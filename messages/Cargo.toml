@@ -1,0 +1,24 @@
+[package]
+name = "transceiver-messages"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+bitflags = "1"
+
+[dependencies.hubpack]
+git = "https://github.com/cbiffle/hubpack"
+rev = "d98084b85cc45fe589a49dd95403d7b41533375c"
+
+[dependencies.serde]
+version = "1"
+features = [ "derive" ]
+
+[dependencies.heapless]
+version = "0.7"
+features = [ "serde" ]
+optional = true
+
+[features]
+std = []
+default = [ "std" ]

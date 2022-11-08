@@ -1,0 +1,10 @@
+[workspace]
+members = [
+    "messages",
+    "controller",
+]
+
+default-members = [
+    "messages",
+    "controller",
+]
