@@ -29,10 +29,10 @@ pub struct Header {
 
 /// A message from either the host or SP.
 ///
-/// All messages share a common [`Header`] and reference a set of QSFP modules
-/// on on a Sidecar. For messages which contain variable length data, such as a
-/// [`HostRequest::Write`] or [`SpResponse::Read`], the data is contained in the
-/// UDP packet, following the `Message` itself.
+/// All messages share a common [`Header`] and reference a set of transceiver
+/// modules on a Sidecar. For messages which contain variable length data, such
+/// as a [`HostRequest::Write`] or [`SpResponse::Read`], the data is contained
+/// in the UDP packet, following the `Message` itself.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
 pub struct Message {
     pub header: Header,
@@ -52,17 +52,17 @@ pub enum MessageBody {
 /// A request from the host to the SP.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
 pub enum HostRequest {
-    /// Request to read a region of the QSFP memory map.
+    /// Request to read a region of the transceiver's memory map.
     Read(MemoryRegion),
 
-    /// Request to write to a region of the QSFP memory map.
+    /// Request to write to a region of the transceiver's memory map.
     ///
     /// The data to be written is contained in the remainder of the UDP packet.
     /// Note that the data may contain a sequence of byte-arrays to be written,
     /// one for each of the addressed modules.
     Write(MemoryRegion),
 
-    /// Request to return the status of the QSFP modules.
+    /// Request to return the status of the transceiver's modules.
     Status,
 
     /// Request that the modules be reset.
@@ -93,15 +93,15 @@ pub enum HostResponse {
 
     /// The result of a read operation.
     ///
-    /// The actual data read from the QSFP modules is contained in the remaining
-    /// bytes of the UDP packet. Note that this may actually contain a sequence
-    /// of byte arrays, one for each of the addressed modules.
+    /// The actual data read from the transceivers' memory is contained in the
+    /// remaining bytes of the UDP packet. Note that this may actually contain a
+    /// sequence of byte arrays, one for each of the addressed modules.
     Read(MemoryRegion),
 
     /// The result of a write operation.
     Write(MemoryRegion),
 
-    /// The status of a set of QSFP modules.
+    /// The status of a set of transceiver modules.
     ///
     /// Each module may have a different set of status flags set. The
     /// [`Message`] type contains the mask identifying all the modules, and the
@@ -134,7 +134,7 @@ bitflags::bitflags! {
     /// The status of a single transceiver module.
     #[derive(Deserialize, Serialize, SerializedSize)]
     pub struct Status: u8 {
-        /// The module is present in the receptable.
+        /// The module is present in the receptacle.
         ///
         /// This translates to the `ModPrsL` pin in SFF-8679 rev 1.8 section
         /// 5.3.4.
@@ -169,16 +169,23 @@ bitflags::bitflags! {
     }
 }
 
+/// An allowed power mode for the module.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
 pub enum PowerMode {
-    /// Entirely power off a transceiver module.
+    /// A module is entirely powered off, using the EFuse.
     Off,
-    /// Request the module transition into low-power mode.
-    Low,
-    /// Request the module transition into high-power mode.
+
+    /// Power is enabled to the module, but the `LPMode` pin is set to high.
     ///
-    /// Note that the actual power mode is defined in the transceiver's memory
-    /// map, in a location that depends on the exact management specification it
-    /// conforms to.
+    /// Note: This requires that we never set the `Power_override` bit (SFF-8636
+    /// rev 2.10a, section 6.2.6, byte 93 bit 2), as that defeats the purpose of
+    /// hardware control.
+    Low,
+
+    /// The module is in high-power mode.
+    ///
+    /// Note that additional configuration may be required to correctly
+    /// configure the module, such as described in SFF-8636 rev 2.10a table
+    /// 6-10.
     High,
 }
