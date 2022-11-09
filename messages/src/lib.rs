@@ -2,11 +2,15 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+// Copyright 2022 Oxide Computer Company
+
 #![cfg_attr(all(not(test), not(feature = "std")), no_std)]
 
-//! Messaging formats for managing the Sidecar QSFP ports over the network.
+//! Messaging formats for managing the Sidecar transceiver ports over the
+//! network.
 
 pub mod message;
+pub mod mgmt;
 
 use hubpack::SerializedSize;
 use serde::Deserialize;
@@ -21,23 +25,37 @@ pub const MAX_MESSAGE_SIZE: usize = 1024;
 /// may initiate messages to their peer. For the host, this includes things like
 /// write requests; for the SP, it may initiate messages to notify the host of
 /// interrupts or alarms.
-pub const PORT: u16 = 22222;
+pub const PORT: u16 = 11112;
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
 pub enum Error {
-    /// An attempt to reference an invalid QSFP port on a Sidecar or FPGA.
+    /// An attempt to reference an invalid transceiver port on a Sidecar or FPGA.
     InvalidPort(u8),
+
     /// An attempt to reference an invalid FPGA on a Sidecar.
     InvalidFpga(u8),
-    /// An attempt was made to read or write an invalid or unsupported QSFP
-    /// memory map page.
-    InvalidQsfpPage(u8),
-    /// An attempt to read or write an invalid portion of QSFP memory map.
-    InvalidMemoryAccess { page: u8, offset: u8, len: u8 },
+
+    /// Accessed an invalid upper memory page.
+    InvalidPage(u8),
+
+    /// Accessed an invalid upper memory bank.
+    InvalidBank(u8),
+
+    /// A page does not accept a bank number.
+    PageIsUnbanked(u8),
+
+    /// A page requires a bank number.
+    PageIsBanked(u8),
+
+    /// An access to memory outside of the 256-byte memory map.
+    InvalidMemoryAccess { offset: u8, len: u8 },
+
     /// A read failed for some reason.
     ReadFailed,
+
     /// A write failed for some reason.
     WriteFailed,
+
     /// A request would result in a response that is too large to fit in a
     /// single UDP message.
     RequestTooLarge,
@@ -47,23 +65,18 @@ pub enum Error {
     VersionMismatch,
 }
 
-/// A bitmask used to identify ports, on a single FPGA.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
-pub struct PortMask(u32);
+type MaskType = u32;
 
-impl core::fmt::UpperHex for PortMask {
-    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
-        write!(f, "{:X}", self.0)
-    }
-}
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, SerializedSize)]
+pub struct PortMask(pub MaskType);
 
 impl PortMask {
-    pub const NUM_PORTS: u8 = 32;
+    pub const MAX_INDEX: u8 = (std::mem::size_of::<MaskType>() * 8) as _;
 
     /// Return true if the provided index is set, or false otherwise. If the
     /// index is out of range, and error is returned.
     pub fn is_set(&self, index: u8) -> Result<bool, Error> {
-        if index >= Self::NUM_PORTS {
+        if index >= Self::MAX_INDEX {
             Err(Error::InvalidPort(index))
         } else {
             Ok((self.0 & (1 << index)) != 0)
@@ -73,7 +86,7 @@ impl PortMask {
     /// Set the bit at the provided index. If it is out of range, an error is
     /// returned.
     pub fn set(&mut self, index: u8) -> Result<(), Error> {
-        if index >= Self::NUM_PORTS {
+        if index >= Self::MAX_INDEX {
             Err(Error::InvalidPort(index))
         } else {
             self.0 |= 1 << index;
@@ -84,7 +97,7 @@ impl PortMask {
     /// Clear the bit at the provided index. If it is out of range, an error is
     /// returned.
     pub fn clear(&mut self, index: u8) -> Result<(), Error> {
-        if index >= Self::NUM_PORTS {
+        if index >= Self::MAX_INDEX {
             Err(Error::InvalidPort(index))
         } else {
             self.0 &= !(1 << index);
@@ -98,7 +111,7 @@ impl PortMask {
     pub fn from_indices(indices: &[u8]) -> Result<Self, Error> {
         let mut out = 0;
         for index in indices.iter().copied() {
-            if index >= Self::NUM_PORTS {
+            if index >= Self::MAX_INDEX {
                 return Err(Error::InvalidPort(index));
             }
             out |= 1 << index;
@@ -108,13 +121,13 @@ impl PortMask {
 
     /// Return the indices of the ports identified by the bitmask.
     pub fn to_indices(&self) -> impl Iterator<Item = u8> + '_ {
-        (0..Self::NUM_PORTS).filter(|i| self.is_set(*i).unwrap())
+        (0..Self::MAX_INDEX).filter(|i| self.is_set(*i).unwrap())
     }
 
     /// A convenience function to return a port bitmask identifying a single
     /// port by index.
     pub const fn single(index: u8) -> Result<Self, Error> {
-        if index >= Self::NUM_PORTS {
+        if index >= Self::MAX_INDEX {
             Err(Error::InvalidPort(index))
         } else {
             Ok(Self(1 << index))
@@ -122,92 +135,47 @@ impl PortMask {
     }
 }
 
-impl From<u32> for PortMask {
-    fn from(x: u32) -> Self {
-        Self(x)
-    }
-}
-
-impl From<PortMask> for u32 {
-    fn from(m: PortMask) -> Self {
-        m.0
-    }
-}
-
-/// Identifier for an FPGA on a Sidecar.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, SerializedSize)]
-pub struct Fpga(u8);
-
-impl Fpga {
-    pub const LEFT: Self = Self(0);
-    pub const RIGHT: Self = Self(1);
-}
-
-impl TryFrom<u8> for Fpga {
-    type Error = Error;
-    fn try_from(x: u8) -> Result<Self, Self::Error> {
-        let maybe_self = Self(x);
-        match maybe_self {
-            Self::LEFT | Self::RIGHT => Ok(maybe_self),
-            _ => Err(Error::InvalidFpga(x)),
-        }
-    }
-}
-
-/// A unique identifier for a set of transceiver modules on a Sidecar.
-///
-/// Modules are identified by a combination of the FPGA and a bitmask of ports
-/// on that FPGA.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
+/// Identifier for a set of transceiver modules accessed through a single FPGA.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, SerializedSize)]
 pub struct ModuleId {
-    pub fpga: Fpga,
+    pub fpga_id: u8,
     pub ports: PortMask,
 }
 
-impl core::fmt::UpperHex for ModuleId {
-    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
-        write!(f, "0x{:X}:0x{:X}", self.fpga.0, self.ports)
-    }
-}
-
-// Map a logical port to the FPGA and per-FPGA port index.
-pub fn port_to_ids(port: u8) -> Result<(Fpga, u8), Error> {
-    // There are 16 ports per FPGA, with a stride of 8. That is:
-    //
-    // Logical port     FPGA    On-FPGA port
-    // ------------     ----    ------------
-    // 0-8              0       0-8
-    // 8-16             1       0-8
-    // 16-24            0       9-16
-    // 24-32            1       9-16.
-    //
-    // The below basically implements poor-man's 2D array indexing from a single
-    // flattened index, assuming row-major ordering.
-    const STRIDE: u8 = 8;
-    const PORTS_PER_FPGA: u8 = 16;
-    const NUM_FPGAS: u8 = 2;
-    let fpga_id = (port / STRIDE) % NUM_FPGAS;
-    let port_index = ((port / PORTS_PER_FPGA) * STRIDE) + (port % STRIDE);
-    Fpga::try_from(fpga_id).map(|fpga| (fpga, port_index))
-}
+// Notes:
+//
+// Address 1 FPGA at a time in each message, a const-sized bitmask (u32? u64?)
+// for the ports on it.
+//
+// Dendrite knows how to go from logical port to (fpga_id, bit), based on the
+// front IO board identity.
+//
+// Need message to tell SP the kind of device in any given port. Really it's
+// which spec it conforms to, so that it can go read the temperature correctly
+// from the memory map and plug that into its thermal loop.
+//
+// Be aware that a read for more than one device returns a uint8_t ** -- I.e.,
+// we get an array of buffers, one for the data read in for each device.
+//
+// Same thing for a write, unless we want to only support writing the same data
+// to every port.
 
 #[cfg(test)]
 mod tests {
     use super::Error;
-    use super::Fpga;
     use super::PortMask;
 
     #[test]
     fn test_port_mask_from_indices() {
         let ix = vec![0, 1, 2];
         let mask = PortMask::from_indices(&ix).unwrap();
-        assert_eq!(u32::from(mask), 0b111);
+        assert_eq!(mask.0, 0b111);
         assert_eq!(mask.to_indices().collect::<Vec<_>>(), ix);
     }
 
     #[test]
     fn test_port_mask_from_indices_out_of_range() {
-        let port = PortMask::NUM_PORTS;
+        let port = PortMask::MAX_INDEX;
         assert_eq!(
             PortMask::from_indices(&[port]),
             Err(Error::InvalidPort(port))
@@ -216,7 +184,7 @@ mod tests {
 
     #[test]
     fn test_port_mask_test_set_clear() {
-        let mut mask = PortMask::from(0b101u32);
+        let mut mask = PortMask(0b101u32);
         assert!(mask.is_set(0).unwrap());
         assert!(!mask.is_set(1).unwrap());
         assert!(mask.is_set(2).unwrap());
@@ -233,12 +201,5 @@ mod tests {
         assert!(mask.set(200).is_err());
         assert!(mask.clear(200).is_err());
         assert!(mask.is_set(200).is_err());
-    }
-
-    #[test]
-    fn test_fpga() {
-        assert_eq!(Fpga::try_from(0u8).unwrap(), Fpga::LEFT);
-        assert_eq!(Fpga::try_from(1u8).unwrap(), Fpga::RIGHT);
-        assert_eq!(Fpga::try_from(10u8), Err(Error::InvalidFpga(10)));
     }
 }
