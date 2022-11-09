@@ -65,8 +65,16 @@ pub enum Error {
     VersionMismatch,
 }
 
-type MaskType = u32;
+// We're currently only expecting to be able to address up to 16 transceivers
+// per Sidecar FPGA. The `PortMask` below exposes this publicly, so we may wish
+// to hide it if / when we want to support other front I/O board designs with
+// different arrangements of FPGAs and / or transceivers.
+type MaskType = u16;
 
+/// A bitmask used to identify the set of transceiver ports to which a message
+/// applies.
+///
+/// Note that this bitmask is always per-FPGA.
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, SerializedSize)]
 pub struct PortMask(pub MaskType);
 
@@ -184,7 +192,7 @@ mod tests {
 
     #[test]
     fn test_port_mask_test_set_clear() {
-        let mut mask = PortMask(0b101u32);
+        let mut mask = PortMask(0b101);
         assert!(mask.is_set(0).unwrap());
         assert!(!mask.is_set(1).unwrap());
         assert!(mask.is_set(2).unwrap());
