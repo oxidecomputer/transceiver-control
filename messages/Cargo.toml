@@ -15,11 +15,6 @@ version = "1"
 features = [ "derive" ]
 default-features = false
 
-[dependencies.heapless]
-version = "0.7"
-features = [ "serde" ]
-optional = true
-
 [features]
 std = []
 default = [ "std" ]

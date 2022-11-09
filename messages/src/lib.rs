@@ -8,12 +8,6 @@
 
 pub mod message;
 
-#[cfg(all(not(test), not(feature = "std")))]
-use heapless::Vec;
-
-#[cfg(any(test, feature = "std"))]
-use std::vec::Vec;
-
 use hubpack::SerializedSize;
 use serde::Deserialize;
 use serde::Serialize;
@@ -173,7 +167,7 @@ impl core::fmt::UpperHex for ModuleId {
 }
 
 // Map a logical port to the FPGA and per-FPGA port index.
-fn port_to_ids(port: u8) -> Result<(Fpga, u8), Error> {
+pub fn port_to_ids(port: u8) -> Result<(Fpga, u8), Error> {
     // There are 16 ports per FPGA, with a stride of 8. That is:
     //
     // Logical port     FPGA    On-FPGA port
@@ -193,26 +187,8 @@ fn port_to_ids(port: u8) -> Result<(Fpga, u8), Error> {
     Fpga::try_from(fpga_id).map(|fpga| (fpga, port_index))
 }
 
-pub fn ids_from_logical_ports(ports: &[u8]) -> Result<[ModuleId; 2], Error> {
-    let mut port_indices: Vec<(Fpga, Vec<u8>)> = Vec::with_capacity(2);
-    for port in ports {
-        let (this_fpga, index) = port_to_ids(*port)?;
-        match port_indices.iter_mut().find(|(fpga, _)| fpga == &this_fpga) {
-            Some((_, ref mut indices)) => indices.push(index),
-            None => port_indices.push((this_fpga, vec![index])),
-        }
-    }
-    port_indices
-        .into_iter()
-        .map(|(fpga, indices)| {
-            PortMask::from_indices(&indices).map(|ports| ModuleId { fpga, ports })
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
-    use super::ids_from_logical_ports;
     use super::Error;
     use super::Fpga;
     use super::PortMask;
@@ -260,24 +236,5 @@ mod tests {
         assert_eq!(Fpga::try_from(0u8).unwrap(), Fpga::LEFT);
         assert_eq!(Fpga::try_from(1u8).unwrap(), Fpga::RIGHT);
         assert_eq!(Fpga::try_from(10u8), Err(Error::InvalidFpga(10)));
-    }
-
-    #[test]
-    fn test_ids_from_logical_ports() {
-        let logical = (0..PortMask::NUM_PORTS).collect::<Vec<_>>();
-        let ids = ids_from_logical_ports(&logical).unwrap();
-        assert_eq!(ids.len(), 2);
-
-        let id = &ids[0];
-        assert_eq!(id.fpga, Fpga::LEFT);
-        for i in 0..16 {
-            assert!(id.ports.is_set(i).unwrap());
-        }
-
-        let id = &ids[1];
-        assert_eq!(id.fpga, Fpga::RIGHT);
-        for i in 0..16 {
-            assert!(id.ports.is_set(i).unwrap());
-        }
     }
 }
