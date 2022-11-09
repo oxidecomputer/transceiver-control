@@ -193,7 +193,7 @@ fn port_to_ids(port: u8) -> Result<(Fpga, u8), Error> {
     Fpga::try_from(fpga_id).map(|fpga| (fpga, port_index))
 }
 
-pub fn ids_from_logical_ports(ports: &[u8]) -> Result<Vec<ModuleId>, Error> {
+pub fn ids_from_logical_ports(ports: &[u8]) -> Result<[ModuleId; 2], Error> {
     let mut port_indices: Vec<(Fpga, Vec<u8>)> = Vec::with_capacity(2);
     for port in ports {
         let (this_fpga, index) = port_to_ids(*port)?;
@@ -219,10 +219,10 @@ mod tests {
 
     #[test]
     fn test_port_mask_from_indices() {
-        let ix = &[0, 1, 2];
-        let mask = PortMask::from_indices(ix).unwrap();
+        let ix = vec![0, 1, 2];
+        let mask = PortMask::from_indices(&ix).unwrap();
         assert_eq!(u32::from(mask), 0b111);
-        assert_eq!(mask.to_indices().as_slice(), ix);
+        assert_eq!(mask.to_indices().collect::<Vec<_>>(), ix);
     }
 
     #[test]
