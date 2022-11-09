@@ -150,24 +150,6 @@ pub struct ModuleId {
     pub ports: PortMask,
 }
 
-// Notes:
-//
-// Address 1 FPGA at a time in each message, a const-sized bitmask (u32? u64?)
-// for the ports on it.
-//
-// Dendrite knows how to go from logical port to (fpga_id, bit), based on the
-// front IO board identity.
-//
-// Need message to tell SP the kind of device in any given port. Really it's
-// which spec it conforms to, so that it can go read the temperature correctly
-// from the memory map and plug that into its thermal loop.
-//
-// Be aware that a read for more than one device returns a uint8_t ** -- I.e.,
-// we get an array of buffers, one for the data read in for each device.
-//
-// Same thing for a write, unless we want to only support writing the same data
-// to every port.
-
 #[cfg(test)]
 mod tests {
     use super::Error;
