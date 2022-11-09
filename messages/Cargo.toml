@@ -7,8 +7,7 @@ edition = "2021"
 bitflags = "1"
 
 [dependencies.hubpack]
-git = "https://github.com/cbiffle/hubpack"
-rev = "d98084b85cc45fe589a49dd95403d7b41533375c"
+version = "0.1.0"
 
 [dependencies.serde]
 version = "1"
