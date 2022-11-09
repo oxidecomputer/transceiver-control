@@ -13,6 +13,7 @@ rev = "d98084b85cc45fe589a49dd95403d7b41533375c"
 [dependencies.serde]
 version = "1"
 features = [ "derive" ]
+default-features = false
 
 [dependencies.heapless]
 version = "0.7"

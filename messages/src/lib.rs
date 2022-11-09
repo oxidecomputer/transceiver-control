@@ -109,15 +109,8 @@ impl PortMask {
     }
 
     /// Return the indices of the ports identified by the bitmask.
-    pub fn to_indices(&self) -> Vec<u8> {
-        let mut out = Vec::with_capacity(usize::from(Self::NUM_PORTS));
-        for i in 0..Self::NUM_PORTS {
-            let i = i as u8;
-            if self.is_set(i).unwrap() {
-                out.push(i);
-            }
-        }
-        out
+    pub fn to_indices(&self) -> impl Iterator<Item = u8> + '_ {
+        (0..Self::NUM_PORTS).filter(|i| self.is_set(*i).unwrap())
     }
 
     /// A convenience function to return a port bitmask identifying a single
