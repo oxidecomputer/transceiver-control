@@ -41,13 +41,40 @@ pub struct Message {
     pub body: MessageBody,
 }
 
+impl Message {
+    /// Return the length of the expected data that should follow `self`.
+    pub fn expected_data_len(&self) -> usize {
+        let bytes_per_xcvr = match self.body {
+            MessageBody::HostRequest(HostRequest::Write(inner)) => inner.len(),
+            MessageBody::SpResponse(SpResponse::Read(inner)) => inner.len(),
+            _ => 0,
+        };
+        self.modules.n_transceivers() * usize::from(bytes_per_xcvr)
+    }
+}
+
 /// The body of a message between host and SP.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
 pub enum MessageBody {
+    /// A request from host to SP.
+    ///
+    /// Must be replied to with a `SpResponse`.
     HostRequest(HostRequest),
-    HostResponse(HostResponse),
-    SpRequest(SpRequest),
+
+    /// A response from SP to host.
+    ///
+    /// The intended reply type for a `HostRequest`.
     SpResponse(SpResponse),
+
+    /// A request from SP to host.
+    ///
+    /// Must be replied to with a `HostResponse`.
+    SpRequest(SpRequest),
+
+    /// A response from host to SP.
+    ///
+    /// The intended reply type for a `SpRequest`.
+    HostResponse(HostResponse),
 }
 
 /// A request from the host to the SP.
@@ -135,7 +162,10 @@ pub enum SpRequest {}
 //
 // TODO-implement
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
-pub enum HostResponse {}
+pub enum HostResponse {
+    /// The request failed.
+    Error(Error),
+}
 
 bitflags::bitflags! {
     /// The status of a single transceiver module.

@@ -16,8 +16,9 @@ use hubpack::SerializedSize;
 use serde::Deserialize;
 use serde::Serialize;
 
-/// The maximum size of the body of a message.
-pub const MAX_MESSAGE_SIZE: usize = 1024;
+/// The maximum size of the payload of a message, i.e., any trailing data after
+/// the [`message::Message`] contents.
+pub const MAX_PAYLOAD_SIZE: usize = 1024;
 
 /// The UDP port on which both sides should listen.
 ///
@@ -27,7 +28,17 @@ pub const MAX_MESSAGE_SIZE: usize = 1024;
 /// interrupts or alarms.
 pub const PORT: u16 = 11112;
 
+/// The IPv6 multicast address on which both peers should listen.
+///
+/// See RFD 250 for backgroun on this specific address. Briefly, this is a
+/// link-local multicast address that is unlikely to conflict with others, such
+/// as the All-Nodes address.
+//
+// NOTE: This isn't a `std::net::Ipv6Addr` to support `no_std` environments.
+pub const ADDR: [u16; 8] = [0xff02, 0, 0, 0, 0, 0, 0x1de, 2];
+
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
+#[cfg_attr(any(test, feature = "std"), derive(thiserror::Error))]
 pub enum Error {
     /// An attempt to reference an invalid transceiver port on a Sidecar or FPGA.
     InvalidPort(u8),
@@ -64,7 +75,14 @@ pub enum Error {
     ProtocolError,
 
     /// The version in the header is unexpected.
-    VersionMismatch,
+    VersionMismatch { expected: u8, actual: u8 },
+}
+
+#[cfg(any(test, feature = "std"))]
+impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
 }
 
 // We're currently only expecting to be able to address up to 16 transceivers
@@ -143,6 +161,11 @@ impl PortMask {
             Ok(Self(1 << index))
         }
     }
+
+    /// Return the number of transceivers addressed by `self.
+    pub const fn n_transceivers(&self) -> usize {
+        self.0.count_ones() as _
+    }
 }
 
 /// Identifier for a set of transceiver modules accessed through a single FPGA.
@@ -150,6 +173,13 @@ impl PortMask {
 pub struct ModuleId {
     pub fpga_id: u8,
     pub ports: PortMask,
+}
+
+impl ModuleId {
+    /// Return the number of transceivers addressed by `self`.
+    pub const fn n_transceivers(&self) -> usize {
+        self.ports.n_transceivers()
+    }
 }
 
 #[cfg(test)]
