@@ -151,7 +151,12 @@ impl MemoryRegion {
     /// page and / or bank zero.
     pub fn new(upper_page: UpperPage, offset: u8, len: u8) -> Result<Self, Error> {
         // The last accessed byte must be within the 256-byte memory map.
-        if offset.checked_add(len).is_none() {
+        //
+        // Offset + len must be no greater than 256, to support reading the
+        // final byte of the map.
+        const MAX: u16 = u8::MAX as u16 + 1;
+        let last = u16::from(offset) + u16::from(len);
+        if last > MAX {
             return Err(Error::InvalidMemoryAccess { offset, len });
         }
 
@@ -209,13 +214,17 @@ mod tests {
         assert_eq!(region.page(), page.page());
         assert!(region.bank().is_none());
 
-        // Would read past map end.
+        // We should be able to read exactly to the end of the map.
+        assert!(MemoryRegion::new(page, 1, 255).is_ok());
+        assert!(MemoryRegion::new(page, 255, 1).is_ok());
+
+        // But these accesses should fail, reading off the end.
         assert!(matches!(
-            MemoryRegion::new(page, 1, 255).unwrap_err(),
+            MemoryRegion::new(page, 2, 255).unwrap_err(),
             Error::InvalidMemoryAccess { .. }
         ));
         assert!(matches!(
-            MemoryRegion::new(page, 255, 1).unwrap_err(),
+            MemoryRegion::new(page, 255, 2).unwrap_err(),
             Error::InvalidMemoryAccess { .. }
         ));
     }
