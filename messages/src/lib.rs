@@ -59,9 +59,11 @@ pub enum Error {
     /// A request would result in a response that is too large to fit in a
     /// single UDP message.
     RequestTooLarge,
-    /// Someone sent an unexpected message (e.g. the host sending an SpRequest)
+
+    /// Someone sent an unexpected message (e.g. the host sending an SpRequest).
     ProtocolError,
-    /// The version in the header is unexpected
+
+    /// The version in the header is unexpected.
     VersionMismatch,
 }
 

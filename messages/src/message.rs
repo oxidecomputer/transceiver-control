@@ -75,6 +75,11 @@ pub enum HostRequest {
     /// allows us to explicitly power down a transceiver. That is useful for
     /// ensuring that there's no wasted power, for example, when a customer
     /// purposefully disables a transceiver via the control plane.
+    ///
+    /// Note that the _host side_ is responsible for ensuring that a transition
+    /// to high-power mode is valid. The host guarantees that it has applied
+    /// the configuration required by the module, prior to requesting such a
+    /// transition.
     SetPowerMode(PowerMode),
 
     /// Assert type of management interface that a set of modules uses.
@@ -186,6 +191,7 @@ pub enum PowerMode {
     ///
     /// Note that additional configuration may be required to correctly
     /// configure the module, such as described in SFF-8636 rev 2.10a table
-    /// 6-10.
+    /// 6-10, and that the _host side_ is responsible for ensuring that the
+    /// relevant configuration is applied.
     High,
 }
