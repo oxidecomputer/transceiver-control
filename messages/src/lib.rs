@@ -81,7 +81,7 @@ type MaskType = u16;
 pub struct PortMask(pub MaskType);
 
 impl PortMask {
-    pub const MAX_INDEX: u8 = (std::mem::size_of::<MaskType>() * 8) as _;
+    pub const MAX_INDEX: u8 = (core::mem::size_of::<MaskType>() * 8) as _;
 
     /// Return true if the provided index is set, or false otherwise. If the
     /// index is out of range, and error is returned.
