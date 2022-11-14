@@ -58,8 +58,9 @@ pub enum HostRequest {
     /// Request to write to a region of the transceiver's memory map.
     ///
     /// The data to be written is contained in the remainder of the UDP packet.
-    /// Note that the data may contain a sequence of byte-arrays to be written,
-    /// one for each of the addressed modules.
+    /// This data should be a single byte array of the size specified by the
+    /// contained `MemoryRegion`, and will broadcast to all transceiver modules
+    /// addressed by the message.
     Write(MemoryRegion),
 
     /// Request to return the status of the transceiver's modules.
