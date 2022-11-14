@@ -7,23 +7,48 @@
 //! Types for working with transceivers conforming to the Common Management
 //! Interface Specification (CMIS) version 5.0.
 
+use crate::mgmt::MemoryPage;
 use crate::Error;
 use hubpack::SerializedSize;
 use serde::Deserialize;
 use serde::Serialize;
 
+/// A single page of the memory map of a transceiver module conforming to CMIS.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
+pub enum Page {
+    Lower,
+    Upper(UpperPage),
+}
+
+impl Page {
+    pub const fn page(&self) -> Option<u8> {
+        match self {
+            Page::Lower => None,
+            Page::Upper(inner) => Some(inner.page()),
+        }
+    }
+
+    pub const fn bank(&self) -> Option<u8> {
+        match self {
+            Page::Lower => None,
+            Page::Upper(inner) => inner.bank(),
+        }
+    }
+}
+
+/// A single upper page of a transceiver conforming to CMIS.
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, SerializedSize)]
-pub struct Page {
+pub struct UpperPage {
     bank: Option<u8>,
     page: u8,
 }
 
-impl Page {
+impl UpperPage {
     /// Create a new page that does not accept a bank number.
     ///
     /// If the requested page number is invalid, an error is returned. If the
     /// requested page number _does_ accept a bank, an error is returned.
-    pub fn new_unbanked(page: u8) -> Result<Self, Error> {
+    pub const fn new_unbanked(page: u8) -> Result<Self, Error> {
         if page_accepts_bank_number(page) {
             return Err(Error::PageIsBanked(page));
         }
@@ -37,7 +62,7 @@ impl Page {
     /// - The requested page number is invalid.
     /// - The requested page number does _not_ accept a bank.
     /// - The requested bank number is invalid.
-    pub fn new_banked(page: u8, bank: u8) -> Result<Self, Error> {
+    pub const fn new_banked(page: u8, bank: u8) -> Result<Self, Error> {
         if !is_valid_page(page) {
             return Err(Error::InvalidPage(page));
         }
@@ -53,17 +78,17 @@ impl Page {
         })
     }
 
-    pub fn page(&self) -> u8 {
+    pub const fn page(&self) -> u8 {
         self.page
     }
 
-    pub fn bank(&self) -> Option<u8> {
+    pub const fn bank(&self) -> Option<u8> {
         self.bank
     }
 }
 
 // See CMIS 5.0 rev 4.0 Figure 8-1 for details.
-fn is_valid_page(page: u8) -> bool {
+const fn is_valid_page(page: u8) -> bool {
     matches!(
         page,
         // Identity, advertising, thresholds, laser control.
@@ -76,30 +101,50 @@ fn is_valid_page(page: u8) -> bool {
 }
 
 // See CMIS 5.0 rev 4.0 Figure 8-1 for details.
-fn page_accepts_bank_number(page: u8) -> bool {
+const fn page_accepts_bank_number(page: u8) -> bool {
     matches!(page, 0x10..=0x3F | 0x9F | 0xA0..=0xAF)
 }
 
 /// The maximum valid bank number supported by CMIS.
 pub const MAX_BANK: u8 = 0x03;
 
+impl MemoryPage for Page {
+    fn max_offset(&self) -> u8 {
+        match self {
+            Page::Lower => u8::MAX / 2,
+            Page::Upper(_) => u8::MAX,
+        }
+    }
+
+    fn min_offset(&self) -> u8 {
+        match self {
+            Page::Lower => 0,
+            Page::Upper(_) => 128,
+        }
+    }
+
+    const MAX_READ_SIZE: u8 = 8;
+
+    const MAX_WRITE_SIZE: u8 = 8;
+}
+
 #[cfg(test)]
 mod tests {
     use super::Error;
-    use super::Page;
+    use super::UpperPage;
 
     #[test]
     fn test_page() {
-        assert!(Page::new_unbanked(0x00).is_ok());
-        assert!(Page::new_unbanked(0xFF).is_ok());
+        assert!(UpperPage::new_unbanked(0x00).is_ok());
+        assert!(UpperPage::new_unbanked(0xFF).is_ok());
         assert!(matches!(
-            Page::new_banked(0x00, 0x01),
+            UpperPage::new_banked(0x00, 0x01),
             Err(Error::PageIsUnbanked(_))
         ));
         assert!(matches!(
-            Page::new_banked(0x10, 0x10),
+            UpperPage::new_banked(0x10, 0x10),
             Err(Error::InvalidBank(_))
         ));
-        assert!(Page::new_banked(0x10, 0x01).is_ok());
+        assert!(UpperPage::new_banked(0x10, 0x01).is_ok());
     }
 }

@@ -7,16 +7,35 @@
 //! Types for working with transceivers conforming to the SFF-8636 management
 //! interface specification.
 
+use crate::mgmt::MemoryPage;
 use crate::Error;
 use hubpack::SerializedSize;
 use serde::Deserialize;
 use serde::Serialize;
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, SerializedSize)]
-pub struct Page(u8);
+/// A single memory page for a transcevier conforming to the SFF-8636 management
+/// specification.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
+pub enum Page {
+    Lower,
+    Upper(UpperPage),
+}
 
 impl Page {
-    pub fn new(page_number: u8) -> Result<Self, Error> {
+    pub const fn page(&self) -> Option<u8> {
+        match self {
+            Page::Lower => None,
+            Page::Upper(inner) => Some(inner.page()),
+        }
+    }
+}
+
+/// An upper memory page for an SFF-8636 transceiver module.
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, SerializedSize)]
+pub struct UpperPage(u8);
+
+impl UpperPage {
+    pub const fn new(page_number: u8) -> Result<Self, Error> {
         if matches!(
         page_number,
         // Static module identity and capabilities.
@@ -38,20 +57,40 @@ impl Page {
         }
     }
 
-    pub fn page(&self) -> u8 {
+    pub const fn page(&self) -> u8 {
         self.0
     }
+}
+
+impl MemoryPage for Page {
+    fn max_offset(&self) -> u8 {
+        match self {
+            Page::Lower => u8::MAX / 2,
+            Page::Upper(_) => u8::MAX,
+        }
+    }
+
+    fn min_offset(&self) -> u8 {
+        match self {
+            Page::Lower => 0,
+            Page::Upper(_) => 128,
+        }
+    }
+
+    const MAX_READ_SIZE: u8 = 128;
+
+    const MAX_WRITE_SIZE: u8 = 4;
 }
 
 #[cfg(test)]
 mod tests {
     use super::Error;
-    use super::Page;
+    use super::UpperPage;
 
     #[test]
-    fn test_page() {
-        assert!(Page::new(0x00).is_ok());
-        assert!(Page::new(0xFF).is_ok());
-        assert!(matches!(Page::new(0x22), Err(Error::InvalidPage(_))));
+    fn test_upper_page() {
+        assert!(UpperPage::new(0x00).is_ok());
+        assert!(UpperPage::new(0xFF).is_ok());
+        assert!(matches!(UpperPage::new(0x22), Err(Error::InvalidPage(_))));
     }
 }
