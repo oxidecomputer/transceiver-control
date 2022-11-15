@@ -18,6 +18,12 @@ struct Args {
     #[structopt(long)]
     source: Option<String>,
 
+    #[structopt(short)]
+    read: bool,
+
+    #[structopt(short)]
+    write: bool,
+
     target: String,
 }
 
@@ -35,56 +41,55 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     socket.connect(&dest[..])?;
 
     let peer = socket.peer_addr()?;
-
-    const MAX_SIZE: usize = Message::MAX_SIZE + transceiver_messages::MAX_MESSAGE_SIZE;
-    let mut buf = [0; MAX_SIZE];
-
-    let mut message_id = 0x1234;
-
     println!("Sending to {} from {}", peer, socket.local_addr()?);
     println!("------------------------------------------------------------");
 
+    const MAX_SIZE: usize =
+        Message::MAX_SIZE + transceiver_messages::MAX_MESSAGE_SIZE;
+    let mut buf = [0; MAX_SIZE];
+
+    let mut message_id = 0x1234;
     loop {
-        for fpga in [0, 1] {
-            for port in 0..16 {
-                let msg = Message {
-                    header: Header {
-                        version: 1,
-                        message_id,
-                    },
-                    modules: ModuleId {
-                        fpga_id: fpga,
-                        ports: PortMask::single(port).unwrap(),
-                    },
-                    body: MessageBody::HostRequest(HostRequest::Status),
-                };
-                println!("FPGA {}, port {}: {:?}", fpga, port, msg.body);
-                message_id += 1;
+        if args.read || !args.write {
+            test_read(&socket, &mut buf, message_id)?;
+        } else {
+            test_write(&socket, &mut buf, message_id)?;
+        }
+        message_id += 1;
 
-                let (reply, rest) = send_message(&mut buf, &socket, msg);
-                let status = Status::from_bits(rest[0]).unwrap();
-                println!("  => {:?}; {:?}", reply.body, status);
+        println!(
+            "------------------------------------------------------------"
+        );
+        std::thread::sleep(Duration::from_secs(1));
+    }
+}
 
-                if status.contains(Status::PRESENT) {
-                    if status.contains(Status::RESET) {
-                        let msg = Message {
-                            header: Header {
-                                version: 1,
-                                message_id,
-                            },
-                            modules: ModuleId {
-                                fpga_id: fpga,
-                                ports: PortMask::single(port).unwrap(),
-                            },
-                            body: MessageBody::HostRequest(HostRequest::SetPowerMode(
-                                PowerMode::Low,
-                            )),
-                        };
-                        println!("Setting PowerMode::Low: {:?}", msg);
-                        let (reply, rest) = send_message(&mut buf, &socket, msg);
-                        assert!(rest.is_empty());
-                        println!("   Got reply {:?}", reply.body);
-                    }
+fn test_read(
+    socket: &UdpSocket,
+    buf: &mut [u8],
+    message_id: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for fpga in [0, 1] {
+        for port in 0..16 {
+            let msg = Message {
+                header: Header {
+                    version: 1,
+                    message_id,
+                },
+                modules: ModuleId {
+                    fpga_id: fpga,
+                    ports: PortMask::single(port).unwrap(),
+                },
+                body: MessageBody::HostRequest(HostRequest::Status),
+            };
+            println!("FPGA {}, port {}: {:?}", fpga, port, msg.body);
+
+            let (reply, rest) = send_message(buf, socket, msg, &[]);
+            let status = Status::from_bits(rest[0]).unwrap();
+            println!("  => {:?}; {:?}", reply.body, status);
+
+            if status.contains(Status::PRESENT) {
+                if status.contains(Status::RESET) {
                     let msg = Message {
                         header: Header {
                             version: 1,
@@ -94,37 +99,157 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             fpga_id: fpga,
                             ports: PortMask::single(port).unwrap(),
                         },
-                        body: MessageBody::HostRequest(HostRequest::Read(
-                            MemoryRegion::new(
-                                UpperPage::Sff8636(sff8636::Page::new(0).unwrap()),
-                                128,
-                                128,
-                            )
-                            .unwrap(),
-                        )),
+                        body: MessageBody::HostRequest(
+                            HostRequest::SetPowerMode(PowerMode::Low),
+                        ),
                     };
-                    println!("Reading memory: {:?}", msg.body);
-                    let (reply, rest) = send_message(&mut buf, &socket, msg);
-                    println!("    => {:?}\n       {:?}", reply.body, rest);
+                    println!("Setting PowerMode::Low: {:?}", msg);
+                    let (reply, rest) = send_message(buf, socket, msg, &[]);
+                    assert!(rest.is_empty());
+                    println!("   Got reply {:?}", reply.body);
                 }
+                let msg = Message {
+                    header: Header {
+                        version: 1,
+                        message_id,
+                    },
+                    modules: ModuleId {
+                        fpga_id: fpga,
+                        ports: PortMask::single(port).unwrap(),
+                    },
+                    body: MessageBody::HostRequest(HostRequest::Read(
+                        MemoryRegion::new(
+                            UpperPage::Sff8636(sff8636::Page::new(0).unwrap()),
+                            0,
+                            128,
+                        )
+                        .unwrap(),
+                    )),
+                };
+                println!("Reading memory: {:?}", msg.body);
+                let (reply, rest) = send_message(buf, socket, msg, &[]);
+                println!("    => {:?}\n       {:?}", reply.body, rest);
             }
         }
-        println!("------------------------------------------------------------");
-        std::thread::sleep(Duration::from_secs(1));
     }
+    Ok(())
 }
 
-fn send_message<'a>(buf: &'a mut [u8], socket: &'a UdpSocket, msg: Message) -> (Message, &'a [u8]) {
-    let size = hubpack::serialize(buf, &msg).unwrap();
+fn test_write(
+    socket: &UdpSocket,
+    buf: &mut [u8],
+    message_id: u64,
+) -> Result<(), Box<dyn std::error::Error>> {
+    for fpga in [0, 1] {
+        for port in 0..16 {
+            let msg = Message {
+                header: Header {
+                    version: 1,
+                    message_id,
+                },
+                modules: ModuleId {
+                    fpga_id: fpga,
+                    ports: PortMask::single(port).unwrap(),
+                },
+                body: MessageBody::HostRequest(HostRequest::Status),
+            };
+            println!("FPGA {}, port {}: {:?}", fpga, port, msg.body);
 
-    socket.send(&buf[0..size]).unwrap();
+            let (reply, rest) = send_message(buf, socket, msg, &[]);
+            let status = Status::from_bits(rest[0]).unwrap();
+            println!("  => {:?}; {:?}", reply.body, status);
+
+            if !status.contains(Status::PRESENT) {
+                continue;
+            }
+            if status.contains(Status::RESET) {
+                let msg = Message {
+                    header: Header {
+                        version: 1,
+                        message_id,
+                    },
+                    modules: ModuleId {
+                        fpga_id: fpga,
+                        ports: PortMask::single(port).unwrap(),
+                    },
+                    body: MessageBody::HostRequest(HostRequest::SetPowerMode(
+                        PowerMode::Low,
+                    )),
+                };
+                println!("Setting PowerMode::Low: {:?}", msg);
+                let (reply, rest) = send_message(buf, socket, msg, &[]);
+                assert!(rest.is_empty());
+                println!("   Got reply {:?}", reply.body);
+            }
+
+            let msg = Message {
+                header: Header {
+                    version: 1,
+                    message_id,
+                },
+                modules: ModuleId {
+                    fpga_id: fpga,
+                    ports: PortMask::single(port).unwrap(),
+                },
+                body: MessageBody::HostRequest(HostRequest::Read(
+                    MemoryRegion::new(
+                        UpperPage::Sff8636(sff8636::Page::new(2).unwrap()),
+                        128,
+                        128,
+                    )
+                    .unwrap(),
+                )),
+            };
+
+            println!("Reading page 2 memory: {:?}", msg.body);
+            let (reply, rest) = send_message(buf, socket, msg, &[]);
+            println!("    => {:?}\n       {:?}", reply.body, rest);
+
+            // Write to page 2, which is a user-writable EEPROM
+            let msg = Message {
+                header: Header {
+                    version: 1,
+                    message_id,
+                },
+                modules: ModuleId {
+                    fpga_id: fpga,
+                    ports: PortMask::single(port).unwrap(),
+                },
+                body: MessageBody::HostRequest(HostRequest::Write(
+                    MemoryRegion::new(
+                        UpperPage::Sff8636(sff8636::Page::new(2).unwrap()),
+                        128,
+                        4,
+                    )
+                    .unwrap(),
+                )),
+            };
+            println!("Reading memory: {:?}", msg.body);
+            let (reply, rest) = send_message(buf, socket, msg, &[5, 6, 7, 8]);
+            println!("    => {:?}\n       {:?}", reply.body, rest);
+        }
+    }
+    Ok(())
+}
+
+fn send_message<'a>(
+    buf: &'a mut [u8],
+    socket: &'a UdpSocket,
+    msg: Message,
+    data: &'a [u8],
+) -> (Message, &'a [u8]) {
+    let size = hubpack::serialize(buf, &msg).unwrap();
+    buf[size..][..data.len()].copy_from_slice(data);
+
+    socket.send(&buf[..(size + data.len())]).unwrap();
 
     let timeout = Instant::now() + Duration::from_secs(1);
 
     loop {
         match socket.recv(buf) {
             Ok(n) => {
-                let (reply, rest): (Message, _) = hubpack::deserialize(&buf[0..n]).unwrap();
+                let (reply, rest): (Message, _) =
+                    hubpack::deserialize(&buf[0..n]).unwrap();
                 return (reply, rest);
             }
             Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {
