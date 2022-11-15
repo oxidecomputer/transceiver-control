@@ -93,7 +93,7 @@ pub enum HostRequest {
 
 /// A response to a host request, sent from SP to host.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
-pub enum HostResponse {
+pub enum SpResponse {
     /// The request failed.
     Error(Error),
 
@@ -134,7 +134,7 @@ pub enum SpRequest {}
 //
 // TODO-implement
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
-pub enum SpResponse {}
+pub enum HostResponse {}
 
 bitflags::bitflags! {
     /// The status of a single transceiver module.
