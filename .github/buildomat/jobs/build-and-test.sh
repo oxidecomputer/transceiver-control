@@ -17,8 +17,8 @@ rustc --version
 banner "fmt"
 ptime -m cargo fmt -- --check
 
-banner "no std"
-ptime -m cargo check --no-default-features --all-targets
+banner "no std chk"
+ptime -m cargo check --no-default-features
 
 banner "test"
 ptime -m cargo test --all-targets

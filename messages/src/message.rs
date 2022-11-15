@@ -7,7 +7,8 @@
 //! Message formats and definitions.
 
 use super::mgmt::ManagementInterface;
-use super::mgmt::MemoryRegion;
+use super::mgmt::MemoryRead;
+use super::mgmt::MemoryWrite;
 use super::Error;
 use super::ModuleId;
 use hubpack::SerializedSize;
@@ -53,15 +54,15 @@ pub enum MessageBody {
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
 pub enum HostRequest {
     /// Request to read a region of the transceiver's memory map.
-    Read(MemoryRegion),
+    Read(MemoryRead),
 
     /// Request to write to a region of the transceiver's memory map.
     ///
     /// The data to be written is contained in the remainder of the UDP packet.
     /// This data should be a single byte array of the size specified by the
-    /// contained `MemoryRegion`, and will broadcast to all transceiver modules
+    /// contained `MemoryWrite`, and will broadcast to all transceiver modules
     /// addressed by the message.
-    Write(MemoryRegion),
+    Write(MemoryWrite),
 
     /// Request to return the status of the transceiver's modules.
     Status,
@@ -102,10 +103,10 @@ pub enum SpResponse {
     /// The actual data read from the transceivers' memory is contained in the
     /// remaining bytes of the UDP packet. Note that this may actually contain a
     /// sequence of byte arrays, one for each of the addressed modules.
-    Read(MemoryRegion),
+    Read(MemoryRead),
 
     /// The result of a write operation.
-    Write(MemoryRegion),
+    Write(MemoryWrite),
 
     /// The status of a set of transceiver modules.
     ///

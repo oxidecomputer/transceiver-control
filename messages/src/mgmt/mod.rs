@@ -26,8 +26,7 @@ pub enum ManagementInterface {
     Unknown(u8),
 }
 
-/// A description of how to page in the upper 128-bytes of a transceiver's
-/// memory map.
+/// A description of a single 128-byte page of a transceiver's memory map.
 ///
 /// There are several specifications that define the memory map for a free-side
 /// transceiver monitor. (See [`ManagementInterface`] for details.) Though there
@@ -87,145 +86,317 @@ pub enum ManagementInterface {
 /// track of which bank and/or page is being accessed, and validate that those
 /// are actually supported by the module prior to operating on them.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
-pub enum UpperPage {
+pub enum Page {
     Sff8636(sff8636::Page),
     Cmis(cmis::Page),
 }
 
-impl UpperPage {
-    /// Return the actual page number of the upper page being mapped in.
-    pub fn page(&self) -> u8 {
+impl Page {
+    /// Return the actual page number of the upper page being mapped in, if any.
+    ///
+    /// If this access is for the lower page, then `None` is returned.
+    pub fn page(&self) -> Option<u8> {
         match self {
-            UpperPage::Sff8636(inner) => inner.page(),
-            UpperPage::Cmis(inner) => inner.page(),
+            Page::Sff8636(inner) => inner.page(),
+            Page::Cmis(inner) => inner.page(),
         }
     }
 
-    /// Return the bank of the upper page being accessed.
+    /// Return the bank of the upper page being accessed, if any.
     ///
     /// Note that this returns `None` for pages that don't have a bank, e.g.,
-    /// those for modules conforming to SFF-8636.
+    /// those for modules conforming to SFF-8636, or for the lower page of a
+    /// CMIS module.
     ///
     /// For those which _may_ have a bank, this _may_ return `Some(_)`. Note
     /// that not all CMIS-defined pages allow a bank, so it may still return
     /// `None` in that case.
     pub fn bank(&self) -> Option<u8> {
         match self {
-            UpperPage::Sff8636(_) => None,
-            UpperPage::Cmis(inner) => inner.bank(),
+            Page::Sff8636(_) => None,
+            Page::Cmis(inner) => inner.bank(),
         }
     }
 }
 
-impl From<sff8636::Page> for UpperPage {
+impl From<sff8636::Page> for Page {
     fn from(p: sff8636::Page) -> Self {
         Self::Sff8636(p)
     }
 }
 
-impl From<cmis::Page> for UpperPage {
+impl From<cmis::Page> for Page {
     fn from(p: cmis::Page) -> Self {
         Self::Cmis(p)
     }
 }
 
-/// A description of a region of a transceiver's memory map.
-///
-/// See [`UpperPage`] for a detailed description of how a module's upper page is
-/// mapped in for an operation. This type also performs validation against the
-/// offset / length, to ensure they're a valid access for the 256-byte memory
-/// map of all transceiver modules we support.
+/// A sized read access to a transceiver memory page.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
-pub struct MemoryRegion {
-    upper_page: UpperPage,
+pub struct MemoryRead {
+    page: Page,
     offset: u8,
     len: u8,
 }
 
-impl MemoryRegion {
-    /// Construct a new memory region.
-    ///
-    /// Note that you must specify an `upper_page`, even if you are only
-    /// accessing the fixed, lower page of memory. In that case, you can use
-    /// the default for the specification of the accessed module, which uses
-    /// page and / or bank zero.
-    pub fn new(upper_page: UpperPage, offset: u8, len: u8) -> Result<Self, Error> {
-        // The last accessed byte must be within the 256-byte memory map.
-        //
-        // Offset + len must be no greater than 256, to support reading the
-        // final byte of the map.
-        const MAX: u16 = u8::MAX as u16 + 1;
-        let last = u16::from(offset) + u16::from(len);
-        if last > MAX {
-            return Err(Error::InvalidMemoryAccess { offset, len });
-        }
-
-        // TODO-correctness: Whether / how to handle zero-byte accesses?
+impl MemoryRead {
+    /// Create a new validated read from the specific page.
+    pub fn new<P>(page: P, offset: u8, len: u8) -> Result<Self, Error>
+    where
+        P: MemoryPage + Into<Page>,
+    {
+        verify_read(&page, offset, len)?;
         Ok(Self {
-            upper_page,
+            page: page.into(),
             offset,
             len,
         })
     }
 
-    /// Return the information about the mapped upper page of this memory
-    /// region.
-    pub fn upper_page(&self) -> &UpperPage {
-        &self.upper_page
+    /// Return the page being read.
+    pub fn page(&self) -> &Page {
+        &self.page
     }
 
-    /// Return the actual page number of the upper page being mapped in.
-    ///
-    /// See [`UpperPage::page`] for details.
-    pub fn page(&self) -> u8 {
-        self.upper_page.page()
-    }
-
-    /// Return the bank of the upper page being accessed.
-    ///
-    /// See [`UpperPage::bank`] for details.
-    pub fn bank(&self) -> Option<u8> {
-        self.upper_page.bank()
-    }
-
-    /// Return the offset into the transceiver memory map for the operation.
+    /// Return the offset into the page of the start of the read.
     pub fn offset(&self) -> u8 {
         self.offset
     }
 
-    /// Return the length of transceiver memory for the operation.
+    /// Return the number of bytes read.
     pub fn len(&self) -> u8 {
         self.len
     }
 }
 
+/// A sized read access to a transceiver memory page.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
+pub struct MemoryWrite {
+    page: Page,
+    offset: u8,
+    len: u8,
+}
+
+impl MemoryWrite {
+    /// Create a new validated write to the specific page.
+    pub fn new<P>(page: P, offset: u8, len: u8) -> Result<Self, Error>
+    where
+        P: MemoryPage + Into<Page>,
+    {
+        verify_write(&page, offset, len)?;
+        Ok(Self {
+            page: page.into(),
+            offset,
+            len,
+        })
+    }
+
+    /// Return the page being read.
+    pub fn page(&self) -> &Page {
+        &self.page
+    }
+
+    /// Return the offset into the page of the start of the write.
+    pub fn offset(&self) -> u8 {
+        self.offset
+    }
+
+    /// Return the number of bytes written.
+    pub fn len(&self) -> u8 {
+        self.len
+    }
+}
+
+/// A trait describing the limits of a memory page.
+pub trait MemoryPage: Copy {
+    /// The maximum allowed offset into the memory page.
+    fn max_offset(&self) -> u8;
+
+    /// The minimum allowed offset into the memory page.
+    ///
+    /// Note that these values are always referenced to the full 256-byte
+    /// transceiver memory map. So this should be zero for a lower page, and 128
+    /// for an upper page.
+    fn min_offset(&self) -> u8 {
+        0
+    }
+
+    /// The upper limit of the page.
+    ///
+    /// Specifically, this is the offset of the first _invalid_ byte of the
+    /// page, or equivalently the maximum offset plus 1.
+    fn upper_limit(&self) -> u16 {
+        self.max_offset() as u16 + 1
+    }
+
+    /// The minimum size of a write operation, in bytes.
+    const MIN_WRITE_SIZE: u8 = 1;
+
+    /// The maximum size of a write operation, in bytes.
+    const MAX_WRITE_SIZE: u8;
+
+    /// The minimum size of a read operation, in bytes.
+    const MIN_READ_SIZE: u8 = 1;
+
+    /// The maximum size of a read operation, in bytes.
+    const MAX_READ_SIZE: u8;
+}
+
+// Helper to check that the limits provided define a valid read.
+fn verify_read<P>(page: &P, offset: u8, len: u8) -> Result<(), Error>
+where
+    P: MemoryPage,
+{
+    if offset >= page.min_offset()
+        && offset <= page.max_offset()
+        && (offset as u16 + len as u16) <= page.upper_limit()
+        && len >= P::MIN_READ_SIZE
+        && len <= P::MAX_READ_SIZE
+    {
+        return Ok(());
+    }
+    Err(Error::InvalidMemoryAccess { offset, len })
+}
+
+// Helper to check that the limits provided define a valid write.
+fn verify_write<P>(page: &P, offset: u8, len: u8) -> Result<(), Error>
+where
+    P: MemoryPage,
+{
+    if offset >= page.min_offset()
+        && offset <= page.max_offset()
+        && (offset as u16 + len as u16) <= page.upper_limit()
+        && len >= P::MIN_WRITE_SIZE
+        && len <= P::MAX_WRITE_SIZE
+    {
+        return Ok(());
+    }
+    Err(Error::InvalidMemoryAccess { offset, len })
+}
+
 #[cfg(test)]
 mod tests {
+    use crate::mgmt::cmis;
     use crate::mgmt::sff8636;
-    use crate::mgmt::MemoryRegion;
-    use crate::mgmt::UpperPage;
+    use crate::mgmt::MemoryPage;
+    use crate::mgmt::MemoryRead;
+    use crate::mgmt::MemoryWrite;
+    use crate::mgmt::Page;
     use crate::Error;
 
+    fn test_page_memory_read<P>(page: P)
+    where
+        P: MemoryPage + Into<Page>,
+    {
+        let wrapped = page.into();
+
+        // Should always be able to read from the minimum offset for up to the
+        // maximum read size.
+        for len in 1..=P::MAX_READ_SIZE {
+            let read = MemoryRead::new(page, page.min_offset(), len).unwrap();
+            assert_eq!(read.page(), &wrapped);
+            assert_eq!(read.offset(), page.min_offset());
+            assert_eq!(read.len(), len);
+        }
+
+        // Should always be able to read 1 byte, at any offset.
+        for offset in page.min_offset()..page.max_offset() {
+            let read = MemoryRead::new(page, offset, 1).unwrap();
+            assert_eq!(read.page(), &wrapped);
+            assert_eq!(read.offset(), offset);
+            assert_eq!(read.len(), 1);
+        }
+
+        // Read exactly to the end.
+        let (offset, len) = (page.max_offset(), 1);
+        let read = MemoryRead::new(page, offset, len).unwrap();
+        assert_eq!(read.page(), &wrapped);
+        assert_eq!(read.offset(), offset);
+        assert_eq!(read.len(), len);
+
+        // Read past the end.
+        let len = 2;
+        assert_eq!(
+            MemoryRead::new(page, offset, 2).unwrap_err(),
+            Error::InvalidMemoryAccess { offset, len }
+        );
+    }
+
+    fn test_page_memory_write<P>(page: P)
+    where
+        P: MemoryPage + Into<Page>,
+    {
+        let wrapped = page.into();
+
+        // Should always be able to write from the minimum offset for up to the
+        // maximum read size.
+        for len in 1..=P::MAX_WRITE_SIZE {
+            let read = MemoryWrite::new(page, page.min_offset(), len).unwrap();
+            assert_eq!(read.page(), &wrapped);
+            assert_eq!(read.offset(), page.min_offset());
+            assert_eq!(read.len(), len);
+        }
+
+        // Should always be able to write 1 byte, at any offset.
+        for offset in page.min_offset()..page.max_offset() {
+            let read = MemoryWrite::new(page, offset, 1).unwrap();
+            assert_eq!(read.page(), &wrapped);
+            assert_eq!(read.offset(), offset);
+            assert_eq!(read.len(), 1);
+        }
+
+        // Write exactly to the end.
+        let (offset, len) = (page.max_offset(), 1);
+        let read = MemoryWrite::new(page, offset, len).unwrap();
+        assert_eq!(read.page(), &wrapped);
+        assert_eq!(read.offset(), offset);
+        assert_eq!(read.len(), len);
+
+        // Write past the end.
+        let len = 2;
+        assert_eq!(
+            MemoryWrite::new(page, offset, 2).unwrap_err(),
+            Error::InvalidMemoryAccess { offset, len }
+        );
+    }
+
     #[test]
-    fn test_memory_region() {
-        let page = UpperPage::Sff8636(sff8636::Page::default());
-        let region = MemoryRegion::new(page, 0, 10).unwrap();
-        assert_eq!(region.upper_page(), &page);
-        assert_eq!(region.page(), page.page());
-        assert!(region.bank().is_none());
+    fn test_sff_8636_lower_page_memory_read() {
+        test_page_memory_read(sff8636::Page::Lower);
+    }
 
-        // We should be able to read exactly to the end of the map.
-        assert!(MemoryRegion::new(page, 1, 255).is_ok());
-        assert!(MemoryRegion::new(page, 255, 1).is_ok());
+    #[test]
+    fn test_sff_8636_upper_page_memory_read() {
+        test_page_memory_read(sff8636::Page::Upper(sff8636::UpperPage::new(0).unwrap()));
+    }
 
-        // But these accesses should fail, reading off the end.
-        assert!(matches!(
-            MemoryRegion::new(page, 2, 255).unwrap_err(),
-            Error::InvalidMemoryAccess { .. }
-        ));
-        assert!(matches!(
-            MemoryRegion::new(page, 255, 2).unwrap_err(),
-            Error::InvalidMemoryAccess { .. }
-        ));
+    #[test]
+    fn test_cmis_lower_page_memory_read() {
+        test_page_memory_read(cmis::Page::Lower);
+    }
+
+    #[test]
+    fn test_cmis_upper_page_memory_read() {
+        test_page_memory_read(cmis::Page::Upper(cmis::UpperPage::new_unbanked(0).unwrap()));
+    }
+
+    #[test]
+    fn test_sff_8636_lower_page_memory_write() {
+        test_page_memory_write(sff8636::Page::Lower);
+    }
+
+    #[test]
+    fn test_sff_8636_upper_page_memory_write() {
+        test_page_memory_write(sff8636::Page::Upper(sff8636::UpperPage::new(0).unwrap()));
+    }
+
+    #[test]
+    fn test_cmis_lower_page_memory_write() {
+        test_page_memory_write(cmis::Page::Lower);
+    }
+
+    #[test]
+    fn test_cmis_upper_page_memory_write() {
+        test_page_memory_write(cmis::Page::Upper(cmis::UpperPage::new_unbanked(0).unwrap()));
     }
 }
