@@ -163,7 +163,7 @@ impl PortMask {
     }
 
     /// Return the number of transceivers addressed by `self.
-    pub const fn n_transceivers(&self) -> usize {
+    pub const fn selected_transceiver_count(&self) -> usize {
         self.0.count_ones() as _
     }
 }
@@ -177,8 +177,8 @@ pub struct ModuleId {
 
 impl ModuleId {
     /// Return the number of transceivers addressed by `self`.
-    pub const fn n_transceivers(&self) -> usize {
-        self.ports.n_transceivers()
+    pub const fn selected_transceiver_count(&self) -> usize {
+        self.ports.selected_transceiver_count()
     }
 }
 

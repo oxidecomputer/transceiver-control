@@ -49,7 +49,7 @@ impl Message {
             MessageBody::SpResponse(SpResponse::Read(inner)) => inner.len(),
             _ => 0,
         };
-        self.modules.n_transceivers() * usize::from(bytes_per_xcvr)
+        self.modules.selected_transceiver_count() * usize::from(bytes_per_xcvr)
     }
 }
 

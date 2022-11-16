@@ -6,10 +6,12 @@ default-run = "xcvradm"
 
 [dependencies]
 hubpack = "0.1.0"
+serde = "1"
 slog-async = "2"
 slog-term = "2"
 thiserror = "1"
 transceiver-messages = { path = "../messages" }
+usdt = "0.3"
 
 [dependencies.slog]
 version = "2"
