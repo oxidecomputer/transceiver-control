@@ -9,7 +9,7 @@ use structopt::StructOpt;
 use hubpack::SerializedSize;
 use transceiver_messages::{
     message::*,
-    mgmt::{sff8636, MemoryRegion, UpperPage},
+    mgmt::{sff8636, MemoryRead, MemoryWrite},
     ModuleId, PortMask,
 };
 
@@ -118,12 +118,7 @@ fn test_read(
                         ports: PortMask::single(port).unwrap(),
                     },
                     body: MessageBody::HostRequest(HostRequest::Read(
-                        MemoryRegion::new(
-                            UpperPage::Sff8636(sff8636::Page::new(0).unwrap()),
-                            0,
-                            128,
-                        )
-                        .unwrap(),
+                        MemoryRead::new(sff8636::Page::Lower, 0, 128).unwrap(),
                     )),
                 };
                 println!("Reading memory: {:?}", msg.body);
@@ -192,8 +187,10 @@ fn test_write(
                     ports: PortMask::single(port).unwrap(),
                 },
                 body: MessageBody::HostRequest(HostRequest::Read(
-                    MemoryRegion::new(
-                        UpperPage::Sff8636(sff8636::Page::new(2).unwrap()),
+                    MemoryRead::new(
+                        sff8636::Page::Upper(
+                            sff8636::UpperPage::new(2).unwrap(),
+                        ),
                         128,
                         128,
                     )
@@ -216,8 +213,10 @@ fn test_write(
                     ports: PortMask::single(port).unwrap(),
                 },
                 body: MessageBody::HostRequest(HostRequest::Write(
-                    MemoryRegion::new(
-                        UpperPage::Sff8636(sff8636::Page::new(2).unwrap()),
+                    MemoryWrite::new(
+                        sff8636::Page::Upper(
+                            sff8636::UpperPage::new(2).unwrap(),
+                        ),
                         128,
                         4,
                     )
@@ -227,6 +226,7 @@ fn test_write(
             println!("Reading memory: {:?}", msg.body);
             let (reply, rest) = send_message(buf, socket, msg, &[5, 6, 7, 8]);
             println!("    => {:?}\n       {:?}", reply.body, rest);
+            return Ok(());
         }
     }
     Ok(())
