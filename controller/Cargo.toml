@@ -2,10 +2,21 @@
 name = "transceiver-controller"
 version = "0.1.0"
 edition = "2021"
+default-run = "xcvradm"
 
 [dependencies]
+hubpack = "0.1.0"
+serde = "1"
+slog-async = "2"
+slog-term = "2"
+thiserror = "1"
 transceiver-messages = { path = "../messages" }
+usdt = "0.3"
+
+[dependencies.slog]
+version = "2"
+features = [ "max_level_trace", "release_max_level_trace" ]
 
 [dependencies.tokio]
 version = "1"
-features = [ "full" ]
+features = [ "macros", "net", "rt", "rt-multi-thread", "sync", "time" ]
