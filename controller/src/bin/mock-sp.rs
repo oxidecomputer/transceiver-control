@@ -9,15 +9,15 @@ use transceiver_messages::message::MessageBody;
 use transceiver_messages::message::SpResponse;
 use transceiver_messages::MAX_PAYLOAD_SIZE;
 use transceiver_messages::PORT;
-
-const PEER: Ipv6Addr = Ipv6Addr::new(0xff02, 0, 0, 0, 0, 0, 0x1de, 2);
+use transceiver_messages::ADDR;
 
 #[tokio::main]
 async fn main() {
+    let peer = Ipv6Addr::from(ADDR);
     let sock = UdpSocket::bind(SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, PORT, 0, 0))
         .await
         .unwrap();
-    sock.join_multicast_v6(&PEER, 0).unwrap();
+    sock.join_multicast_v6(&peer, 0).unwrap();
 
     let mut buf = [0; MAX_PAYLOAD_SIZE * 2];
     loop {
