@@ -58,9 +58,6 @@ pub enum Error {
     #[error("Network or I/O error: {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("Message type requires data, but none provided")]
-    MessageRequiresData,
-
     #[error("A serialization error occurred: {0}")]
     SerDes(hubpack::Error),
 }
@@ -377,9 +374,10 @@ impl IoLoop {
         peer: &SocketAddr,
         header: Header,
         modules: ModuleId,
+        err: MessageError,
         tx_buf: &mut [u8],
     ) {
-        let body = MessageBody::HostResponse(HostResponse::Error(MessageError::ProtocolError));
+        let body = MessageBody::HostResponse(HostResponse::Error(err));
         let message = Message {
             header,
             modules,
@@ -577,8 +575,15 @@ impl IoLoop {
                     // We never expect these message types to be sent to us.
                     if matches!(message.body, MessageBody::HostRequest(_) | MessageBody::HostResponse(_)) {
                         debug!(self.log, "wrong message type"; "peer" => peer);
-                        probes::bad__message!(|| (peer.ip(), "wrong message type"));
-                        self.send_protocol_error(&peer, message.header, message.modules, &mut tx_buf).await;
+                        let err = MessageError::ProtocolError;
+                        probes::bad__message!(|| (peer.ip(), format!("{:?}", err)));
+                        self.send_protocol_error(
+                            &peer,
+                            message.header,
+                            message.modules,
+                            err,
+                            &mut tx_buf,
+                        ).await;
                         continue;
                     }
 
@@ -594,8 +599,15 @@ impl IoLoop {
                                 "actual_len" => remainder.len(),
                                 "peer" => peer,
                             );
-                            probes::bad__message!(|| (peer.ip(), "message missing data"));
-                            self.send_protocol_error(&peer, message.header, message.modules, &mut tx_buf).await;
+                            let err = MessageError::MissingData;
+                            probes::bad__message!(|| (peer.ip(), format!("{:?}", err)));
+                            self.send_protocol_error(
+                                &peer,
+                                message.header,
+                                message.modules,
+                                err,
+                                &mut tx_buf,
+                            ).await;
                             continue;
                         }
                         Some(remainder[..expected_len].to_vec())

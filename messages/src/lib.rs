@@ -74,6 +74,10 @@ pub enum Error {
     /// Someone sent an unexpected message (e.g. the host sending an SpRequest).
     ProtocolError,
 
+    /// A message expected trailing data, but none was contained in the UDP
+    /// packet.
+    MissingData,
+
     /// The version in the header is unexpected.
     VersionMismatch { expected: u8, actual: u8 },
 }
