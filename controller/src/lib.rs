@@ -123,7 +123,8 @@ pub struct Controller {
     // The task handling actual network IO with the peer.
     io_task: JoinHandle<()>,
 
-    // The task handling actual network IO with the peer.
+    // The task receiving requests from the peer and calling the user-supplied
+    // request handler.
     request_task: JoinHandle<()>,
 }
 
