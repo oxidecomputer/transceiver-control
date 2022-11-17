@@ -7,9 +7,9 @@ use transceiver_messages::message::HostRequest;
 use transceiver_messages::message::Message;
 use transceiver_messages::message::MessageBody;
 use transceiver_messages::message::SpResponse;
+use transceiver_messages::ADDR;
 use transceiver_messages::MAX_PAYLOAD_SIZE;
 use transceiver_messages::PORT;
-use transceiver_messages::ADDR;
 
 #[tokio::main]
 async fn main() {
