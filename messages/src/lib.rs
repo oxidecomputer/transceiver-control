@@ -170,6 +170,11 @@ impl PortMask {
     pub const fn selected_transceiver_count(&self) -> usize {
         self.0.count_ones() as _
     }
+
+    /// Convience function to address all transceivers.
+    pub const fn all() -> Self {
+        Self(!0)
+    }
 }
 
 /// Identifier for a set of transceiver modules accessed through a single FPGA.
@@ -183,6 +188,15 @@ impl ModuleId {
     /// Return the number of transceivers addressed by `self`.
     pub const fn selected_transceiver_count(&self) -> usize {
         self.ports.selected_transceiver_count()
+    }
+
+    /// Convenience method to build a `ModuleId` that selects all transceivers
+    /// on the given FPGA.
+    pub const fn all_transceivers(&self, fpga_id: u8) -> Self {
+        Self {
+            fpga_id,
+            ports: PortMask::all(),
+        }
     }
 }
 
@@ -227,5 +241,15 @@ mod tests {
         assert!(mask.set(200).is_err());
         assert!(mask.clear(200).is_err());
         assert!(mask.is_set(200).is_err());
+    }
+
+    #[test]
+    fn test_port_mask_all() {
+        assert_eq!(PortMask::all().0, 0xFFFF);
+    }
+
+    #[test]
+    fn test_selected_transceiver_count() {
+        assert_eq!(PortMask(0b101).selected_transceiver_count(), 2);
     }
 }

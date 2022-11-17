@@ -45,11 +45,12 @@ impl Message {
     /// Return the length of the expected data that should follow `self`.
     pub fn expected_data_len(&self) -> usize {
         let bytes_per_xcvr = match self.body {
-            MessageBody::HostRequest(HostRequest::Write(inner)) => inner.len(),
-            MessageBody::SpResponse(SpResponse::Read(inner)) => inner.len(),
+            MessageBody::HostRequest(HostRequest::Write(inner)) => usize::from(inner.len()),
+            MessageBody::SpResponse(SpResponse::Read(inner)) => usize::from(inner.len()),
+            MessageBody::SpResponse(SpResponse::Status) => core::mem::size_of::<Status>(),
             _ => 0,
         };
-        self.modules.selected_transceiver_count() * usize::from(bytes_per_xcvr)
+        self.modules.selected_transceiver_count() * bytes_per_xcvr
     }
 }
 
