@@ -10,6 +10,7 @@ serde = "1"
 slog-async = "2"
 slog-term = "2"
 thiserror = "1"
+transceiver-decode = { path = "../decode" }
 transceiver-messages = { path = "../messages" }
 usdt = "0.3"
 

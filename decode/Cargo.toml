@@ -1,0 +1,9 @@
+[package]
+name = "transceiver-decode"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+chrono = "0.4"
+transceiver-messages = { path = "../messages" }
+thiserror = "1"

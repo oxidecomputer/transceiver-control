@@ -1,10 +1,12 @@
 [workspace]
 members = [
-    "messages",
     "controller",
+    "decode",
+    "messages",
 ]
 
 default-members = [
-    "messages",
     "controller",
+    "decode",
+    "messages",
 ]

@@ -15,6 +15,7 @@ use slog::error;
 use slog::info;
 use slog::warn;
 use slog::Logger;
+use std::collections::BTreeMap;
 use std::future::Future;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
@@ -29,17 +30,25 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tokio::time::interval;
 use tokio::time::Interval;
+use transceiver_decode::Error as DecodeError;
+use transceiver_decode::Identifier;
+use transceiver_decode::Identity;
+use transceiver_decode::ParseFromModule;
+use transceiver_decode::Vendor;
 use transceiver_messages::message;
 use transceiver_messages::message::Header;
 use transceiver_messages::message::HostRequest;
 use transceiver_messages::message::HostResponse;
 use transceiver_messages::message::Message;
 use transceiver_messages::message::MessageBody;
+use transceiver_messages::message::PowerMode;
 use transceiver_messages::message::SpResponse;
 use transceiver_messages::message::Status;
+use transceiver_messages::mgmt::sff8636;
 use transceiver_messages::mgmt::MemoryRead;
 use transceiver_messages::Error as MessageError;
 use transceiver_messages::ModuleId;
+use transceiver_messages::PortMask;
 use transceiver_messages::ADDR;
 use transceiver_messages::MAX_PAYLOAD_SIZE;
 use transceiver_messages::PORT;
@@ -79,6 +88,9 @@ pub enum Error {
 
     #[error("Received an unexpected message type in response: {0:?}")]
     UnexpectedMessage(MessageBody),
+
+    #[error("Transceiver memory map decode error: {0}")]
+    Decode(#[from] DecodeError),
 }
 
 // A request sent from host to SP, possibly with trailing data.
@@ -302,8 +314,116 @@ impl Controller {
         }
     }
 
+    // Split the provided modules into a sequence of modules, each of the same
+    // type.
+    //
+    // # Panics
+    //
+    // This panics if the transceivers and ID counts are different.
+    fn split_modules_by_identifier(
+        modules: ModuleId,
+        ids: &[Identifier],
+    ) -> BTreeMap<Identifier, ModuleId> {
+        assert_eq!(modules.selected_transceiver_count(), ids.len());
+        let fpga_id = modules.fpga_id;
+        let mut out = BTreeMap::new();
+        for (port, id) in modules.ports.to_indices().zip(ids) {
+            out.entry(*id)
+                .or_insert_with(|| ModuleId {
+                    fpga_id,
+                    ports: PortMask(0),
+                })
+                .ports
+                .set(port)
+                .unwrap();
+        }
+        out
+    }
+
+    // Read the SFF-8024 identifier for some modules.
+    async fn fetch_sff_identifier(
+        &self,
+        modules: ModuleId,
+    ) -> Result<(ModuleId, Vec<Identifier>), Error> {
+        let read = MemoryRead::new(sff8636::Page::Lower, 0, 1).unwrap();
+        let (modules, per_module_data) = self.read(modules, read).await?;
+        assert_eq!(modules.selected_transceiver_count(), per_module_data.len());
+        let ids = per_module_data
+            .into_iter()
+            .map(|v| Identifier::from(v[0]))
+            .collect();
+        Ok((modules, ids))
+    }
+
+    /// Return the identity of a set of modules.
+    pub async fn identify(&self, modules: ModuleId) -> Result<(ModuleId, Vec<Identity>), Error> {
+        let (modules, ids) = self.fetch_sff_identifier(modules).await.unwrap();
+        let modules_by_id = Self::split_modules_by_identifier(modules, &ids);
+        let mut identity = BTreeMap::new();
+
+        // Read data for each kind of module independently.
+        for (id, modules) in modules_by_id.into_iter() {
+            // Issue the reads for each chunk of data for this kind of module.
+            let reads = Vendor::reads(id)?;
+            let vendor_data = {
+                let mut vendor_data = Vec::with_capacity(reads.len());
+                for read in reads.into_iter() {
+                    // TODO-correctness: Deal with the returned messages
+                    // indicating the set of modules changed during these reads.
+                    let (_, d) = self.read(modules, read).await?;
+                    vendor_data.push(d);
+                }
+                vendor_data
+            };
+
+            // Parse the vendor data itself for each module.
+            //
+            // `vendor_data` is a Vec<Vec<Vec<u8>>> where the are, from outer to
+            // inner:
+            //
+            // - Each read, defined by `Vendor::reads`.
+            // - Each _module_ of the same kind.
+            // - Bytes for that read and module.
+            //
+            // So the data for each module is at a single index of the second
+            // array, and the full contents along the other two dimensions. (In
+            // ndarray notation, something like `vendor_data[..][i][..]`.)
+            for (i, port) in modules.ports.to_indices().enumerate() {
+                let parse_data = vendor_data.iter().map(|read| read[i].as_slice());
+                let vendor = Vendor::parse(id, parse_data)?;
+                let ident = Identity {
+                    identifier: id,
+                    vendor,
+                };
+                identity.insert(port, ident);
+            }
+        }
+
+        // Sort by index, so that the returned `Vec<_>` maps to the return value
+        // of `modules.ports.to_indices()`.
+        Ok((modules, identity.into_iter().map(|(_k, v)| v).collect()))
+    }
+
+    /// Set the power mode for a set of transceiver modules.
+    pub async fn set_power_mode(
+        &self,
+        modules: ModuleId,
+        mode: PowerMode,
+    ) -> Result<ModuleId, Error> {
+        let message = Message {
+            header: self.next_header(),
+            modules,
+            body: MessageBody::HostRequest(HostRequest::SetPowerMode(mode)),
+        };
+        let request = HostRpcRequest {
+            message,
+            data: None,
+        };
+        self.rpc(request).await.map(|resp| resp.message.modules)
+    }
+
     /// Report the status of a set of transceiver modules.
-    pub async fn status(&self, modules: ModuleId) -> Result<Vec<Status>, Error> {
+    pub async fn status(&self, modules: ModuleId) -> Result<(ModuleId, Vec<Status>), Error> {
         let message = Message {
             header: self.next_header(),
             modules,
@@ -314,12 +434,15 @@ impl Controller {
             data: None,
         };
         let reply = self.rpc(request).await?;
-        Ok(reply
-            .data
-            .unwrap()
-            .into_iter()
-            .map(|x| Status::from_bits(x).unwrap())
-            .collect())
+        Ok((
+            reply.message.modules,
+            reply
+                .data
+                .unwrap()
+                .into_iter()
+                .map(|x| Status::from_bits(x).unwrap())
+                .collect(),
+        ))
     }
 
     /// Read the memory map of a set of transceiver modules.
@@ -330,7 +453,11 @@ impl Controller {
     /// Note that the _caller_ is responsible for verifying that the details of
     /// the read are valid, such as that the modules conform to the specified
     /// management interface, and that the page is supported.
-    pub async fn read(&self, modules: ModuleId, read: MemoryRead) -> Result<Vec<Vec<u8>>, Error> {
+    pub async fn read(
+        &self,
+        modules: ModuleId,
+        read: MemoryRead,
+    ) -> Result<(ModuleId, Vec<Vec<u8>>), Error> {
         let message = Message {
             header: self.next_header(),
             modules,
@@ -361,7 +488,7 @@ impl Controller {
             .map(Vec::from)
             .collect::<Vec<_>>();
         assert_eq!(data.len(), modules.selected_transceiver_count());
-        Ok(data)
+        Ok((reply.message.modules, data))
     }
 
     // Issue one RPC, possibly retrying, and await the response.

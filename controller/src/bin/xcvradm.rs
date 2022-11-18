@@ -9,6 +9,8 @@ use transceiver_controller::Controller;
 use transceiver_controller::Error;
 use transceiver_controller::HostRpcResponse;
 use transceiver_controller::SpRpcRequest;
+use transceiver_decode::Identity;
+use transceiver_messages::message::PowerMode;
 use transceiver_messages::message::Status;
 use transceiver_messages::mgmt::sff8636;
 use transceiver_messages::mgmt::MemoryRead;
@@ -24,7 +26,12 @@ fn parse_log_level(s: &str) -> Result<Level, String> {
     s.parse().map_err(|_| String::from("invalid log level"))
 }
 
+/// Administer optical network transceiver modules.
+///
+/// This tool communicates with the SP on an attached Sidecar to query and
+/// control the optical transceivers attached to its front IO board.
 #[derive(Parser)]
+#[command(version, about, long_about)]
 struct Args {
     #[command(subcommand)]
     cmd: Cmd,
@@ -83,8 +90,18 @@ enum Cmd {
     /// enable, and power mode.
     Status,
 
+    /// Set the power module of the addressed modules.
+    SetPower {
+        /// The desired power mode.
+        #[arg(value_enum)]
+        mode: PowerMode,
+    },
+
     /// Read the lower page of a set of transceiver modules.
     ReadLower { offset: u8, len: u8 },
+
+    /// Extract the identity information for a set of modules.
+    Identify,
 }
 
 #[tokio::main]
@@ -116,7 +133,7 @@ async fn main() {
         .transceivers
         .map(|ix| PortMask::from_indices(&ix).unwrap())
         .unwrap_or_else(PortMask::all);
-    let modules = ModuleId {
+    let requested_modules = ModuleId {
         fpga_id: args.fpga_id,
         ports,
     };
@@ -124,13 +141,23 @@ async fn main() {
 
     match args.cmd {
         Cmd::Status => {
-            let status = controller.status(modules).await.unwrap();
+            let (modules, status) = controller.status(requested_modules).await.unwrap();
             print_module_status(modules, status);
         }
         Cmd::ReadLower { offset, len } => {
             let read = MemoryRead::new(sff8636::Page::Lower, offset, len).unwrap();
-            let data = controller.read(modules, read).await.unwrap();
+            let (modules, data) = controller.read(requested_modules, read).await.unwrap();
             print_read_data(modules, data);
+        }
+        Cmd::SetPower { mode } => {
+            controller
+                .set_power_mode(requested_modules, mode)
+                .await
+                .unwrap();
+        }
+        Cmd::Identify => {
+            let (modules, ids) = controller.identify(requested_modules).await.unwrap();
+            print_module_identity(modules, ids);
         }
     }
 }
@@ -155,4 +182,32 @@ fn print_read_data(modules: ModuleId, data: Vec<Vec<u8>>) {
             .join(",");
         println!("{:>WIDTH$} {port:>WIDTH$} [{hex_data}]", modules.fpga_id);
     }
+}
+
+const ID_WIDTH: usize = 16;
+const VENDOR_WIDTH: usize = 16;
+const PART_WIDTH: usize = 16;
+const REV_WIDTH: usize = 4;
+const SERIAL_WIDTH: usize = 16;
+const DATE_WIDTH: usize = 20;
+
+fn print_module_identity(modules: ModuleId, ids: Vec<Identity>) {
+    println!(
+        "FPGA Port {:ID_WIDTH$} {:VENDOR_WIDTH$} {:PART_WIDTH$} \
+        {:REV_WIDTH$} {:SERIAL_WIDTH$} {:DATE_WIDTH$}",
+        "Identifier", "Vendor", "Part", "Rev", "Serial", "Mfg date"
+    );
+    let fpga_id = modules.fpga_id;
+    for (port, id) in modules.ports.to_indices().zip(ids.into_iter()) {
+        print_single_module_identity(fpga_id, port, id);
+    }
+}
+
+fn print_single_module_identity(fpga_id: u8, port: u8, id: Identity) {
+    let ident = format!("{:?} (0x{:02x})", id.identifier, u8::from(id.identifier));
+    println!(
+        "{fpga_id:>WIDTH$} {port:>WIDTH$} {:ID_WIDTH$} {:VENDOR_WIDTH$} \
+        {:PART_WIDTH$} {:REV_WIDTH$} {:SERIAL_WIDTH$} {:DATE_WIDTH$}",
+        ident, id.vendor.name, id.vendor.part, id.vendor.revision, id.vendor.serial, id.vendor.date,
+    );
 }
