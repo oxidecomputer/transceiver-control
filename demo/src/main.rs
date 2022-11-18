@@ -45,7 +45,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("------------------------------------------------------------");
 
     const MAX_SIZE: usize =
-        Message::MAX_SIZE + transceiver_messages::MAX_MESSAGE_SIZE;
+        Message::MAX_SIZE + transceiver_messages::MAX_PAYLOAD_SIZE;
     let mut buf = [0; MAX_SIZE];
 
     let mut message_id = 0x1234;
