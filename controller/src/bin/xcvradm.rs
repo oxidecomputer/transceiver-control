@@ -20,15 +20,6 @@ async fn request_handler(_: SpRpcRequest) -> Result<HostRpcResponse, Error> {
     Err(Error::Protocol(MessageError::ProtocolError))
 }
 
-fn parse_xvcr_list(s: &str) -> Result<Vec<u8>, String> {
-    s.split(",")
-        .map(|x| {
-            x.parse()
-                .map_err(|_| String::from("invalid transceiver index"))
-        })
-        .collect()
-}
-
 fn parse_log_level(s: &str) -> Result<Level, String> {
     s.parse().map_err(|_| String::from("invalid log level"))
 }
@@ -45,8 +36,8 @@ struct Args {
     /// The comma-separated list of transcievers on the FPGA to address.
     ///
     /// The default is all transceivers on an FPGA.
-    #[arg(short, long)]
-    transceivers: Option<String>,
+    #[arg(short, long, use_value_delimiter = true)]
+    transceivers: Option<Vec<u8>>,
 
     /// The source IP address on which to listen for messages.
     #[arg(short, long, default_value_t = Ipv6Addr::UNSPECIFIED)]
@@ -104,7 +95,7 @@ async fn main() {
         interface: args.interface,
         peer: args
             .peer
-            .unwrap_or(Ipv6Addr::from(transceiver_messages::ADDR)),
+            .unwrap_or_else(|| Ipv6Addr::from(transceiver_messages::ADDR)),
         n_retries: args.n_retries,
         retry_interval: Duration::from_millis(args.retry_interval),
     };
@@ -123,8 +114,8 @@ async fn main() {
 
     let ports = args
         .transceivers
-        .map(|list| PortMask::from_indices(&parse_xvcr_list(&list).unwrap()).unwrap())
-        .unwrap_or_else(|| PortMask::all());
+        .map(|ix| PortMask::from_indices(&ix).unwrap())
+        .unwrap_or_else(PortMask::all);
     let modules = ModuleId {
         fpga_id: args.fpga_id,
         ports,
@@ -144,21 +135,24 @@ async fn main() {
     }
 }
 
+// Column width for printing data below.
+const WIDTH: usize = 4;
+
 fn print_module_status(modules: ModuleId, status: Vec<Status>) {
-    println!("FPGA\tPort\tStatus");
+    println!("FPGA Port Status");
     for (port, status) in modules.ports.to_indices().zip(status.into_iter()) {
-        println!("{}\t{port}\t{status:?}", modules.fpga_id);
+        println!("{:>WIDTH$} {port:>WIDTH$} {status:?}", modules.fpga_id);
     }
 }
 
 fn print_read_data(modules: ModuleId, data: Vec<Vec<u8>>) {
-    println!("FPGA\tPort\tData");
+    println!("FPGA Port Data");
     for (port, each) in modules.ports.to_indices().zip(data.into_iter()) {
         let hex_data = each
             .into_iter()
             .map(|byte| format!("0x{byte:02x}"))
             .collect::<Vec<_>>()
             .join(",");
-        println!("{}\t{port}\t[{hex_data}]", modules.fpga_id);
+        println!("{:>WIDTH$} {port:>WIDTH$} [{hex_data}]", modules.fpga_id);
     }
 }

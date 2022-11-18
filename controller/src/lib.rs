@@ -76,6 +76,9 @@ pub enum Error {
         one of the requested transceivers may not be present"
     )]
     ReadFailed,
+
+    #[error("Received an unexpected message type in response: {0:?}")]
+    UnexpectedMessage(MessageBody),
 }
 
 // A request sent from host to SP, possibly with trailing data.
@@ -113,6 +116,8 @@ struct OutstandingHostRequest {
     // The actual request object we're sending. It's stored so that we can
     // resend it if needed.
     request: HostRpcRequest,
+    // The number of attempts to submit and process `request`.
+    n_retries: usize,
     // The channel on which the eventual reply will be sent.
     response_tx: oneshot::Sender<Result<SpRpcResponse, Error>>,
 }
@@ -345,7 +350,7 @@ impl Controller {
             }
             MessageBody::SpResponse(SpResponse::Error(e)) => return Err(Error::from(e)),
             MessageBody::SpResponse(SpResponse::Read(_)) => reply.data.unwrap(),
-            _ => panic!("Unexpected message type"),
+            other => return Err(Error::UnexpectedMessage(other)),
         };
 
         // We expect data to be a flattened vec of vecs, with the data from each
@@ -364,6 +369,7 @@ impl Controller {
         let (response_tx, response_rx) = oneshot::channel();
         let outstanding_request = OutstandingHostRequest {
             request,
+            n_retries: 0,
             response_tx,
         };
         self.outgoing_request_tx
@@ -416,11 +422,11 @@ impl IoLoop {
     // Send an outgoing request.
     //
     // Panics if there is no outstanding request.
-    async fn send_outgoing_request(&self, tx_buf: &mut [u8]) {
+    async fn send_outgoing_request(&mut self, tx_buf: &mut [u8]) {
         // Safety: Serialization can only fail in a few constrained
         // circumstances, such as a buffer overrun or unsupported types. None of
         // those apply here, so we just unwrap in that direction.
-        let request = self.outstanding_request.as_ref().unwrap();
+        let mut request = self.outstanding_request.as_mut().unwrap();
         let data_start = hubpack::serialize(tx_buf, &request.request.message).unwrap();
         let msg_size = if let Some(data) = &request.request.data {
             let data_end = data_start + data.len();
@@ -458,6 +464,10 @@ impl IoLoop {
                     let peer = IpAddr::V6(*self.peer_addr.ip());
                     (peer, &request.request.message)
                 });
+
+                // Reset the resend timer and increment the number of attempts.
+                self.resend.reset();
+                request.n_retries += 1;
             }
         }
     }
@@ -533,7 +543,6 @@ impl IoLoop {
     async fn run(mut self) {
         let mut rx_buf = [0; MAX_PACKET_SIZE];
         let mut tx_buf = [0; MAX_PACKET_SIZE];
-        let mut n_retries = 0;
 
         loop {
             tokio::select! {
@@ -561,27 +570,25 @@ impl IoLoop {
                         "dequeued a new request while one is already outstanding!",
                     );
                     self.send_outgoing_request(&mut tx_buf).await;
-                    self.resend.reset();
-                    n_retries += 1;
                 }
 
                 // If we _do_ have an outstanding request, we need to resend it
                 // periodically until we get a response. Wait for up to the resend
                 // interval of inactivity, and then possibly retry.
                 _ = self.resend.tick(), if self.outstanding_request.is_some() => {
+                    let n_retries = self.outstanding_request.as_ref().unwrap().n_retries;
                     if n_retries < self.n_retries {
                         debug!(self.log, "timed out without response, retrying");
                         self.send_outgoing_request(&mut tx_buf).await;
-                        self.resend.reset();
-                        n_retries += 1;
                     } else {
                         error!(
                             self.log,
                             "failed to send message within {n_retries} retries"
                         );
+                        // Safety: This branch is only taken if the request is
+                        // `Some(_)`.
                         let old = self.outstanding_request.take().unwrap();
                         old.response_tx.send(Err(Error::MaxRetries(n_retries))).unwrap();
-                        n_retries = 0;
                     }
                 }
 
