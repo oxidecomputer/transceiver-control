@@ -7,6 +7,9 @@
 //! A host-side control interface to the SP for managing Sidecar transceivers.
 
 use hubpack::SerializedSize;
+use nix::net::if_::if_nametoindex;
+use serde::Deserialize;
+use serde::Serialize;
 use slog::debug;
 use slog::error;
 use slog::info;
@@ -32,6 +35,7 @@ use transceiver_messages::message::HostRequest;
 use transceiver_messages::message::HostResponse;
 use transceiver_messages::message::Message;
 use transceiver_messages::message::MessageBody;
+use transceiver_messages::message::SpResponse;
 use transceiver_messages::message::Status;
 use transceiver_messages::mgmt::MemoryRead;
 use transceiver_messages::Error as MessageError;
@@ -58,8 +62,23 @@ pub enum Error {
     #[error("Network or I/O error: {0}")]
     Io(#[from] std::io::Error),
 
-    #[error("A serialization error occurred: {0}")]
-    SerDes(hubpack::Error),
+    #[error("Message type requires data, but none provided")]
+    MessageRequiresData,
+
+    #[error("Could not find requested interface")]
+    BadInterface(String),
+
+    #[error("Maximum number of retries ({0}) reached without a response")]
+    MaxRetries(usize),
+
+    #[error(
+        "Read of transceiver module memory failed, \
+        one of the requested transceivers may not be present"
+    )]
+    ReadFailed,
+
+    #[error("Received an unexpected message type in response: {0:?}")]
+    UnexpectedMessage(MessageBody),
 }
 
 // A request sent from host to SP, possibly with trailing data.
@@ -97,6 +116,8 @@ struct OutstandingHostRequest {
     // The actual request object we're sending. It's stored so that we can
     // resend it if needed.
     request: HostRpcRequest,
+    // The number of attempts to submit and process `request`.
+    n_retries: usize,
     // The channel on which the eventual reply will be sent.
     response_tx: oneshot::Sender<Result<SpRpcResponse, Error>>,
 }
@@ -104,10 +125,46 @@ struct OutstandingHostRequest {
 // We limit ourselves to a single outstanding request in either direction at
 // this point.
 const NUM_OUTSTANDING_REQUESTS: usize = 1;
+const RESEND_INTERVAL: Duration = Duration::from_secs(1);
+const MAX_PACKET_SIZE: usize = MAX_PAYLOAD_SIZE + Message::MAX_SIZE;
+
+const fn default_retry_interval() -> Duration {
+    RESEND_INTERVAL
+}
+
+fn default_peer_addr() -> Ipv6Addr {
+    Ipv6Addr::from(ADDR)
+}
+
+/// Configuration for a `Controller`.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Config {
+    /// The address on which to listen for messages.
+    pub address: Ipv6Addr,
+
+    /// The name of the interface on which to listen.
+    pub interface: String,
+
+    /// The IPv6 address to use for communication.
+    ///
+    /// The default is a link-local IPv6 multicast address.
+    #[serde(default = "default_peer_addr")]
+    pub peer: Ipv6Addr,
+
+    /// The interval on which to retry messages that receive no response.
+    #[serde(default = "default_retry_interval")]
+    pub retry_interval: Duration,
+
+    /// The number of retries for a message before failing.
+    #[serde(default)]
+    pub n_retries: Option<usize>,
+}
 
 /// A type for controlling transceiver modules on a Sidecar.
 #[derive(Debug)]
 pub struct Controller {
+    _config: Config,
+    _iface: u32,
     _log: Logger,
     message_id: AtomicU64,
 
@@ -138,7 +195,7 @@ impl Controller {
     /// `request_handler` is a function that yields responses to SP requests. As
     /// requests over the network are received, they'll be passed into the
     /// handler, and the yielded response forwarded back to the SP.
-    pub async fn new<H, F>(log: Logger, request_handler: H) -> Result<Self, Error>
+    pub async fn new<H, F>(config: Config, log: Logger, request_handler: H) -> Result<Self, Error>
     where
         H: Fn(SpRpcRequest) -> F + Send + Sync + 'static,
         F: Future<Output = Result<HostRpcResponse, Error>> + Send,
@@ -147,19 +204,28 @@ impl Controller {
             warn!(log, "failed to register DTrace probes"; "reason" => ?e);
         }
 
-        // TODO-correctness We probably want to accept a specific address as
-        // part of the construction of this object.
-        // TODO-completeness: Need to set the scope_id here based on the
-        // interface we expect to use.
-        let local_addr = SocketAddrV6::new(Ipv6Addr::UNSPECIFIED, PORT, 0, 0);
+        let iface = if_nametoindex(config.interface.as_str())
+            .map_err(|_| Error::BadInterface(config.interface.clone()))?;
+        let local_addr = SocketAddrV6::new(config.address, PORT, 0, iface);
         let socket = UdpSocket::bind(local_addr).await?;
+        debug!(
+            log,
+            "bound UDP socket";
+            "interface" => &config.interface,
+            "local_addr" => ?local_addr,
+        );
 
-        // Make sure we receive addresses sent to the multicast address we use
-        // for the protocol, but not those sent by us.
-        // TODO-completeness: Need to set the scope_id here based on the
-        // interface we expect to use.
-        socket.join_multicast_v6(&Ipv6Addr::from(ADDR), 0)?;
+        // Join the group for the multicast protocol address, so that we can
+        // accept requests from the SP in the case it does not have our unicast
+        // address.
+        let multicast_addr = Ipv6Addr::from(ADDR);
+        socket.join_multicast_v6(&multicast_addr, iface)?;
         socket.set_multicast_loop_v6(false)?;
+        debug!(
+            log,
+            "joined IPv6 multicast group";
+            "multicast_addr" => ?multicast_addr,
+        );
 
         // Channel for communicating outgoing requests from this object to the
         // I/O loop. Note that the _responses_ from the I/O loop back to this
@@ -175,12 +241,23 @@ impl Controller {
         // the request-handler task.
         let (incoming_request_tx, incoming_request_rx) = mpsc::channel(NUM_OUTSTANDING_REQUESTS);
 
+        // The multicast peer address for our protocol.
+        //
+        // We can't both `connect` the socket and still `send_to`, which means
+        // we wouldn't be able to send outgoing packets without a unicast
+        // adddress. Pass this address to the IO loop, so we can initiate
+        // requests.
+        let peer_addr = SocketAddrV6::new(config.peer, PORT, 0, iface);
+
         // The I/O task handles the actual network I/O, reading and writing UDP
         // packets in both directions.
         let io_log = log.new(slog::o!("task" => "io"));
         let io_loop = IoLoop::new(
             io_log,
             socket,
+            peer_addr,
+            config.n_retries,
+            config.retry_interval,
             outgoing_request_rx,
             outgoing_response_rx,
             incoming_request_tx,
@@ -188,6 +265,7 @@ impl Controller {
         let io_task = tokio::spawn(async move {
             io_loop.run().await;
         });
+        debug!(log, "spawned IO task");
 
         // The request task runs the user-supplied request handler, receiving
         // valid requests from the I/O task and sending valid responses back.
@@ -203,8 +281,11 @@ impl Controller {
             )
             .await;
         });
+        debug!(log, "spawned request-handler task");
 
         Ok(Self {
+            _config: config,
+            _iface: iface,
             _log: log,
             message_id: AtomicU64::new(0),
             outgoing_request_tx,
@@ -232,8 +313,13 @@ impl Controller {
             message,
             data: None,
         };
-        let _reply = self.rpc(request).await.unwrap();
-        todo!();
+        let reply = self.rpc(request).await?;
+        Ok(reply
+            .data
+            .unwrap()
+            .into_iter()
+            .map(|x| Status::from_bits(x).unwrap())
+            .collect())
     }
 
     /// Read the memory map of a set of transceiver modules.
@@ -254,13 +340,23 @@ impl Controller {
             message,
             data: None,
         };
-        let reply = self.rpc(request).await.unwrap();
+        let reply = self.rpc(request).await?;
+
+        // If we get back a ReadFailed error, one possibility is that we asked
+        // to read a transceiver that's not present.
+        let data = match reply.message.body {
+            MessageBody::SpResponse(SpResponse::Error(MessageError::ReadFailed)) => {
+                return Err(Error::ReadFailed);
+            }
+            MessageBody::SpResponse(SpResponse::Error(e)) => return Err(Error::from(e)),
+            MessageBody::SpResponse(SpResponse::Read(_)) => reply.data.unwrap(),
+            other => return Err(Error::UnexpectedMessage(other)),
+        };
+
         // We expect data to be a flattened vec of vecs, with the data from each
         // referenced transceiver. Split it into chunks sized by the number of
         // bytes we expected to read.
-        let data = reply
-            .data
-            .unwrap()
+        let data = data
             .chunks_exact(usize::from(read.len()))
             .map(Vec::from)
             .collect::<Vec<_>>();
@@ -273,6 +369,7 @@ impl Controller {
         let (response_tx, response_rx) = oneshot::channel();
         let outstanding_request = OutstandingHostRequest {
             request,
+            n_retries: 0,
             response_tx,
         };
         self.outgoing_request_tx
@@ -283,9 +380,6 @@ impl Controller {
     }
 }
 
-const RESEND_INTERVAL: Duration = Duration::from_secs(1);
-const MAX_PACKET_SIZE: usize = MAX_PAYLOAD_SIZE + Message::MAX_SIZE;
-
 // A POD type holding the data we need for the main I/O loop. See `IoLoop::run`
 // for details.
 #[derive(Debug)]
@@ -293,17 +387,21 @@ struct IoLoop {
     log: Logger,
     socket: UdpSocket,
     peer_addr: SocketAddrV6,
+    n_retries: usize,
+    resend: Interval,
     outstanding_request: Option<OutstandingHostRequest>,
     outgoing_request_rx: mpsc::Receiver<OutstandingHostRequest>,
     outgoing_response_rx: mpsc::Receiver<HostRpcResponse>,
     incoming_request_tx: mpsc::Sender<SpRpcRequest>,
-    resend: Interval,
 }
 
 impl IoLoop {
     fn new(
         log: Logger,
         socket: UdpSocket,
+        peer_addr: SocketAddrV6,
+        n_retries: Option<usize>,
+        retry_interval: Duration,
         outgoing_request_rx: mpsc::Receiver<OutstandingHostRequest>,
         outgoing_response_rx: mpsc::Receiver<HostRpcResponse>,
         incoming_request_tx: mpsc::Sender<SpRpcRequest>,
@@ -311,23 +409,24 @@ impl IoLoop {
         Self {
             log,
             socket,
-            peer_addr: SocketAddrV6::new(Ipv6Addr::from(ADDR), PORT, 0, 0),
+            peer_addr,
+            n_retries: n_retries.unwrap_or(usize::MAX),
+            resend: interval(retry_interval),
             outstanding_request: None,
             outgoing_request_rx,
             outgoing_response_rx,
             incoming_request_tx,
-            resend: interval(RESEND_INTERVAL),
         }
     }
 
     // Send an outgoing request.
     //
     // Panics if there is no outstanding request.
-    async fn send_outgoing_request(&self, tx_buf: &mut [u8]) {
+    async fn send_outgoing_request(&mut self, tx_buf: &mut [u8]) {
         // Safety: Serialization can only fail in a few constrained
         // circumstances, such as a buffer overrun or unsupported types. None of
         // those apply here, so we just unwrap in that direction.
-        let request = self.outstanding_request.as_ref().unwrap();
+        let mut request = self.outstanding_request.as_mut().unwrap();
         let data_start = hubpack::serialize(tx_buf, &request.request.message).unwrap();
         let msg_size = if let Some(data) = &request.request.data {
             let data_end = data_start + data.len();
@@ -365,6 +464,10 @@ impl IoLoop {
                     let peer = IpAddr::V6(*self.peer_addr.ip());
                     (peer, &request.request.message)
                 });
+
+                // Reset the resend timer and increment the number of attempts.
+                self.resend.reset();
+                request.n_retries += 1;
             }
         }
     }
@@ -467,16 +570,26 @@ impl IoLoop {
                         "dequeued a new request while one is already outstanding!",
                     );
                     self.send_outgoing_request(&mut tx_buf).await;
-                    self.resend.reset();
                 }
 
                 // If we _do_ have an outstanding request, we need to resend it
                 // periodically until we get a response. Wait for up to the resend
                 // interval of inactivity, and then possibly retry.
                 _ = self.resend.tick(), if self.outstanding_request.is_some() => {
-                    debug!(self.log, "timed out without response, retrying");
-                    self.send_outgoing_request(&mut tx_buf).await;
-                    self.resend.reset();
+                    let n_retries = self.outstanding_request.as_ref().unwrap().n_retries;
+                    if n_retries < self.n_retries {
+                        debug!(self.log, "timed out without response, retrying");
+                        self.send_outgoing_request(&mut tx_buf).await;
+                    } else {
+                        error!(
+                            self.log,
+                            "failed to send message within {n_retries} retries"
+                        );
+                        // Safety: This branch is only taken if the request is
+                        // `Some(_)`.
+                        let old = self.outstanding_request.take().unwrap();
+                        old.response_tx.send(Err(Error::MaxRetries(n_retries))).unwrap();
+                    }
                 }
 
                 // Poll for outgoing responses we need to send.
@@ -574,17 +687,50 @@ impl IoLoop {
                     //
                     // We never expect these message types to be sent to us.
                     if matches!(message.body, MessageBody::HostRequest(_) | MessageBody::HostResponse(_)) {
-                        debug!(self.log, "wrong message type"; "peer" => peer);
-                        let err = MessageError::ProtocolError;
-                        probes::bad__message!(|| (peer.ip(), format!("{:?}", err)));
-                        self.send_protocol_error(
-                            &peer,
-                            message.header,
-                            message.modules,
-                            err,
-                            &mut tx_buf,
-                        ).await;
-                        continue;
+                        // We need to check the message ID to decide how to
+                        // proceed.
+                        //
+                        // If we have an outstanding request, and this incoming
+                        // message matches that ID, we need to fail this
+                        // request. Otherwise we'll simply retry the message
+                        // again, which will obviously fail in the same way.
+                        //
+                        // Note that we can always take out of the Option. If it
+                        // is None, then we can replace it with None without
+                        // worry. If it is Some(_), we want to replace it
+                        // anyway when we fail this request.
+                        let maybe_outstanding = self.outstanding_request.take();
+                        if let Some(request) = maybe_outstanding {
+                            if request.request.message.header.message_id ==
+                                message.header.message_id {
+                                debug!(
+                                    self.log,
+                                    "received incorrect message type, \
+                                    but with message ID that matches our \
+                                    outstanding message ID, failing the \
+                                    request";
+                                    "message" => ?message,
+                                    "peer" => peer,
+                                );
+                                request.response_tx.send(
+                                    Err(Error::Protocol(MessageError::ProtocolError))
+                                ).unwrap();
+                            }
+                        } else {
+                            // We don't have an outstanding request, so we try
+                            // to inform the SP that this message wasn't
+                            // supposed to be sent to us.
+                            debug!(self.log, "wrong message type"; "peer" => peer);
+                            let err = MessageError::ProtocolError;
+                            probes::bad__message!(|| (peer.ip(), format!("{:?}", err)));
+                            self.send_protocol_error(
+                                &peer,
+                                message.header,
+                                message.modules,
+                                err,
+                                &mut tx_buf,
+                            ).await;
+                        }
                     }
 
                     // Check that we have data, if the message is supposed to
