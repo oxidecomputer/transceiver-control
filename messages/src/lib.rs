@@ -37,7 +37,7 @@ pub const PORT: u16 = 11112;
 // NOTE: This isn't a `std::net::Ipv6Addr` to support `no_std` environments.
 pub const ADDR: [u16; 8] = [0xff02, 0, 0, 0, 0, 0, 0x1de, 2];
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, SerializedSize)]
 #[cfg_attr(any(test, feature = "std"), derive(thiserror::Error))]
 pub enum Error {
     /// An attempt to reference an invalid transceiver port on a Sidecar or FPGA.
@@ -73,6 +73,9 @@ pub enum Error {
     /// Reading transceiver status failed for some reason.
     StatusFailed(HwError),
 
+    /// Failed to set power mode
+    PowerModeFailed(HwError),
+
     /// A request would result in a response that is too large to fit in a
     /// single UDP message.
     RequestTooLarge,
@@ -107,8 +110,20 @@ pub enum HwError {
     /// Could not clear the reset pin
     ClearResetFailed,
 
+    /// Failed to clear the power enable mask
+    ClearPowerEnableFailed,
+
+    /// Failed to set the power enable mask
+    SetPowerEnableFailed,
+
+    /// Failed to clear the low power mode mask
+    ClearLpModeFailed,
+
+    /// Failed to set the low power mode mask
+    SetLpModeFailed,
+
     /// Failed to read the `EN` register
-    EnabledReadFailed,
+    EnableReadFailed,
 
     /// Failed to read the `RESET` register
     ResetReadFailed,
@@ -170,7 +185,7 @@ type MaskType = u16;
 /// applies.
 ///
 /// Note that this bitmask is always per-FPGA.
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, SerializedSize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, SerializedSize)]
 pub struct PortMask(pub MaskType);
 
 impl PortMask {
