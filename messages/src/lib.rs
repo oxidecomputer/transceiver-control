@@ -37,7 +37,7 @@ pub const PORT: u16 = 11112;
 // NOTE: This isn't a `std::net::Ipv6Addr` to support `no_std` environments.
 pub const ADDR: [u16; 8] = [0xff02, 0, 0, 0, 0, 0, 0x1de, 2];
 
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, SerializedSize)]
 #[cfg_attr(any(test, feature = "std"), derive(thiserror::Error))]
 pub enum Error {
     /// An attempt to reference an invalid transceiver port on a Sidecar or FPGA.
@@ -62,10 +62,19 @@ pub enum Error {
     InvalidMemoryAccess { offset: u8, len: u8 },
 
     /// A read failed for some reason.
-    ReadFailed,
+    ReadFailed(HwError),
 
     /// A write failed for some reason.
-    WriteFailed,
+    WriteFailed(HwError),
+
+    /// A reset failed for some reason.
+    ResetFailed(HwError),
+
+    /// Reading transceiver status failed for some reason.
+    StatusFailed(HwError),
+
+    /// Failed to set power mode
+    PowerModeFailed(HwError),
 
     /// A request would result in a response that is too large to fit in a
     /// single UDP message.
@@ -78,12 +87,89 @@ pub enum Error {
     /// packet.
     MissingData,
 
+    /// The trailing data is an unexpected size.
+    WrongDataSize,
+
     /// The version in the header is unexpected.
     VersionMismatch { expected: u8, actual: u8 },
 }
 
 #[cfg(any(test, feature = "std"))]
 impl std::fmt::Display for Error {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize, SerializedSize)]
+#[cfg_attr(any(test, feature = "std"), derive(thiserror::Error))]
+pub enum HwError {
+    /// Could not set the reset pin
+    SetResetFailed,
+
+    /// Could not clear the reset pin
+    ClearResetFailed,
+
+    /// Failed to clear the power enable mask
+    ClearPowerEnableFailed,
+
+    /// Failed to set the power enable mask
+    SetPowerEnableFailed,
+
+    /// Failed to clear the low power mode mask
+    ClearLpModeFailed,
+
+    /// Failed to set the low power mode mask
+    SetLpModeFailed,
+
+    /// Failed to read the `EN` register
+    EnableReadFailed,
+
+    /// Failed to read the `RESET` register
+    ResetReadFailed,
+
+    /// Failed to read the `LPMODE` register
+    LpReadFailed,
+
+    /// Failed to read the `PRESENT` register
+    PresentReadFailed,
+
+    /// Failed to read the `IRQ` register
+    IrqReadFailed,
+
+    /// Could not set up the write buffer for a page select
+    PageSelectWriteBufFailed,
+
+    /// The page select write operation failed
+    PageSelectWriteFailed,
+
+    /// Could not set up the write buffer for a bank select
+    BankSelectWriteBufFailed,
+
+    /// The bank select write operation failed
+    BankSelectWriteFailed,
+
+    /// Waiting for the operation to complete failed
+    WaitFailed,
+
+    /// The FPGA reported an I2C error
+    I2cError,
+
+    /// The read setup operation failed
+    ReadSetupFailed,
+
+    /// Reading back the read buffer failed
+    ReadBufFailed,
+
+    /// Loading the write buffer failed
+    WriteBufFailed,
+
+    /// The write setup call failed
+    WriteSetupFailed,
+}
+
+#[cfg(any(test, feature = "std"))]
+impl std::fmt::Display for HwError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "{:?}", self)
     }
@@ -99,7 +185,7 @@ type MaskType = u16;
 /// applies.
 ///
 /// Note that this bitmask is always per-FPGA.
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, SerializedSize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, SerializedSize)]
 pub struct PortMask(pub MaskType);
 
 impl PortMask {

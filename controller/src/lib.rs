@@ -297,7 +297,7 @@ impl Controller {
     // Return a header using the next available message ID.
     fn next_header(&self) -> Header {
         Header {
-            version: message::version::V1,
+            version: message::version::CURRENT,
             message_id: self.message_id.fetch_add(1, Ordering::SeqCst),
         }
     }
@@ -345,7 +345,7 @@ impl Controller {
         // If we get back a ReadFailed error, one possibility is that we asked
         // to read a transceiver that's not present.
         let data = match reply.message.body {
-            MessageBody::SpResponse(SpResponse::Error(MessageError::ReadFailed)) => {
+            MessageBody::SpResponse(SpResponse::Error(MessageError::ReadFailed(..))) => {
                 return Err(Error::ReadFailed);
             }
             MessageBody::SpResponse(SpResponse::Error(e)) => return Err(Error::from(e)),
@@ -657,7 +657,7 @@ impl IoLoop {
                     probes::message__received!(|| (peer.ip(), &message));
 
                     // Sanity check the protocol version.
-                    if message.header.version != message::version::V1 {
+                    if message.header.version != message::version::CURRENT {
                         // If the version does not match, we're choosing to drop
                         // the packet rather than reply with a version mismatch
                         // error. Without a matching version, we can't really
@@ -666,7 +666,7 @@ impl IoLoop {
                         debug!(
                             self.log,
                             "deserialized message with incorrect version";
-                            "expected" => message::version::V1,
+                            "expected" => message::version::CURRENT,
                             "actual" => message.header.version,
                             "peer" => peer,
                         );
@@ -675,7 +675,7 @@ impl IoLoop {
                                 peer.ip(),
                                 format!(
                                     "incorrect version: expected {}, actual {}",
-                                    message::version::V1,
+                                    message::version::CURRENT,
                                     message.header.version,
                                 ),
                             )

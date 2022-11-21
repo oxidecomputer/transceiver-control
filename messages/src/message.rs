@@ -17,6 +17,9 @@ use serde::Serialize;
 
 pub mod version {
     pub const V1: u8 = 1;
+    pub const V2: u8 = 2;
+
+    pub const CURRENT: u8 = V2;
 }
 
 /// A common header to all messages between host and SP.
