@@ -345,7 +345,7 @@ impl Controller {
         // If we get back a ReadFailed error, one possibility is that we asked
         // to read a transceiver that's not present.
         let data = match reply.message.body {
-            MessageBody::SpResponse(SpResponse::Error(MessageError::ReadFailed)) => {
+            MessageBody::SpResponse(SpResponse::Error(MessageError::ReadFailed(..))) => {
                 return Err(Error::ReadFailed);
             }
             MessageBody::SpResponse(SpResponse::Error(e)) => return Err(Error::from(e)),
