@@ -161,11 +161,11 @@ pub enum HwError {
     /// Reading back the read buffer failed
     ReadBufFailed,
 
-    /// The write setup operation failed
-    WriteSetupFailed,
+    /// Loading the write buffer failed
+    WriteBufFailed,
 
-    /// The write operation failed
-    WriteFailed,
+    /// The write setup call failed
+    WriteSetupFailed,
 }
 
 #[cfg(any(test, feature = "std"))]
