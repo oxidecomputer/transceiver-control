@@ -212,6 +212,7 @@ bitflags::bitflags! {
 
 /// An allowed power mode for the module.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
+#[cfg_attr(feature = "std", derive(clap::ValueEnum))]
 pub enum PowerMode {
     /// A module is entirely powered off, using the EFuse.
     Off,
