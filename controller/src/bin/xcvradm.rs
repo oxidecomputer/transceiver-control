@@ -90,6 +90,9 @@ enum Cmd {
     /// enable, and power mode.
     Status,
 
+    /// Reset the addressed modules.
+    Reset,
+
     /// Set the power module of the addressed modules.
     SetPower {
         /// The desired power mode.
@@ -144,6 +147,7 @@ async fn main() {
             let (modules, status) = controller.status(requested_modules).await.unwrap();
             print_module_status(modules, status);
         }
+        Cmd::Reset => controller.reset(requested_modules).await.unwrap(),
         Cmd::ReadLower { offset, len } => {
             let read = MemoryRead::new(sff8636::Page::Lower, offset, len).unwrap();
             let (modules, data) = controller.read(requested_modules, read).await.unwrap();
