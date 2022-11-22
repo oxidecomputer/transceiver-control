@@ -404,6 +404,20 @@ impl Controller {
         Ok((modules, identity.into_iter().map(|(_k, v)| v).collect()))
     }
 
+    /// Reset a set of transceiver modules.
+    pub async fn reset(&self, modules: ModuleId) -> Result<(), Error> {
+        let message = Message {
+            header: self.next_header(),
+            modules,
+            body: MessageBody::HostRequest(HostRequest::Reset),
+        };
+        let request = HostRpcRequest {
+            message,
+            data: None,
+        };
+        self.rpc(request).await.map(|_| ())
+    }
+
     /// Set the power mode for a set of transceiver modules.
     pub async fn set_power_mode(
         &self,
