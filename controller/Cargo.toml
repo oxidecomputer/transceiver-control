@@ -5,6 +5,7 @@ edition = "2021"
 default-run = "xcvradm"
 
 [dependencies]
+anyhow = "1"
 hubpack = "0.1.0"
 serde = "1"
 slog-async = "2"

@@ -7,6 +7,7 @@
 //! Types for working with transceivers conforming to the Common Management
 //! Interface Specification (CMIS) version 5.0.
 
+use crate::mgmt::ManagementInterface;
 use crate::mgmt::MemoryPage;
 use crate::Error;
 use hubpack::SerializedSize;
@@ -109,6 +110,8 @@ const fn page_accepts_bank_number(page: u8) -> bool {
 pub const MAX_BANK: u8 = 0x03;
 
 impl MemoryPage for Page {
+    const INTERFACE: ManagementInterface = ManagementInterface::Cmis;
+
     fn max_offset(&self) -> u8 {
         match self {
             Page::Lower => u8::MAX / 2,

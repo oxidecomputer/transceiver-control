@@ -7,6 +7,7 @@
 //! Types for working with transceivers conforming to the SFF-8636 management
 //! interface specification.
 
+use crate::mgmt::ManagementInterface;
 use crate::mgmt::MemoryPage;
 use crate::Error;
 use hubpack::SerializedSize;
@@ -63,6 +64,8 @@ impl UpperPage {
 }
 
 impl MemoryPage for Page {
+    const INTERFACE: ManagementInterface = ManagementInterface::Sff8636;
+
     fn max_offset(&self) -> u8 {
         match self {
             Page::Lower => u8::MAX / 2,

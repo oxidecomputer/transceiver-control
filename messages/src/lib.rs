@@ -13,6 +13,7 @@ pub mod message;
 pub mod mgmt;
 
 use hubpack::SerializedSize;
+use mgmt::ManagementInterface;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -41,138 +42,233 @@ pub const ADDR: [u16; 8] = [0xff02, 0, 0, 0, 0, 0, 0x1de, 2];
 #[cfg_attr(any(test, feature = "std"), derive(thiserror::Error))]
 pub enum Error {
     /// An attempt to reference an invalid transceiver port on a Sidecar or FPGA.
+    #[cfg_attr(any(test, feature = "std"), error("Invalid transceiver port: {0}"))]
     InvalidPort(u8),
 
     /// An attempt to reference an invalid FPGA on a Sidecar.
+    #[cfg_attr(any(test, feature = "std"), error("Invalid FPGA: {0}"))]
     InvalidFpga(u8),
 
     /// Accessed an invalid upper memory page.
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Invalid upper memory page: 0x{0:02x}")
+    )]
     InvalidPage(u8),
 
     /// Accessed an invalid upper memory bank.
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Invalid upper memory bank: 0x{0:02x}")
+    )]
     InvalidBank(u8),
 
     /// A page does not accept a bank number.
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Page does not accept a bank number: 0x{0:02x}")
+    )]
     PageIsUnbanked(u8),
 
     /// A page requires a bank number.
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Page requires a bank number: 0x{0:02x}")
+    )]
     PageIsBanked(u8),
 
     /// An access to memory outside of the 256-byte memory map.
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error(
+            "Invalid memory access: \
+            offset=0x{offset:02x}, len=0x{len:02x}"
+        )
+    )]
     InvalidMemoryAccess { offset: u8, len: u8 },
 
     /// A read failed for some reason.
+    #[cfg_attr(any(test, feature = "std"), error("Failure during read: {0}"))]
     ReadFailed(HwError),
 
     /// A write failed for some reason.
+    #[cfg_attr(any(test, feature = "std"), error("Failure during write: {0}"))]
     WriteFailed(HwError),
 
     /// A reset failed for some reason.
+    #[cfg_attr(any(test, feature = "std"), error("Failure during reset: {0}"))]
     ResetFailed(HwError),
 
     /// Reading transceiver status failed for some reason.
+    #[cfg_attr(any(test, feature = "std"), error("Failure reading status: {0}"))]
     StatusFailed(HwError),
 
     /// Failed to set power mode
+    #[cfg_attr(any(test, feature = "std"), error("Failure to set power mode: {0}"))]
     PowerModeFailed(HwError),
 
     /// A request would result in a response that is too large to fit in a
     /// single UDP message.
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Request too large for single protocol message")
+    )]
     RequestTooLarge,
 
     /// Someone sent an unexpected message (e.g. the host sending an SpRequest).
+    #[cfg_attr(any(test, feature = "std"), error("Protocol error"))]
     ProtocolError,
 
     /// A message expected trailing data, but none was contained in the UDP
     /// packet.
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Message expects trailing data, but none found")
+    )]
     MissingData,
 
     /// The trailing data is an unexpected size.
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Message trailing data has incorrect size")
+    )]
     WrongDataSize,
 
     /// The version in the header is unexpected.
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Version mismatch: expected={expected}, actual={actual}")
+    )]
     VersionMismatch { expected: u8, actual: u8 },
-}
 
-#[cfg(any(test, feature = "std"))]
-impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
+    /// A write or read is an invalid size for the provided management
+    /// interface.
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error(
+            "Write or read of {size} bytes too \
+            large for management interface {interface:?}"
+        )
+    )]
+    InvalidOperationSize {
+        size: u8,
+        interface: ManagementInterface,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize, SerializedSize)]
 #[cfg_attr(any(test, feature = "std"), derive(thiserror::Error))]
 pub enum HwError {
     /// Could not set the reset pin
+    #[cfg_attr(any(test, feature = "std"), error("Could not set reset pin"))]
     SetResetFailed,
 
     /// Could not clear the reset pin
+    #[cfg_attr(any(test, feature = "std"), error("Could not clear reset pin"))]
     ClearResetFailed,
 
     /// Failed to clear the power enable mask
+    #[cfg_attr(any(test, feature = "std"), error("Failed to clear power enable mask"))]
     ClearPowerEnableFailed,
 
     /// Failed to set the power enable mask
+    #[cfg_attr(any(test, feature = "std"), error("Failed to set power enable mask"))]
     SetPowerEnableFailed,
 
     /// Failed to clear the low power mode mask
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Failed to clear low power mode mask")
+    )]
     ClearLpModeFailed,
 
     /// Failed to set the low power mode mask
+    #[cfg_attr(any(test, feature = "std"), error("Failed to set low power mode mask"))]
     SetLpModeFailed,
 
     /// Failed to read the `EN` register
+    #[cfg_attr(any(test, feature = "std"), error("Failed to read `EN` register"))]
     EnableReadFailed,
 
     /// Failed to read the `RESET` register
+    #[cfg_attr(any(test, feature = "std"), error("Failed to read `RESET` register"))]
     ResetReadFailed,
 
     /// Failed to read the `LPMODE` register
+    #[cfg_attr(any(test, feature = "std"), error("Failed to read `LPMODE` register"))]
     LpReadFailed,
 
     /// Failed to read the `PRESENT` register
+    #[cfg_attr(any(test, feature = "std"), error("Failed to read `PRESENT` register"))]
     PresentReadFailed,
 
     /// Failed to read the `IRQ` register
+    #[cfg_attr(any(test, feature = "std"), error("Failed to read `IRQ` register"))]
     IrqReadFailed,
 
     /// Could not set up the write buffer for a page select
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Could not set up write buffer for page select")
+    )]
     PageSelectWriteBufFailed,
 
     /// The page select write operation failed
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Page select write operation failed")
+    )]
     PageSelectWriteFailed,
 
     /// Could not set up the write buffer for a bank select
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Could not set up write buffer for bank select")
+    )]
     BankSelectWriteBufFailed,
 
     /// The bank select write operation failed
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Bank select write operation failed")
+    )]
     BankSelectWriteFailed,
 
     /// Waiting for the operation to complete failed
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Waiting for the operation to complete failed")
+    )]
     WaitFailed,
 
     /// The FPGA reported an I2C error
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("FPGA reported an I2C error, module may not be present")
+    )]
     I2cError,
 
     /// The read setup operation failed
+    #[cfg_attr(any(test, feature = "std"), error("Read setup operation failed"))]
     ReadSetupFailed,
 
     /// Reading back the read buffer failed
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Reading back the FPGA read buffer failed")
+    )]
     ReadBufFailed,
 
     /// Loading the write buffer failed
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Loading the FPGA write buffer failed")
+    )]
     WriteBufFailed,
 
     /// The write setup call failed
+    #[cfg_attr(any(test, feature = "std"), error("Write setup call failed"))]
     WriteSetupFailed,
-}
-
-#[cfg(any(test, feature = "std"))]
-impl std::fmt::Display for HwError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "{:?}", self)
-    }
 }
 
 // We're currently only expecting to be able to address up to 16 transceivers

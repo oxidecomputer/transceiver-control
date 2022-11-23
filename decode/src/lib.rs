@@ -12,6 +12,7 @@ use std::ops::Range;
 use thiserror::Error;
 use transceiver_messages::mgmt::cmis;
 use transceiver_messages::mgmt::sff8636;
+use transceiver_messages::mgmt::ManagementInterface;
 use transceiver_messages::mgmt::MemoryRead;
 use transceiver_messages::Error as MessageError;
 
@@ -70,6 +71,17 @@ pub enum Identifier {
     Unsupported(u8),
     Reserved(u8),
     VendorSpecific(u8),
+}
+
+impl Identifier {
+    pub const fn management_interface(&self) -> Result<ManagementInterface, Error> {
+        use Identifier::*;
+        match self {
+            QsfpPlusSff8636 | Qsfp28 => Ok(ManagementInterface::Sff8636),
+            QsfpPlusCmis | QsfpDD => Ok(ManagementInterface::Cmis),
+            _ => Err(Error::UnsupportedIdentifier(*self)),
+        }
+    }
 }
 
 impl From<u8> for Identifier {
@@ -436,13 +448,161 @@ impl fmt::Display for DateCode {
     }
 }
 
+/// Description of the memory model of a transceiver memory map.
+///
+/// Modules all include a 256-byte memory map, divided into lower and
+/// upper pages. The upper page is indexed by a page number. If the module
+/// supports only a single upper page (index 0), then the module is referred to
+/// as "flat memory". Otherwise, different upper pages may be swapped in at the
+/// request of the fixed-side device, allowing for much more data than fits in
+/// the fixed 256-byte map.
+#[derive(Clone, Debug, PartialEq)]
+pub enum MemoryModel {
+    /// The memory map is flat (only the lower page and upper page 0).
+    Flat,
+    /// The memory map supports the listed pages.
+    Paged(Vec<u8>),
+}
+
+impl fmt::Display for MemoryModel {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            MemoryModel::Flat => write!(f, "Flat"),
+            MemoryModel::Paged(pages) => write!(
+                f,
+                "Paged [{}]",
+                pages
+                    .into_iter()
+                    .map(|page| format!("0x{page:02x}"))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            ),
+        }
+    }
+}
+
+impl ParseFromModule for MemoryModel {
+    fn reads(id: Identifier) -> Result<Vec<MemoryRead>, Error> {
+        match id {
+            Identifier::QsfpPlusSff8636 | Identifier::Qsfp28 => {
+                // See SFF-8636 rev 2.10a Table 6-2 and Table 6-21.
+                //
+                // The first byte is the status word, bit 2 of which indicates
+                // if flat or paged memory. The second has several bits which
+                // indicate the supported pages.
+                let page = sff8636::Page::Lower;
+                let status = MemoryRead::new(page, 2, 1)?;
+                let page = sff8636::Page::Upper(sff8636::UpperPage::new(0)?);
+                let advertised_pages = MemoryRead::new(page, 195, 1)?;
+                Ok(vec![status, advertised_pages])
+            }
+            Identifier::QsfpPlusCmis | Identifier::QsfpDD => {
+                // See CMIS rev 5.0 Table 8-4.
+                //
+                // We only need to read the single word / bit indicating whether
+                // memory is paged or flat. If it's paged, it is required to
+                // support a fixed set of pages.
+                let page = cmis::Page::Lower;
+                Ok(vec![MemoryRead::new(page, 2, 1)?])
+            }
+            _ => Err(Error::UnsupportedIdentifier(id)),
+        }
+    }
+
+    fn parse<'a>(id: Identifier, mut reads: impl Iterator<Item = &'a [u8]>) -> Result<Self, Error> {
+        match id {
+            Identifier::QsfpPlusSff8636 | Identifier::Qsfp28 => {
+                let status = reads
+                    .next()
+                    .map(|bytes| bytes.first())
+                    .flatten()
+                    .ok_or_else(|| Error::ParseFailed)?;
+                if status & (1 << 2) == 0 {
+                    let advertised_pages = reads
+                        .next()
+                        .map(|bytes| bytes.first())
+                        .flatten()
+                        .ok_or_else(|| Error::ParseFailed)?;
+
+                    // These pages are required. The others are described by
+                    // bits in the `advertised_pages` byte.
+                    let mut pages = vec![0x00, 0x03];
+                    if (advertised_pages & (1 << 7)) != 0 {
+                        pages.push(0x02);
+                    }
+                    if (advertised_pages & (1 << 6)) != 0 {
+                        pages.push(0x01);
+                    }
+                    if (advertised_pages & (1 << 0)) != 0 {
+                        pages.push(0x20);
+                        pages.push(0x21);
+                    }
+                    pages.sort();
+                    Ok(MemoryModel::Paged(pages))
+                } else {
+                    Ok(MemoryModel::Flat)
+                }
+            }
+            Identifier::QsfpPlusCmis | Identifier::QsfpDD => {
+                let status = reads
+                    .next()
+                    .map(|bytes| bytes.first())
+                    .flatten()
+                    .ok_or_else(|| Error::ParseFailed)?;
+                if status & (1 << 7) == 0 {
+                    Ok(MemoryModel::Paged(vec![0x00, 0x01, 0x02, 0x10, 0x11]))
+                } else {
+                    Ok(MemoryModel::Flat)
+                }
+            }
+            _ => Err(Error::UnsupportedIdentifier(id)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::DateCode;
     use super::Identifier;
+    use super::MemoryModel;
     use super::NaiveDate;
     use super::ParseFromModule;
     use super::Vendor;
+
+    #[test]
+    fn test_parse_memory_model_from_module_sff8636() {
+        let id = Identifier::Qsfp28;
+
+        // Paged, supporting pages 0x02, 0x01, and _not_ 0x20-0x21.
+        let status = vec![0b000];
+        let pages = vec![(1 << 7) | (1 << 6)];
+        const EXPECTED_PAGES: &[u8] = &[0x00, 0x01, 0x02, 0x03];
+
+        let parsed =
+            MemoryModel::parse(id, vec![status.as_slice(), pages.as_slice()].into_iter()).unwrap();
+        assert_eq!(parsed, MemoryModel::Paged(EXPECTED_PAGES.to_vec()));
+
+        // Flat
+        let status = vec![0b100];
+        let parsed = MemoryModel::parse(id, std::iter::once(status.as_slice())).unwrap();
+        assert_eq!(parsed, MemoryModel::Flat);
+    }
+
+    #[test]
+    fn test_parse_memory_model_from_module_cmis() {
+        let id = Identifier::QsfpPlusCmis;
+
+        // Paged
+        let status = vec![0];
+        let parsed = MemoryModel::parse(id, std::iter::once(status.as_slice())).unwrap();
+        const EXPECTED_PAGES: &[u8] = &[0x00, 0x01, 0x02, 0x10, 0x11];
+        assert_eq!(parsed, MemoryModel::Paged(EXPECTED_PAGES.to_vec()));
+
+        // Paged
+        let status = vec![1 << 7];
+        let parsed = MemoryModel::parse(id, std::iter::once(status.as_slice())).unwrap();
+        assert_eq!(parsed, MemoryModel::Flat);
+    }
 
     // Assert that `substring` is a prefix of `full`.
     fn assert_prefix(full: &[u8], substring: &str) {

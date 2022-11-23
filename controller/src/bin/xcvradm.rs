@@ -1,7 +1,22 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+// Copyright 2022 Oxide Computer Company
+
+//! Command-line tool to administer optical transceivers.
+
+use anyhow::ensure;
+use anyhow::Context;
+use clap::ArgGroup;
 use clap::Parser;
 use clap::Subcommand;
+use clap::ValueEnum;
 use slog::Drain;
 use slog::Level;
+use std::fs::File;
+use std::io::stdin;
+use std::io::Read;
 use std::net::Ipv6Addr;
 use std::time::Duration;
 use transceiver_controller::Config;
@@ -10,10 +25,13 @@ use transceiver_controller::Error;
 use transceiver_controller::HostRpcResponse;
 use transceiver_controller::SpRpcRequest;
 use transceiver_decode::Identity;
+use transceiver_decode::MemoryModel;
 use transceiver_messages::message::PowerMode;
 use transceiver_messages::message::Status;
+use transceiver_messages::mgmt::cmis;
 use transceiver_messages::mgmt::sff8636;
 use transceiver_messages::mgmt::MemoryRead;
+use transceiver_messages::mgmt::MemoryWrite;
 use transceiver_messages::Error as MessageError;
 use transceiver_messages::ModuleId;
 use transceiver_messages::PortMask;
@@ -84,6 +102,16 @@ struct Args {
     log_level: Level,
 }
 
+#[derive(Clone, Copy, Debug, ValueEnum)]
+enum InputKind {
+    /// Input is raw binary data.
+    Binary,
+    /// Input is decimal text.
+    Decimal,
+    /// Input is hexadecimal text.
+    Hex,
+}
+
 #[derive(Subcommand)]
 enum Cmd {
     /// Return the status of the addressed modules, such as presence, power
@@ -100,15 +128,170 @@ enum Cmd {
         mode: PowerMode,
     },
 
-    /// Read the lower page of a set of transceiver modules.
-    ReadLower { offset: u8, len: u8 },
-
     /// Extract the identity information for a set of modules.
     Identify,
+
+    /// Read the lower page of a set of transceiver modules.
+    #[command(group(ArgGroup::new("interface").required(true).args(["sff", "cmis"])))]
+    ReadLower {
+        /// Interpret the module's memory map as SFF-8636.
+        #[arg(long)]
+        sff: bool,
+
+        /// Interpret the module's memory map as CMIS.
+        #[arg(long)]
+        cmis: bool,
+
+        /// Print the data in binary (hex is the default).
+        #[arg(long)]
+        binary: bool,
+
+        /// The offset to start reading from.
+        offset: u8,
+
+        /// The number of bytes to read.
+        len: u8,
+    },
+
+    /// Write the lower page of a set of transceiver modules.
+    #[command(group(ArgGroup::new("interface").required(true).args(["sff", "cmis"])))]
+    WriteLower {
+        /// Interpret the module's memory map as SFF-8636.
+        #[arg(long)]
+        sff: bool,
+
+        /// Interpret the module's memory map as CMIS.
+        #[arg(long)]
+        cmis: bool,
+
+        /// The input file for data, defaulting to stdin.
+        #[arg(short, long)]
+        input: Option<String>,
+
+        /// How to interpret the input data.
+        #[arg(long, default_value_t = InputKind::Binary, value_enum)]
+        input_kind: InputKind,
+
+        /// The offset to start writing to.
+        offset: u8,
+    },
+
+    /// Read data from an upper memory page.
+    #[command(group(ArgGroup::new("interface").required(true).args(["sff", "cmis"])))]
+    ReadUpper {
+        /// Interpret the module's memory map as SFF-8636.
+        #[arg(long)]
+        sff: bool,
+
+        /// Interpret the module's memory map as CMIS.
+        #[arg(long)]
+        cmis: bool,
+
+        /// Print the data in binary (hex is the default).
+        #[arg(long)]
+        binary: bool,
+
+        /// The upper page to read from.
+        #[arg(short, long, default_value_t = 0)]
+        page: u8,
+
+        /// For CMIS modules, the bank of the upper page to read from.
+        ///
+        /// Note that some pages require a bank and others may not have a bank.
+        /// The validity will be checked at runtime.
+        #[arg(short, long, conflicts_with("sff"))]
+        bank: Option<u8>,
+
+        /// The offset to start reading from.
+        ///
+        /// Note that offsets are always specified as relative to the full
+        /// 256-byte transceiver memory map. E.g., to read starting from the
+        /// first byte of an upper page, the value `128` should be specified.
+        offset: u8,
+
+        /// The number of bytes to read.
+        len: u8,
+    },
+
+    /// Write the upper page of a set of transceiver modules.
+    #[command(group(ArgGroup::new("interface").required(true).args(["sff", "cmis"])))]
+    WriteUpper {
+        /// Interpret the module's memory map as SFF-8636.
+        #[arg(long)]
+        sff: bool,
+
+        /// Interpret the module's memory map as CMIS.
+        #[arg(long)]
+        cmis: bool,
+
+        /// The input file for data, defaulting to stdin.
+        #[arg(short, long)]
+        input: Option<String>,
+
+        /// How to interpret the input data.
+        #[arg(long, default_value_t = InputKind::Binary, value_enum)]
+        input_kind: InputKind,
+
+        /// The upper page to read from.
+        #[arg(short, long, default_value_t = 0)]
+        page: u8,
+
+        /// For CMIS modules, the bank of the upper page to read from.
+        ///
+        /// Note that some pages require a bank and others may not have a bank.
+        /// The validity will be checked at runtime.
+        #[arg(short, long, conflicts_with("sff"))]
+        bank: Option<u8>,
+
+        /// The offset to start writing to.
+        ///
+        /// Note that offsets are always specified as relative to the full
+        /// 256-byte transceiver memory map. E.g., to read starting from the
+        /// first byte of an upper page, the value `128` should be specified.
+        offset: u8,
+    },
+
+    /// Describe the memory model of a set of modules.
+    MemoryModel,
+}
+
+fn load_write_data(file: Option<String>, kind: InputKind) -> anyhow::Result<Vec<u8>> {
+    let mut rdr: Box<dyn Read> = if let Some(path) = file {
+        Box::new(File::open(path)?)
+    } else {
+        Box::new(stdin())
+    };
+
+    const MAX_BYTES: usize = 128;
+    match kind {
+        InputKind::Binary => {
+            let mut data = vec![0; MAX_BYTES];
+            let n_bytes = rdr.read(&mut data)?;
+            data.truncate(n_bytes);
+            Ok(data)
+        }
+        text => {
+            let radix = if matches!(text, InputKind::Decimal) {
+                10
+            } else {
+                16
+            };
+            let conv = |x| u8::from_str_radix(x, radix).map_err(anyhow::Error::from);
+            let mut buf = String::with_capacity(MAX_BYTES * 4);
+            rdr.take(buf.capacity().try_into().unwrap())
+                .read_to_string(&mut buf)?;
+            let data = buf
+                .split_whitespace()
+                .map(conv)
+                .collect::<anyhow::Result<Vec<_>>>()?;
+            ensure!(data.len() <= MAX_BYTES, "Input data too large");
+            Ok(data)
+        }
+    }
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let config = Config {
         address: args.address,
@@ -136,34 +319,165 @@ async fn main() {
         .transceivers
         .map(|ix| PortMask::from_indices(&ix).unwrap())
         .unwrap_or_else(PortMask::all);
-    let requested_modules = ModuleId {
+    let modules = ModuleId {
         fpga_id: args.fpga_id,
         ports,
     };
-    let controller = Controller::new(config, log.clone(), handler).await.unwrap();
+    let controller = Controller::new(config, log.clone(), handler)
+        .await
+        .context("Failed to initialize transceiver controller")?;
 
     match args.cmd {
         Cmd::Status => {
-            let (modules, status) = controller.status(requested_modules).await.unwrap();
+            let status = controller
+                .status(modules)
+                .await
+                .context("Failed to retrieve module status")?;
             print_module_status(modules, status);
         }
-        Cmd::Reset => controller.reset(requested_modules).await.unwrap(),
-        Cmd::ReadLower { offset, len } => {
-            let read = MemoryRead::new(sff8636::Page::Lower, offset, len).unwrap();
-            let (modules, data) = controller.read(requested_modules, read).await.unwrap();
-            print_read_data(modules, data);
-        }
+
+        Cmd::Reset => controller
+            .reset(modules)
+            .await
+            .context("Failed to reset modules")?,
+
         Cmd::SetPower { mode } => {
             controller
-                .set_power_mode(requested_modules, mode)
+                .set_power_mode(modules, mode)
                 .await
-                .unwrap();
+                .context("Failed to set power mode")?;
         }
+
         Cmd::Identify => {
-            let (modules, ids) = controller.identify(requested_modules).await.unwrap();
+            let ids = controller
+                .identify(modules)
+                .await
+                .context("Failed to identify transceiver modules")?;
             print_module_identity(modules, ids);
         }
+
+        Cmd::ReadLower {
+            sff,
+            cmis,
+            binary,
+            offset,
+            len,
+        } => {
+            let read = match (sff, cmis) {
+                (true, false) => MemoryRead::new(sff8636::Page::Lower, offset, len)
+                    .context("Failed to setup lower page memory read")?,
+                (false, true) => MemoryRead::new(cmis::Page::Lower, offset, len)
+                    .context("Failed to setup lower page memory read")?,
+                (_, _) => unreachable!("clap didn't do its job"),
+            };
+            let data = controller
+                .read(modules, read)
+                .await
+                .context("Failed to read transceiver modules")?;
+            print_read_data(modules, data, binary);
+        }
+
+        Cmd::WriteLower {
+            sff,
+            cmis,
+            input,
+            input_kind,
+            offset,
+        } => {
+            let data = load_write_data(input, input_kind).context("Failed to load input data")?;
+            let len = data.len().try_into().context("Input data too long")?;
+            let write = match (sff, cmis) {
+                (true, false) => MemoryWrite::new(sff8636::Page::Lower, offset, len)
+                    .context("Failed to setup lower page memory write")?,
+                (false, true) => MemoryWrite::new(cmis::Page::Lower, offset, len)
+                    .context("Failed to setup lower page memory write")?,
+                (_, _) => unreachable!("clap didn't do its job"),
+            };
+            controller
+                .write(modules, write, &data)
+                .await
+                .context("Failed to write transceiver modules")?;
+        }
+
+        Cmd::ReadUpper {
+            sff,
+            cmis,
+            binary,
+            page,
+            bank,
+            offset,
+            len,
+        } => {
+            let read = match (sff, cmis) {
+                (true, false) => {
+                    let page =
+                        sff8636::UpperPage::new(page).context("Invalid SFF-8636 upper page")?;
+                    MemoryRead::new(sff8636::Page::Upper(page), offset, len)
+                        .context("Failed to setup upper page memory read")?
+                }
+                (false, true) => {
+                    let page = if let Some(bank) = bank {
+                        cmis::UpperPage::new_banked(page, bank)
+                    } else {
+                        cmis::UpperPage::new_unbanked(page)
+                    }
+                    .context("Invalid CMIS upper page")?;
+                    MemoryRead::new(cmis::Page::Upper(page), offset, len)
+                        .context("Failed to setup upper page memory read")?
+                }
+                (_, _) => unreachable!("clap didn't do its job"),
+            };
+            let data = controller
+                .read(modules, read)
+                .await
+                .context("Failed to read transceiver modules")?;
+            print_read_data(modules, data, binary);
+        }
+
+        Cmd::WriteUpper {
+            sff,
+            cmis,
+            input,
+            input_kind,
+            page,
+            bank,
+            offset,
+        } => {
+            let data = load_write_data(input, input_kind).context("Failed to load input data")?;
+            let len = data.len().try_into().context("Input data too long")?;
+            let write = match (sff, cmis) {
+                (true, false) => {
+                    let page =
+                        sff8636::UpperPage::new(page).context("Invalid SFF-8636 upper page")?;
+                    MemoryWrite::new(sff8636::Page::Upper(page), offset, len)
+                        .context("Failed to setup upper page memory write")?
+                }
+                (false, true) => {
+                    let page = if let Some(bank) = bank {
+                        cmis::UpperPage::new_banked(page, bank)
+                    } else {
+                        cmis::UpperPage::new_unbanked(page)
+                    }
+                    .context("Invalid CMIS upper page")?;
+                    MemoryWrite::new(cmis::Page::Upper(page), offset, len)
+                        .context("Failed to setup upper page memory read")?
+                }
+                (_, _) => unreachable!("clap didn't do its job"),
+            };
+            controller
+                .write(modules, write, &data)
+                .await
+                .context("Failed to write transceiver modules")?;
+        }
+        Cmd::MemoryModel => {
+            let layout = controller
+                .memory_model(modules)
+                .await
+                .context("Failed to get memory model")?;
+            print_module_memory_model(modules, layout);
+        }
     }
+    Ok(())
 }
 
 // Column width for printing data below.
@@ -176,19 +490,23 @@ fn print_module_status(modules: ModuleId, status: Vec<Status>) {
     }
 }
 
-fn print_read_data(modules: ModuleId, data: Vec<Vec<u8>>) {
+fn print_read_data(modules: ModuleId, data: Vec<Vec<u8>>, binary: bool) {
     println!("FPGA Port Data");
+    let fmt_data = if binary {
+        |byte| format!("0b{byte:08b}")
+    } else {
+        |byte| format!("0x{byte:02x}")
+    };
     for (port, each) in modules.ports.to_indices().zip(data.into_iter()) {
-        let hex_data = each
-            .into_iter()
-            .map(|byte| format!("0x{byte:02x}"))
-            .collect::<Vec<_>>()
-            .join(",");
-        println!("{:>WIDTH$} {port:>WIDTH$} [{hex_data}]", modules.fpga_id);
+        let formatted_data = each.into_iter().map(fmt_data).collect::<Vec<_>>().join(",");
+        println!(
+            "{:>WIDTH$} {port:>WIDTH$} [{formatted_data}]",
+            modules.fpga_id
+        );
     }
 }
 
-const ID_WIDTH: usize = 16;
+const ID_WIDTH: usize = 20;
 const VENDOR_WIDTH: usize = 16;
 const PART_WIDTH: usize = 16;
 const REV_WIDTH: usize = 4;
@@ -214,4 +532,12 @@ fn print_single_module_identity(fpga_id: u8, port: u8, id: Identity) {
         {:PART_WIDTH$} {:REV_WIDTH$} {:SERIAL_WIDTH$} {:DATE_WIDTH$}",
         ident, id.vendor.name, id.vendor.part, id.vendor.revision, id.vendor.serial, id.vendor.date,
     );
+}
+
+fn print_module_memory_model(modules: ModuleId, models: Vec<MemoryModel>) {
+    println!("FPGA Port Model");
+    let fpga_id = modules.fpga_id;
+    for (port, model) in modules.ports.to_indices().zip(models.into_iter()) {
+        println!("{fpga_id:>WIDTH$} {port:>WIDTH$} {model}");
+    }
 }
