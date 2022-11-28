@@ -2,9 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
+use clap::Parser;
+
 use std::net::{ToSocketAddrs, UdpSocket};
 use std::time::{Duration, Instant};
-use structopt::StructOpt;
 
 use hubpack::SerializedSize;
 use transceiver_messages::{
@@ -13,7 +14,7 @@ use transceiver_messages::{
     ModuleId, PortMask,
 };
 
-#[derive(StructOpt)]
+#[derive(Parser)]
 struct Args {
     #[structopt(long)]
     source: Option<String>,
@@ -28,7 +29,7 @@ struct Args {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let args = Args::from_args();
+    let args = Args::parse();
 
     let dest = args.target.to_socket_addrs()?.collect::<Vec<_>>();
 
