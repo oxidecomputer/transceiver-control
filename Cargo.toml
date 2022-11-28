@@ -2,11 +2,13 @@
 members = [
     "controller",
     "decode",
+    "demo",
     "messages",
 ]
 
 default-members = [
     "controller",
     "decode",
+    "demo",
     "messages",
 ]
