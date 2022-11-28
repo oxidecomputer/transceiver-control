@@ -73,7 +73,7 @@ fn test_read(
         for port in 0..16 {
             let msg = Message {
                 header: Header {
-                    version: 1,
+                    version: version::CURRENT,
                     message_id,
                 },
                 modules: ModuleId {
@@ -92,7 +92,7 @@ fn test_read(
                 if status.contains(Status::RESET) {
                     let msg = Message {
                         header: Header {
-                            version: 1,
+                            version: version::CURRENT,
                             message_id,
                         },
                         modules: ModuleId {
@@ -110,7 +110,7 @@ fn test_read(
                 }
                 let msg = Message {
                     header: Header {
-                        version: 1,
+                        version: version::CURRENT,
                         message_id,
                     },
                     modules: ModuleId {
@@ -139,7 +139,7 @@ fn test_write(
         for port in 0..16 {
             let msg = Message {
                 header: Header {
-                    version: 1,
+                    version: version::CURRENT,
                     message_id,
                 },
                 modules: ModuleId {
@@ -160,7 +160,7 @@ fn test_write(
             if status.contains(Status::RESET) {
                 let msg = Message {
                     header: Header {
-                        version: 1,
+                        version: version::CURRENT,
                         message_id,
                     },
                     modules: ModuleId {
@@ -179,7 +179,7 @@ fn test_write(
 
             let msg = Message {
                 header: Header {
-                    version: 1,
+                    version: version::CURRENT,
                     message_id,
                 },
                 modules: ModuleId {
@@ -189,7 +189,7 @@ fn test_write(
                 body: MessageBody::HostRequest(HostRequest::Read(
                     MemoryRead::new(
                         sff8636::Page::Upper(
-                            sff8636::UpperPage::new(2).unwrap(),
+                            sff8636::UpperPage::new(0).unwrap(),
                         ),
                         128,
                         128,
@@ -205,7 +205,7 @@ fn test_write(
             // Write to page 2, which is a user-writable EEPROM
             let msg = Message {
                 header: Header {
-                    version: 1,
+                    version: version::CURRENT,
                     message_id,
                 },
                 modules: ModuleId {
@@ -215,7 +215,7 @@ fn test_write(
                 body: MessageBody::HostRequest(HostRequest::Write(
                     MemoryWrite::new(
                         sff8636::Page::Upper(
-                            sff8636::UpperPage::new(2).unwrap(),
+                            sff8636::UpperPage::new(0).unwrap(),
                         ),
                         128,
                         4,
