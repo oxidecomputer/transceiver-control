@@ -415,7 +415,12 @@ impl Controller {
             message,
             data: None,
         };
-        self.rpc(request).await.map(|_| ())
+        let response = self.rpc(request).await?;
+        match response.message.body {
+            MessageBody::SpResponse(SpResponse::Ack) => Ok(()),
+            MessageBody::SpResponse(SpResponse::Error(e)) => Err(Error::from(e)),
+            other => Err(Error::UnexpectedMessage(other)),
+        }
     }
 
     /// Set the power mode for a set of transceiver modules.
@@ -429,7 +434,12 @@ impl Controller {
             message,
             data: None,
         };
-        self.rpc(request).await.map(|_| ())
+        let response = self.rpc(request).await?;
+        match response.message.body {
+            MessageBody::SpResponse(SpResponse::Ack) => Ok(()),
+            MessageBody::SpResponse(SpResponse::Error(e)) => Err(Error::from(e)),
+            other => Err(Error::UnexpectedMessage(other)),
+        }
     }
 
     /// Report the status of a set of transceiver modules.
@@ -443,13 +453,17 @@ impl Controller {
             message,
             data: None,
         };
-        let reply = self.rpc(request).await?;
-        Ok(reply
-            .data
-            .expect("Length of data checked earlier")
-            .into_iter()
-            .map(|x| Status::from_bits(x).unwrap())
-            .collect())
+        let response = self.rpc(request).await?;
+        match response.message.body {
+            MessageBody::SpResponse(SpResponse::Status) => Ok(response
+                .data
+                .expect("Length of data checked earlier")
+                .into_iter()
+                .map(|x| Status::from_bits(x).unwrap())
+                .collect()),
+            MessageBody::SpResponse(SpResponse::Error(e)) => Err(Error::from(e)),
+            other => Err(Error::UnexpectedMessage(other)),
+        }
     }
 
     /// Write the memory map of a set of transceiver modules.
@@ -459,7 +473,7 @@ impl Controller {
     ///
     /// `data` is a buffer to be written to each module. Note that it will be
     /// "broadcast" to all addressed modules! The length of `data` must match
-    /// the length of region specified in `write`.
+    /// the length of the region specified in `write`.
     pub async fn write(
         &self,
         modules: ModuleId,
@@ -473,7 +487,6 @@ impl Controller {
 
     // Implementation of the write function, which does not check that the
     // memory pages address by `write` are valid for the addressed modules.
-    // modules
     async fn write_impl(
         &self,
         modules: ModuleId,
@@ -526,10 +539,12 @@ impl Controller {
             message,
             data: None,
         };
-        let reply = self.rpc(request).await?;
-        let data = match reply.message.body {
+        let response = self.rpc(request).await?;
+        let data = match response.message.body {
             MessageBody::SpResponse(SpResponse::Error(e)) => return Err(Error::from(e)),
-            MessageBody::SpResponse(SpResponse::Read(_)) => reply.data.unwrap(),
+            MessageBody::SpResponse(SpResponse::Read(_)) => {
+                response.data.expect("Existence of data checked earlier")
+            }
             other => return Err(Error::UnexpectedMessage(other)),
         };
 
