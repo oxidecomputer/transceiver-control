@@ -69,10 +69,10 @@ mod probes {
 /// An error related to managing the transceivers.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error(transparent)]
+    #[error("Network protocol error")]
     Protocol(#[from] transceiver_messages::Error),
 
-    #[error("Network or I/O error: {0}")]
+    #[error("Network or I/O error")]
     Io(#[from] std::io::Error),
 
     #[error("Message type requires data, but none provided")]
@@ -87,7 +87,7 @@ pub enum Error {
     #[error("Received an unexpected message type in response: {0:?}")]
     UnexpectedMessage(MessageBody),
 
-    #[error("Transceiver memory map decode error: {0}")]
+    #[error("Transceiver memory map decoding error")]
     Decode(#[from] DecodeError),
 
     #[error("Incorrect data length for memory write")]
@@ -492,7 +492,12 @@ impl Controller {
             message,
             data: Some(data.to_vec()),
         };
-        self.rpc(request).await.map(|_| ())
+        let response = self.rpc(request).await?;
+        match response.message.body {
+            MessageBody::SpResponse(SpResponse::Write(_)) => Ok(()),
+            MessageBody::SpResponse(SpResponse::Error(e)) => Err(Error::from(e)),
+            other => Err(Error::UnexpectedMessage(other)),
+        }
     }
 
     /// Read the memory map of a set of transceiver modules.
