@@ -15,7 +15,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 /// The specification to which a transciever's management interface conforms.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, SerializedSize)]
 pub enum ManagementInterface {
     /// SFF-8636, which covers QSFP+ and QSFP28.
     Sff8636,
@@ -85,7 +85,9 @@ pub enum ManagementInterface {
 /// to those known to be valid, usually zero. That means the client _must_ keep
 /// track of which bank and/or page is being accessed, and validate that those
 /// are actually supported by the module prior to operating on them.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
+#[derive(
+    Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize, SerializedSize,
+)]
 pub enum Page {
     Sff8636(sff8636::Page),
     Cmis(cmis::Page),
@@ -117,11 +119,25 @@ impl Page {
             Page::Cmis(inner) => inner.bank(),
         }
     }
+
+    /// Return the management interface the page conforms to.
+    pub const fn management_interface(&self) -> ManagementInterface {
+        match self {
+            Page::Sff8636(_) => ManagementInterface::Sff8636,
+            Page::Cmis(_) => ManagementInterface::Cmis,
+        }
+    }
 }
 
 impl From<sff8636::Page> for Page {
     fn from(p: sff8636::Page) -> Self {
         Self::Sff8636(p)
+    }
+}
+
+impl From<sff8636::UpperPage> for Page {
+    fn from(p: sff8636::UpperPage) -> Self {
+        Self::Sff8636(sff8636::Page::Upper(p))
     }
 }
 
@@ -131,8 +147,14 @@ impl From<cmis::Page> for Page {
     }
 }
 
+impl From<cmis::UpperPage> for Page {
+    fn from(p: cmis::UpperPage) -> Self {
+        Self::Cmis(cmis::Page::Upper(p))
+    }
+}
+
 /// A sized read access to a transceiver memory page.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, SerializedSize)]
 pub struct MemoryRead {
     page: Page,
     offset: u8,
@@ -164,13 +186,14 @@ impl MemoryRead {
     }
 
     /// Return the number of bytes read.
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> u8 {
         self.len
     }
 }
 
 /// A sized read access to a transceiver memory page.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, SerializedSize)]
 pub struct MemoryWrite {
     page: Page,
     offset: u8,
@@ -202,6 +225,7 @@ impl MemoryWrite {
     }
 
     /// Return the number of bytes written.
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> u8 {
         self.len
     }
@@ -209,6 +233,9 @@ impl MemoryWrite {
 
 /// A trait describing the limits of a memory page.
 pub trait MemoryPage: Copy {
+    /// The management interface the page conforms to.
+    const INTERFACE: ManagementInterface;
+
     /// The maximum allowed offset into the memory page.
     fn max_offset(&self) -> u8;
 
@@ -247,15 +274,19 @@ fn verify_read<P>(page: &P, offset: u8, len: u8) -> Result<(), Error>
 where
     P: MemoryPage,
 {
-    if offset >= page.min_offset()
-        && offset <= page.max_offset()
-        && (offset as u16 + len as u16) <= page.upper_limit()
-        && len >= P::MIN_READ_SIZE
-        && len <= P::MAX_READ_SIZE
+    if offset < page.min_offset()
+        || offset > page.max_offset()
+        || (offset as u16 + len as u16) > page.upper_limit()
     {
-        return Ok(());
+        Err(Error::InvalidMemoryAccess { offset, len })
+    } else if len < P::MIN_READ_SIZE || len > P::MAX_READ_SIZE {
+        Err(Error::InvalidOperationSize {
+            size: len,
+            interface: P::INTERFACE,
+        })
+    } else {
+        Ok(())
     }
-    Err(Error::InvalidMemoryAccess { offset, len })
 }
 
 // Helper to check that the limits provided define a valid write.
@@ -263,15 +294,19 @@ fn verify_write<P>(page: &P, offset: u8, len: u8) -> Result<(), Error>
 where
     P: MemoryPage,
 {
-    if offset >= page.min_offset()
-        && offset <= page.max_offset()
-        && (offset as u16 + len as u16) <= page.upper_limit()
-        && len >= P::MIN_WRITE_SIZE
-        && len <= P::MAX_WRITE_SIZE
+    if offset < page.min_offset()
+        || offset > page.max_offset()
+        || (offset as u16 + len as u16) > page.upper_limit()
     {
-        return Ok(());
+        Err(Error::InvalidMemoryAccess { offset, len })
+    } else if len < P::MIN_WRITE_SIZE || len > P::MAX_WRITE_SIZE {
+        Err(Error::InvalidOperationSize {
+            size: len,
+            interface: P::INTERFACE,
+        })
+    } else {
+        Ok(())
     }
-    Err(Error::InvalidMemoryAccess { offset, len })
 }
 
 #[cfg(test)]

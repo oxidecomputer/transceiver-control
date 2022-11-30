@@ -33,6 +33,7 @@ use tokio::time::Interval;
 use transceiver_decode::Error as DecodeError;
 use transceiver_decode::Identifier;
 use transceiver_decode::Identity;
+use transceiver_decode::MemoryModel;
 use transceiver_decode::ParseFromModule;
 use transceiver_decode::Vendor;
 use transceiver_messages::message;
@@ -45,7 +46,10 @@ use transceiver_messages::message::PowerMode;
 use transceiver_messages::message::SpResponse;
 use transceiver_messages::message::Status;
 use transceiver_messages::mgmt::sff8636;
+use transceiver_messages::mgmt::ManagementInterface;
 use transceiver_messages::mgmt::MemoryRead;
+use transceiver_messages::mgmt::MemoryWrite;
+use transceiver_messages::mgmt::Page;
 use transceiver_messages::Error as MessageError;
 use transceiver_messages::ModuleId;
 use transceiver_messages::PortMask;
@@ -55,8 +59,8 @@ use transceiver_messages::PORT;
 
 #[usdt::provider(provider = "xcvr__ctl")]
 mod probes {
-    fn packet__received(peer: IpAddr, n_bytes: usize) {}
-    fn packet__sent(peer: IpAddr, n_bytes: usize) {}
+    fn packet__received(peer: IpAddr, n_bytes: u64, data: *const u8) {}
+    fn packet__sent(peer: IpAddr, n_bytes: u64, data: *const u8) {}
     fn message__received(peer: IpAddr, message: &Message) {}
     fn message__sent(peer: IpAddr, message: &Message) {}
     fn bad__message(peer: IpAddr, reason: &str) {}
@@ -65,10 +69,10 @@ mod probes {
 /// An error related to managing the transceivers.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("Error in transceiver control protocol: {0:?}")]
+    #[error("Network protocol error")]
     Protocol(#[from] transceiver_messages::Error),
 
-    #[error("Network or I/O error: {0}")]
+    #[error("Network or I/O error")]
     Io(#[from] std::io::Error),
 
     #[error("Message type requires data, but none provided")]
@@ -80,17 +84,21 @@ pub enum Error {
     #[error("Maximum number of retries ({0}) reached without a response")]
     MaxRetries(usize),
 
-    #[error(
-        "Read of transceiver module memory failed, \
-        one of the requested transceivers may not be present"
-    )]
-    ReadFailed,
-
     #[error("Received an unexpected message type in response: {0:?}")]
     UnexpectedMessage(MessageBody),
 
-    #[error("Transceiver memory map decode error: {0}")]
+    #[error("Transceiver memory map decoding error")]
     Decode(#[from] DecodeError),
+
+    #[error("Incorrect data length for memory write")]
+    InvalidWriteData,
+
+    #[error(
+        "An addressed module does not use the \
+        management interface for the specified \
+        memory operation ({0:?})"
+    )]
+    InvalidInterfaceForModule(ManagementInterface),
 }
 
 // A request sent from host to SP, possibly with trailing data.
@@ -341,23 +349,18 @@ impl Controller {
     }
 
     // Read the SFF-8024 identifier for some modules.
-    async fn fetch_sff_identifier(
-        &self,
-        modules: ModuleId,
-    ) -> Result<(ModuleId, Vec<Identifier>), Error> {
+    async fn fetch_sff_identifier(&self, modules: ModuleId) -> Result<Vec<Identifier>, Error> {
         let read = MemoryRead::new(sff8636::Page::Lower, 0, 1).unwrap();
-        let (modules, per_module_data) = self.read(modules, read).await?;
-        assert_eq!(modules.selected_transceiver_count(), per_module_data.len());
-        let ids = per_module_data
+        let per_module_data = self.read_impl(modules, read).await?;
+        Ok(per_module_data
             .into_iter()
             .map(|v| Identifier::from(v[0]))
-            .collect();
-        Ok((modules, ids))
+            .collect())
     }
 
     /// Return the identity of a set of modules.
-    pub async fn identify(&self, modules: ModuleId) -> Result<(ModuleId, Vec<Identity>), Error> {
-        let (modules, ids) = self.fetch_sff_identifier(modules).await.unwrap();
+    pub async fn identify(&self, modules: ModuleId) -> Result<Vec<Identity>, Error> {
+        let ids = self.fetch_sff_identifier(modules).await?;
         let modules_by_id = Self::split_modules_by_identifier(modules, &ids);
         let mut identity = BTreeMap::new();
 
@@ -368,18 +371,15 @@ impl Controller {
             let vendor_data = {
                 let mut vendor_data = Vec::with_capacity(reads.len());
                 for read in reads.into_iter() {
-                    // TODO-correctness: Deal with the returned messages
-                    // indicating the set of modules changed during these reads.
-                    let (_, d) = self.read(modules, read).await?;
-                    vendor_data.push(d);
+                    vendor_data.push(self.read(modules, read).await?);
                 }
                 vendor_data
             };
 
             // Parse the vendor data itself for each module.
             //
-            // `vendor_data` is a Vec<Vec<Vec<u8>>> where the are, from outer to
-            // inner:
+            // `vendor_data` is a Vec<Vec<Vec<u8>>> where they are, from outer
+            // to inner:
             //
             // - Each read, defined by `Vendor::reads`.
             // - Each _module_ of the same kind.
@@ -401,7 +401,7 @@ impl Controller {
 
         // Sort by index, so that the returned `Vec<_>` maps to the return value
         // of `modules.ports.to_indices()`.
-        Ok((modules, identity.into_iter().map(|(_k, v)| v).collect()))
+        Ok(identity.into_iter().map(|(_k, v)| v).collect())
     }
 
     /// Reset a set of transceiver modules.
@@ -419,11 +419,7 @@ impl Controller {
     }
 
     /// Set the power mode for a set of transceiver modules.
-    pub async fn set_power_mode(
-        &self,
-        modules: ModuleId,
-        mode: PowerMode,
-    ) -> Result<ModuleId, Error> {
+    pub async fn set_power_mode(&self, modules: ModuleId, mode: PowerMode) -> Result<(), Error> {
         let message = Message {
             header: self.next_header(),
             modules,
@@ -433,11 +429,11 @@ impl Controller {
             message,
             data: None,
         };
-        self.rpc(request).await.map(|resp| resp.message.modules)
+        self.rpc(request).await.map(|_| ())
     }
 
     /// Report the status of a set of transceiver modules.
-    pub async fn status(&self, modules: ModuleId) -> Result<(ModuleId, Vec<Status>), Error> {
+    pub async fn status(&self, modules: ModuleId) -> Result<Vec<Status>, Error> {
         let message = Message {
             header: self.next_header(),
             modules,
@@ -448,15 +444,60 @@ impl Controller {
             data: None,
         };
         let reply = self.rpc(request).await?;
-        Ok((
-            reply.message.modules,
-            reply
-                .data
-                .unwrap()
-                .into_iter()
-                .map(|x| Status::from_bits(x).unwrap())
-                .collect(),
-        ))
+        Ok(reply
+            .data
+            .expect("Length of data checked earlier")
+            .into_iter()
+            .map(|x| Status::from_bits(x).unwrap())
+            .collect())
+    }
+
+    /// Write the memory map of a set of transceiver modules.
+    ///
+    /// `write` contains a description of which memory region to write to,
+    /// including the page, offset, and length. See [`MemoryWrite`] for details.
+    ///
+    /// `data` is a buffer to be written to each module. Note that it will be
+    /// "broadcast" to all addressed modules! The length of `data` must match
+    /// the length of region specified in `write`.
+    pub async fn write(
+        &self,
+        modules: ModuleId,
+        write: MemoryWrite,
+        data: &[u8],
+    ) -> Result<(), Error> {
+        let ids = self.fetch_sff_identifier(modules).await?;
+        verify_ids_for_page(write.page(), &ids)?;
+        self.write_impl(modules, write, data).await
+    }
+
+    // Implementation of the write function, which does not check that the
+    // memory pages address by `write` are valid for the addressed modules.
+    // modules
+    async fn write_impl(
+        &self,
+        modules: ModuleId,
+        write: MemoryWrite,
+        data: &[u8],
+    ) -> Result<(), Error> {
+        if usize::from(write.len()) != data.len() {
+            return Err(Error::InvalidWriteData);
+        }
+        let message = Message {
+            header: self.next_header(),
+            modules,
+            body: MessageBody::HostRequest(HostRequest::Write(write)),
+        };
+        let request = HostRpcRequest {
+            message,
+            data: Some(data.to_vec()),
+        };
+        let response = self.rpc(request).await?;
+        match response.message.body {
+            MessageBody::SpResponse(SpResponse::Write(_)) => Ok(()),
+            MessageBody::SpResponse(SpResponse::Error(e)) => Err(Error::from(e)),
+            other => Err(Error::UnexpectedMessage(other)),
+        }
     }
 
     /// Read the memory map of a set of transceiver modules.
@@ -467,11 +508,15 @@ impl Controller {
     /// Note that the _caller_ is responsible for verifying that the details of
     /// the read are valid, such as that the modules conform to the specified
     /// management interface, and that the page is supported.
-    pub async fn read(
-        &self,
-        modules: ModuleId,
-        read: MemoryRead,
-    ) -> Result<(ModuleId, Vec<Vec<u8>>), Error> {
+    pub async fn read(&self, modules: ModuleId, read: MemoryRead) -> Result<Vec<Vec<u8>>, Error> {
+        let ids = self.fetch_sff_identifier(modules).await?;
+        verify_ids_for_page(read.page(), &ids)?;
+        self.read_impl(modules, read).await
+    }
+
+    // Implementation of the read function, which does not check that the memory
+    // pages addressed by `read` are valid for the addressed modules.
+    async fn read_impl(&self, modules: ModuleId, read: MemoryRead) -> Result<Vec<Vec<u8>>, Error> {
         let message = Message {
             header: self.next_header(),
             modules,
@@ -482,13 +527,7 @@ impl Controller {
             data: None,
         };
         let reply = self.rpc(request).await?;
-
-        // If we get back a ReadFailed error, one possibility is that we asked
-        // to read a transceiver that's not present.
         let data = match reply.message.body {
-            MessageBody::SpResponse(SpResponse::Error(MessageError::ReadFailed(..))) => {
-                return Err(Error::ReadFailed);
-            }
             MessageBody::SpResponse(SpResponse::Error(e)) => return Err(Error::from(e)),
             MessageBody::SpResponse(SpResponse::Read(_)) => reply.data.unwrap(),
             other => return Err(Error::UnexpectedMessage(other)),
@@ -502,7 +541,38 @@ impl Controller {
             .map(Vec::from)
             .collect::<Vec<_>>();
         assert_eq!(data.len(), modules.selected_transceiver_count());
-        Ok((reply.message.modules, data))
+        Ok(data)
+    }
+
+    /// Describe the memory model of a set of modules.
+    pub async fn memory_model(&self, modules: ModuleId) -> Result<Vec<MemoryModel>, Error> {
+        let ids = self.fetch_sff_identifier(modules).await?;
+        let modules_by_id = Self::split_modules_by_identifier(modules, &ids);
+        let mut models = BTreeMap::new();
+
+        // Read data for each _kind_ of module independently.
+        for (id, modules) in modules_by_id.into_iter() {
+            // Issue the reads for each chunk of data for this kind of module.
+            let reads = MemoryModel::reads(id)?;
+            let model_data = {
+                let mut model_data = Vec::with_capacity(reads.len());
+                for read in reads.into_iter() {
+                    model_data.push(self.read(modules, read).await?);
+                }
+                model_data
+            };
+
+            // Parse the memory model for each module.
+            for (i, port) in modules.ports.to_indices().enumerate() {
+                let parse_data = model_data.iter().map(|read| read[i].as_slice());
+                let model = MemoryModel::parse(id, parse_data)?;
+                models.insert(port, model);
+            }
+        }
+
+        // Sort by index, so that the returned `Vec<_>` maps to the return value
+        // of `modules.ports.to_indices()`.
+        Ok(models.into_iter().map(|(_k, v)| v).collect())
     }
 
     // Issue one RPC, possibly retrying, and await the response.
@@ -518,6 +588,27 @@ impl Controller {
             .await
             .unwrap();
         response_rx.await.unwrap()
+    }
+}
+
+fn verify_ids_for_page(page: &Page, ids: &[Identifier]) -> Result<(), Error> {
+    let iface = page.management_interface();
+    let cmp = match iface {
+        ManagementInterface::Sff8636 => {
+            |id| id == &Identifier::Qsfp28 || id == &Identifier::QsfpPlusSff8636
+        }
+        ManagementInterface::Cmis => {
+            |id| id == &Identifier::QsfpDD || id == &Identifier::QsfpPlusCmis
+        }
+        ManagementInterface::Unknown(_) => unimplemented!(
+            "Only SFF-8636 and CMIS management interfaces \
+                are currently implemented"
+        ),
+    };
+    if ids.iter().all(cmp) {
+        Ok(())
+    } else {
+        Err(Error::InvalidInterfaceForModule(iface))
     }
 }
 
@@ -537,6 +628,7 @@ struct IoLoop {
 }
 
 impl IoLoop {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         log: Logger,
         socket: UdpSocket,
@@ -599,7 +691,7 @@ impl IoLoop {
                 );
                 probes::packet__sent!(|| {
                     let peer = IpAddr::V6(*self.peer_addr.ip());
-                    (peer, n_bytes)
+                    (peer, n_bytes as u64, tx_buf.as_ptr())
                 });
                 probes::message__sent!(|| {
                     let peer = IpAddr::V6(*self.peer_addr.ip());
@@ -646,7 +738,7 @@ impl IoLoop {
                 );
                 probes::packet__sent!(|| {
                     let peer = IpAddr::V6(*self.peer_addr.ip());
-                    (peer, n_bytes)
+                    (peer, n_bytes as u64, tx_buf.as_ptr())
                 });
                 probes::message__sent!(|| {
                     let peer = IpAddr::V6(*self.peer_addr.ip());
@@ -760,7 +852,9 @@ impl IoLoop {
                                 "n_bytes" => n_bytes,
                                 "peer" => peer,
                             );
-                            probes::packet__received!(|| (peer.ip(), n_bytes));
+                            probes::packet__received!(|| {
+                                (peer.ip(), n_bytes as u64, rx_buf.as_ptr())
+                            });
                             (n_bytes, peer)
                         }
                     };
@@ -968,4 +1062,24 @@ async fn request_loop<H, F>(
         }
     }
     debug!(log, "request handler channel closed, exiting");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sff8636;
+    use super::verify_ids_for_page;
+    use super::Identifier;
+    use super::Page;
+
+    #[test]
+    fn test_verify_ids_for_page() {
+        let page = Page::Sff8636(sff8636::Page::Lower);
+
+        assert!(
+            verify_ids_for_page(&page, &[Identifier::Qsfp28, Identifier::QsfpPlusSff8636]).is_ok()
+        );
+        assert!(
+            verify_ids_for_page(&page, &[Identifier::QsfpDD, Identifier::QsfpPlusCmis]).is_err()
+        );
+    }
 }
