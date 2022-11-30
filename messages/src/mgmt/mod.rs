@@ -85,7 +85,9 @@ pub enum ManagementInterface {
 /// to those known to be valid, usually zero. That means the client _must_ keep
 /// track of which bank and/or page is being accessed, and validate that those
 /// are actually supported by the module prior to operating on them.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
+#[derive(
+    Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize, SerializedSize,
+)]
 pub enum Page {
     Sff8636(sff8636::Page),
     Cmis(cmis::Page),
@@ -133,9 +135,21 @@ impl From<sff8636::Page> for Page {
     }
 }
 
+impl From<sff8636::UpperPage> for Page {
+    fn from(p: sff8636::UpperPage) -> Self {
+        Self::Sff8636(sff8636::Page::Upper(p))
+    }
+}
+
 impl From<cmis::Page> for Page {
     fn from(p: cmis::Page) -> Self {
         Self::Cmis(p)
+    }
+}
+
+impl From<cmis::UpperPage> for Page {
+    fn from(p: cmis::UpperPage) -> Self {
+        Self::Cmis(cmis::Page::Upper(p))
     }
 }
 

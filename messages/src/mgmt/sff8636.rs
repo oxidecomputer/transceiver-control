@@ -16,7 +16,9 @@ use serde::Serialize;
 
 /// A single memory page for a transcevier conforming to the SFF-8636 management
 /// specification.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
+#[derive(
+    Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize, SerializedSize,
+)]
 pub enum Page {
     Lower,
     Upper(UpperPage),
@@ -32,7 +34,19 @@ impl Page {
 }
 
 /// An upper memory page for an SFF-8636 transceiver module.
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, SerializedSize)]
+#[derive(
+    Clone,
+    Copy,
+    Debug,
+    Default,
+    Eq,
+    Deserialize,
+    Ord,
+    PartialEq,
+    PartialOrd,
+    Serialize,
+    SerializedSize,
+)]
 pub struct UpperPage(u8);
 
 impl UpperPage {
@@ -41,6 +55,8 @@ impl UpperPage {
         page_number,
         // Static module identity and capabilities.
         0x00 |
+        // Deprecated page supporting SFF-8079.
+        0x01 |
         // User read/write space.
         0x02 |
         // Static monitor thresholds, advertising and channel controls.

@@ -14,6 +14,7 @@ use transceiver_messages::mgmt::cmis;
 use transceiver_messages::mgmt::sff8636;
 use transceiver_messages::mgmt::ManagementInterface;
 use transceiver_messages::mgmt::MemoryRead;
+use transceiver_messages::mgmt::Page;
 use transceiver_messages::Error as MessageError;
 
 /// An error related to decoding a transceiver memory map.
@@ -461,7 +462,7 @@ pub enum MemoryModel {
     /// The memory map is flat (only the lower page and upper page 0).
     Flat,
     /// The memory map supports the listed pages.
-    Paged(Vec<u8>),
+    Paged(Vec<Page>),
 }
 
 impl fmt::Display for MemoryModel {
@@ -473,7 +474,21 @@ impl fmt::Display for MemoryModel {
                 "Paged [{}]",
                 pages
                     .into_iter()
-                    .map(|page| format!("0x{page:02x}"))
+                    .map(|page| {
+                        // Safety: This is an upper page, since we only build
+                        // this type by parsing from the below implementation of
+                        // `ParseFromModule`.
+                        let page_index = page.page().unwrap();
+
+                        // Possibly generate a `/{bank_index}` suffix.
+                        let bank_suffix = if let Some(bank) = page.bank() {
+                            format!("/{bank}")
+                        } else {
+                            String::new()
+                        };
+
+                        format!("0x{page_index:02x}{bank_suffix}")
+                    })
                     .collect::<Vec<_>>()
                     .join(",")
             ),
@@ -491,19 +506,37 @@ impl ParseFromModule for MemoryModel {
                 // if flat or paged memory. The second has several bits which
                 // indicate the supported pages.
                 let page = sff8636::Page::Lower;
-                let status = MemoryRead::new(page, 2, 1)?;
-                let page = sff8636::Page::Upper(sff8636::UpperPage::new(0)?);
-                let advertised_pages = MemoryRead::new(page, 195, 1)?;
+                let status = MemoryRead::new(page, 2, 1).unwrap();
+                let page = sff8636::Page::Upper(sff8636::UpperPage::new(0).unwrap());
+                let advertised_pages = MemoryRead::new(page, 195, 1).unwrap();
                 Ok(vec![status, advertised_pages])
             }
             Identifier::QsfpPlusCmis | Identifier::QsfpDD => {
-                // See CMIS rev 5.0 Table 8-4.
+                // See CMIS rev 5.0 Table 8-4 and Table 8-40.
                 //
-                // We only need to read the single word / bit indicating whether
-                // memory is paged or flat. If it's paged, it is required to
-                // support a fixed set of pages.
+                // Byte 2 bit 7 indicates whether memory is flat or paged. If
+                // paged, the module is required to support pages 0x00-0x02 and
+                // 0x10-0x11. Additional supported pages are listed in the bits
+                // of byte 142.
                 let page = cmis::Page::Lower;
-                Ok(vec![MemoryRead::new(page, 2, 1)?])
+                let characteristics = MemoryRead::new(page, 2, 1).unwrap();
+
+                let page = cmis::Page::Upper(cmis::UpperPage::new_unbanked(1).unwrap());
+                let advertised_pages = MemoryRead::new(page, 142, 1).unwrap();
+
+                // TODO-completeness: Read page 0x01 byte 155, where bit 6
+                // indicates support for pages 0x04 and 0x12, laser tunables.
+
+                // TODO-completeness: Read page 0x01 byte 145, where bit 3
+                // indicates support for page 0x15, timing characteristics.
+
+                // TODO-completeness: Byte 142 bit 6 indicates support for VDM,
+                // in pages, 0x20-0x2F. However, only a subset of these pages
+                // may actually be supported. That's described in page 0x2f,
+                // byte 128 bit 1, see CMIS Table 8-128. Implement this read as
+                // well.
+
+                Ok(vec![characteristics, advertised_pages])
             }
             _ => Err(Error::UnsupportedIdentifier(id)),
         }
@@ -526,16 +559,19 @@ impl ParseFromModule for MemoryModel {
 
                     // These pages are required. The others are described by
                     // bits in the `advertised_pages` byte.
-                    let mut pages = vec![0x00, 0x03];
+                    let mut pages = vec![
+                        Page::from(sff8636::UpperPage::new(0x00).unwrap()),
+                        Page::from(sff8636::UpperPage::new(0x03).unwrap()),
+                    ];
                     if (advertised_pages & (1 << 7)) != 0 {
-                        pages.push(0x02);
+                        pages.push(Page::from(sff8636::UpperPage::new(0x02).unwrap()));
                     }
                     if (advertised_pages & (1 << 6)) != 0 {
-                        pages.push(0x01);
+                        pages.push(Page::from(sff8636::UpperPage::new(0x01).unwrap()));
                     }
                     if (advertised_pages & (1 << 0)) != 0 {
-                        pages.push(0x20);
-                        pages.push(0x21);
+                        pages.push(Page::from(sff8636::UpperPage::new(0x20).unwrap()));
+                        pages.push(Page::from(sff8636::UpperPage::new(0x21).unwrap()));
                     }
                     pages.sort();
                     Ok(MemoryModel::Paged(pages))
@@ -550,7 +586,50 @@ impl ParseFromModule for MemoryModel {
                     .flatten()
                     .ok_or_else(|| Error::ParseFailed)?;
                 if status & (1 << 7) == 0 {
-                    Ok(MemoryModel::Paged(vec![0x00, 0x01, 0x02, 0x10, 0x11]))
+                    let advertised_pages = reads
+                        .next()
+                        .map(|bytes| bytes.first())
+                        .flatten()
+                        .ok_or_else(|| Error::ParseFailed)?;
+
+                    // These pages are required, and are not banked.
+                    let mut pages: Vec<_> = [0x00, 0x01, 0x02]
+                        .into_iter()
+                        .map(|page| Page::from(cmis::UpperPage::new_unbanked(page).unwrap()))
+                        .collect();
+
+                    // These pages are also required, but the banks that they
+                    // supprt are described in the advertised_pages byte. We
+                    // construct a single page for each, with the maximum bank
+                    // supported.
+                    let max_bank = match advertised_pages & 0b11 {
+                        0b00 => 0,
+                        0b01 => 1,
+                        0b10 => 3,
+                        _ => unreachable!("Reserved value in the CMIS spec"),
+                    };
+                    for page in [0x10, 0x11] {
+                        pages.push(Page::from(
+                            cmis::UpperPage::new_banked(page, max_bank).unwrap(),
+                        ));
+                    }
+
+                    if (advertised_pages & (1 << 2)) != 0 {
+                        pages.push(Page::from(cmis::UpperPage::new_unbanked(0x03).unwrap()));
+                    }
+
+                    if (advertised_pages & (1 << 5)) != 0 {
+                        for page in [0x13, 0x14] {
+                            pages.push(Page::from(
+                                cmis::UpperPage::new_banked(page, max_bank).unwrap(),
+                            ));
+                        }
+                    }
+
+                    // TODO-completeness: Handle other reads listed above.
+
+                    pages.sort();
+                    Ok(MemoryModel::Paged(pages))
                 } else {
                     Ok(MemoryModel::Flat)
                 }
@@ -580,7 +659,15 @@ mod tests {
 
         let parsed =
             MemoryModel::parse(id, vec![status.as_slice(), pages.as_slice()].into_iter()).unwrap();
-        assert_eq!(parsed, MemoryModel::Paged(EXPECTED_PAGES.to_vec()));
+        match parsed {
+            MemoryModel::Paged(pages) => {
+                assert!(pages
+                    .iter()
+                    .zip(EXPECTED_PAGES.iter())
+                    .all(|(page, expected_page)| page.page() == Some(*expected_page)));
+            }
+            _ => panic!("Expected a paged memory model"),
+        }
 
         // Flat
         let status = vec![0b100];
@@ -594,11 +681,24 @@ mod tests {
 
         // Paged
         let status = vec![0];
-        let parsed = MemoryModel::parse(id, std::iter::once(status.as_slice())).unwrap();
+        let advertised_pages = vec![0b00];
+        let parsed = MemoryModel::parse(
+            id,
+            [status.as_slice(), advertised_pages.as_slice()].into_iter(),
+        )
+        .unwrap();
         const EXPECTED_PAGES: &[u8] = &[0x00, 0x01, 0x02, 0x10, 0x11];
-        assert_eq!(parsed, MemoryModel::Paged(EXPECTED_PAGES.to_vec()));
+        match parsed {
+            MemoryModel::Paged(pages) => {
+                assert!(pages
+                    .iter()
+                    .zip(EXPECTED_PAGES.iter())
+                    .all(|(page, expected_page)| page.page() == Some(*expected_page)));
+            }
+            _ => panic!("Expected a paged memory model"),
+        }
 
-        // Paged
+        // Flat
         let status = vec![1 << 7];
         let parsed = MemoryModel::parse(id, std::iter::once(status.as_slice())).unwrap();
         assert_eq!(parsed, MemoryModel::Flat);

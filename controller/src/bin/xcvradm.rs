@@ -252,6 +252,12 @@ enum Cmd {
     },
 
     /// Describe the memory model of a set of modules.
+    ///
+    /// If a module supports paged memory, the list of pages is printed. For
+    /// modules which support banked pages (CMIS only), the maximum supported
+    /// bank is also printed following each banked page. For example, `0x10/1`
+    /// indicates that page `0x10` is supported, and the module implements banks
+    /// 0 and 1 (16 lanes).
     MemoryModel,
 }
 
