@@ -18,6 +18,7 @@ use std::fs::File;
 use std::io::stdin;
 use std::io::Read;
 use std::net::Ipv6Addr;
+use std::path::PathBuf;
 use std::time::Duration;
 use transceiver_controller::Config;
 use transceiver_controller::Controller;
@@ -166,7 +167,7 @@ enum Cmd {
 
         /// The input file for data, defaulting to stdin.
         #[arg(short, long)]
-        input: Option<String>,
+        input: Option<PathBuf>,
 
         /// How to interpret the input data.
         #[arg(long, default_value_t = InputKind::Binary, value_enum)]
@@ -226,7 +227,7 @@ enum Cmd {
 
         /// The input file for data, defaulting to stdin.
         #[arg(short, long)]
-        input: Option<String>,
+        input: Option<PathBuf>,
 
         /// How to interpret the input data.
         #[arg(long, default_value_t = InputKind::Binary, value_enum)]
@@ -261,7 +262,7 @@ enum Cmd {
     MemoryModel,
 }
 
-fn load_write_data(file: Option<String>, kind: InputKind) -> anyhow::Result<Vec<u8>> {
+fn load_write_data(file: Option<PathBuf>, kind: InputKind) -> anyhow::Result<Vec<u8>> {
     let mut rdr: Box<dyn Read> = if let Some(path) = file {
         Box::new(File::open(path)?)
     } else {
@@ -545,5 +546,43 @@ fn print_module_memory_model(modules: ModuleId, models: Vec<MemoryModel>) {
     let fpga_id = modules.fpga_id;
     for (port, model) in modules.ports.to_indices().zip(models.into_iter()) {
         println!("{fpga_id:>WIDTH$} {port:>WIDTH$} {model}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::load_write_data;
+    use super::InputKind;
+    use std::io::Write;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_load_write_data_binary() {
+        let mut f = NamedTempFile::new().unwrap();
+        f.write(&[1, 2, 3]).unwrap();
+        assert_eq!(
+            load_write_data(Some(f.path().to_path_buf()), InputKind::Binary).unwrap(),
+            vec![1, 2, 3]
+        );
+    }
+
+    #[test]
+    fn test_load_write_data_hex() {
+        let mut f = NamedTempFile::new().unwrap();
+        write!(f, "aa bb cc").unwrap();
+        assert_eq!(
+            load_write_data(Some(f.path().to_path_buf()), InputKind::Hex).unwrap(),
+            vec![0xaa, 0xbb, 0xcc]
+        );
+    }
+
+    #[test]
+    fn test_load_write_data_decimal() {
+        let mut f = NamedTempFile::new().unwrap();
+        write!(f, "10 20 30").unwrap();
+        assert_eq!(
+            load_write_data(Some(f.path().to_path_buf()), InputKind::Decimal).unwrap(),
+            vec![10, 20, 30]
+        );
     }
 }
