@@ -396,7 +396,7 @@ fn ascii_to_string(buf: &[u8]) -> String {
 }
 
 /// An SFF-8636 or CMIS date code.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DateCode {
     pub date: NaiveDate,
     pub lot: Option<String>,
@@ -457,7 +457,7 @@ impl fmt::Display for DateCode {
 /// as "flat memory". Otherwise, different upper pages may be swapped in at the
 /// request of the fixed-side device, allowing for much more data than fits in
 /// the fixed 256-byte map.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MemoryModel {
     /// The memory map is flat (only the lower page and upper page 0).
     Flat,
@@ -473,7 +473,7 @@ impl fmt::Display for MemoryModel {
                 f,
                 "Paged [{}]",
                 pages
-                    .into_iter()
+                    .iter()
                     .map(|page| {
                         // Safety: This is an upper page, since we only build
                         // this type by parsing from the below implementation of
@@ -547,15 +547,13 @@ impl ParseFromModule for MemoryModel {
             Identifier::QsfpPlusSff8636 | Identifier::Qsfp28 => {
                 let status = reads
                     .next()
-                    .map(|bytes| bytes.first())
-                    .flatten()
-                    .ok_or_else(|| Error::ParseFailed)?;
+                    .and_then(|bytes| bytes.first())
+                    .ok_or(Error::ParseFailed)?;
                 if status & (1 << 2) == 0 {
                     let advertised_pages = reads
                         .next()
-                        .map(|bytes| bytes.first())
-                        .flatten()
-                        .ok_or_else(|| Error::ParseFailed)?;
+                        .and_then(|bytes| bytes.first())
+                        .ok_or(Error::ParseFailed)?;
 
                     // These pages are required. The others are described by
                     // bits in the `advertised_pages` byte.
@@ -582,15 +580,13 @@ impl ParseFromModule for MemoryModel {
             Identifier::QsfpPlusCmis | Identifier::QsfpDD => {
                 let status = reads
                     .next()
-                    .map(|bytes| bytes.first())
-                    .flatten()
-                    .ok_or_else(|| Error::ParseFailed)?;
+                    .and_then(|bytes| bytes.first())
+                    .ok_or(Error::ParseFailed)?;
                 if status & (1 << 7) == 0 {
                     let advertised_pages = reads
                         .next()
-                        .map(|bytes| bytes.first())
-                        .flatten()
-                        .ok_or_else(|| Error::ParseFailed)?;
+                        .and_then(|bytes| bytes.first())
+                        .ok_or(Error::ParseFailed)?;
 
                     // These pages are required, and are not banked.
                     let mut pages: Vec<_> = [0x00, 0x01, 0x02]

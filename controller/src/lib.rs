@@ -628,6 +628,7 @@ struct IoLoop {
 }
 
 impl IoLoop {
+    #[allow(clippy::too_many_arguments)]
     fn new(
         log: Logger,
         socket: UdpSocket,

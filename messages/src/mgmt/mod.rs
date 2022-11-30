@@ -154,7 +154,7 @@ impl From<cmis::UpperPage> for Page {
 }
 
 /// A sized read access to a transceiver memory page.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, SerializedSize)]
 pub struct MemoryRead {
     page: Page,
     offset: u8,
@@ -186,13 +186,14 @@ impl MemoryRead {
     }
 
     /// Return the number of bytes read.
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> u8 {
         self.len
     }
 }
 
 /// A sized read access to a transceiver memory page.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, SerializedSize)]
 pub struct MemoryWrite {
     page: Page,
     offset: u8,
@@ -224,6 +225,7 @@ impl MemoryWrite {
     }
 
     /// Return the number of bytes written.
+    #[allow(clippy::len_without_is_empty)]
     pub fn len(&self) -> u8 {
         self.len
     }

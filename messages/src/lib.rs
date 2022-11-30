@@ -360,7 +360,7 @@ impl PortMask {
 }
 
 /// Identifier for a set of transceiver modules accessed through a single FPGA.
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Serialize, SerializedSize)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, SerializedSize)]
 pub struct ModuleId {
     pub fpga_id: u8,
     pub ports: PortMask,

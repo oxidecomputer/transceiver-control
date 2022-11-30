@@ -23,7 +23,7 @@ pub mod version {
 }
 
 /// A common header to all messages between host and SP.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, SerializedSize)]
 pub struct Header {
     /// The protocol version.
     pub version: u8,
@@ -37,7 +37,7 @@ pub struct Header {
 /// modules on a Sidecar. For messages which contain variable length data, such
 /// as a [`HostRequest::Write`] or [`SpResponse::Read`], the data is contained
 /// in the UDP packet, following the `Message` itself.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, SerializedSize)]
 pub struct Message {
     pub header: Header,
     pub modules: ModuleId,
@@ -58,7 +58,7 @@ impl Message {
 }
 
 /// The body of a message between host and SP.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, SerializedSize)]
 pub enum MessageBody {
     /// A request from host to SP.
     ///
@@ -82,7 +82,7 @@ pub enum MessageBody {
 }
 
 /// A request from the host to the SP.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, SerializedSize)]
 pub enum HostRequest {
     /// Request to read a region of the transceiver's memory map.
     Read(MemoryRead),
@@ -124,7 +124,7 @@ pub enum HostRequest {
 }
 
 /// A response to a host request, sent from SP to host.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, SerializedSize)]
 pub enum SpResponse {
     /// The request failed.
     Error(Error),
@@ -159,13 +159,13 @@ pub enum SpResponse {
 /// A request from the SP to the host.
 //
 // TODO-implement
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, SerializedSize)]
 pub enum SpRequest {}
 
 /// A response to a SP request, sent from host to SP.
 //
 // TODO-implement
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, SerializedSize)]
 pub enum HostResponse {
     /// The request failed.
     Error(Error),
@@ -211,7 +211,7 @@ bitflags::bitflags! {
 }
 
 /// An allowed power mode for the module.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq, Serialize, SerializedSize)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, SerializedSize)]
 #[cfg_attr(feature = "std", derive(clap::ValueEnum))]
 pub enum PowerMode {
     /// A module is entirely powered off, using the EFuse.
