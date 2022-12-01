@@ -16,7 +16,6 @@ use slog::info;
 use slog::warn;
 use slog::Logger;
 use std::collections::BTreeMap;
-use std::future::Future;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
@@ -209,16 +208,27 @@ impl Drop for Controller {
     }
 }
 
+/// A trait for handling requests from the SP.
+#[async_trait::async_trait]
+pub trait RequestHandler: Send + Sync + 'static {
+    /// Handle a single SP request, generating a response for it.
+    ///
+    /// This lets us implement request handling within types that can maintain
+    /// some state. Note that this will be called from a separate Tokio task,
+    /// and so takes the receiver as `&self`. You'll need to use interior
+    /// mutability if a request requires mutation of any state.
+    async fn handle_request(&self, request: SpRpcRequest) -> Result<HostRpcResponse, Error>;
+}
+
 impl Controller {
     /// Create a new transceiver controller.
     ///
-    /// `request_handler` is a function that yields responses to SP requests. As
+    /// `request_handler` is a type that generates responses to SP requests. As
     /// requests over the network are received, they'll be passed into the
     /// handler, and the yielded response forwarded back to the SP.
-    pub async fn new<H, F>(config: Config, log: Logger, request_handler: H) -> Result<Self, Error>
+    pub async fn new<H>(config: Config, log: Logger, request_handler: H) -> Result<Self, Error>
     where
-        H: Fn(SpRpcRequest) -> F + Send + Sync + 'static,
-        F: Future<Output = Result<HostRpcResponse, Error>> + Send,
+        H: RequestHandler,
     {
         if let Err(e) = usdt::register_probes() {
             warn!(log, "failed to register DTrace probes"; "reason" => ?e);
@@ -1060,18 +1070,17 @@ impl IoLoop {
     }
 }
 
-async fn request_loop<H, F>(
+async fn request_loop<H>(
     log: Logger,
     mut incoming_request_rx: mpsc::Receiver<SpRpcRequest>,
     outgoing_response_tx: mpsc::Sender<HostRpcResponse>,
     request_handler: H,
 ) where
-    H: Fn(SpRpcRequest) -> F + Send + Sync + 'static,
-    F: Future<Output = Result<HostRpcResponse, Error>> + Send,
+    H: RequestHandler,
 {
     while let Some(incoming_request) = incoming_request_rx.recv().await {
         info!(log, "Incoming request {incoming_request:?}");
-        match request_handler(incoming_request).await {
+        match request_handler.handle_request(incoming_request).await {
             Ok(response) => outgoing_response_tx.send(response).await.unwrap(),
             Err(e) => error!(log, "request handler failed: {e:?}"),
         }
