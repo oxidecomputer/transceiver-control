@@ -209,19 +209,19 @@ bitflags::bitflags! {
         const INTERRUPT             = 0b0001_0000;
 
         /// This module's power supply has come up successfully.
-        /// 
+        ///
         /// Note that this is not part of the QSFP specification, but provided
         /// by the Sidecar board design itself.
         const POWER_GOOD            = 0b0010_0000;
 
         /// This module's power supply has not come up after being enabled.
-        /// 
+        ///
         /// Note that this is not part of the QSFP specification, but provided
         /// by the Sidecar board design itself.
         const FAULT_POWER_TIMEOUT   = 0b0100_0000;
 
         /// This module unexpectedly lost power.
-        /// 
+        ///
         /// Note that this is not part of the QSFP specification, but provided
         /// by the Sidecar board design itself.
         const FAULT_POWER_LOST      = 0b1000_0000;

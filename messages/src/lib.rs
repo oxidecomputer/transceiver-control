@@ -160,19 +160,31 @@ pub enum Error {
 #[cfg_attr(any(test, feature = "std"), derive(thiserror::Error))]
 pub enum HwError {
     /// Failed to write to the `STATUS_PORT` register
-    #[cfg_attr(any(test, feature = "std"), error("Failed to write `STATUS_PORT` register"))]
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Failed to write `STATUS_PORT` register")
+    )]
     StatusPortWriteFailed,
 
     /// Failed to read the `STATUS_PORT` register
-    #[cfg_attr(any(test, feature = "std"), error("Failed to read `STATUS_PORT` register"))]
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Failed to read `STATUS_PORT` register")
+    )]
     StatusPortReadFailed,
 
     /// Failed to write to the `CONTROL_PORT` register
-    #[cfg_attr(any(test, feature = "std"), error("Failed to write `CONTROL_PORT` register"))]
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Failed to write `CONTROL_PORT` register")
+    )]
     ControlPortWriteFailed,
 
     /// Failed to read the `CONTROL_PORT` register
-    #[cfg_attr(any(test, feature = "std"), error("Failed to read `CONTROL_PORT` register"))]
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Failed to read `CONTROL_PORT` register")
+    )]
     ControlPortReadFailed,
 
     /// Failed to read the `EN` register
@@ -200,7 +212,10 @@ pub enum HwError {
     PgReadFailed,
 
     /// Failed to read the `PG_TIMEOUT` register
-    #[cfg_attr(any(test, feature = "std"), error("Failed to read `PG_TIMEOUT` register"))]
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Failed to read `PG_TIMEOUT` register")
+    )]
     PgTimeoutReadFailed,
 
     /// Failed to read the `PgLost` register
