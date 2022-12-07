@@ -12,7 +12,7 @@ use std::ops::Range;
 use thiserror::Error;
 use transceiver_messages::mgmt::cmis;
 use transceiver_messages::mgmt::sff8636;
-use transceiver_messages::mgmt::ManagementInterface;
+pub use transceiver_messages::mgmt::ManagementInterface;
 use transceiver_messages::mgmt::MemoryRead;
 use transceiver_messages::mgmt::Page;
 use transceiver_messages::Error as MessageError;
@@ -402,8 +402,26 @@ pub struct DateCode {
     pub lot: Option<String>,
 }
 
-impl From<&[u8]> for DateCode {
-    fn from(buf: &[u8]) -> Self {
+impl DateCode {
+    /// Serialize self into the SFF-8636 date code format.
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let mut buf = vec![0; 8];
+
+        let date = self.date.format("%y%m%d").to_string();
+        buf[..date.len()].copy_from_slice(date.as_bytes());
+        if let Some(lot) = &self.lot {
+            buf[6..].copy_from_slice(&lot.as_bytes()[..2]);
+        }
+        buf
+    }
+}
+
+impl<T> From<T> for DateCode
+where
+    T: AsRef<[u8]>,
+{
+    fn from(buf: T) -> Self {
+        let buf = buf.as_ref();
         assert!(buf.len() >= 8);
 
         // The date code is specified in SFF-8636 section 6.2.36 or CMIS
@@ -794,5 +812,16 @@ mod tests {
                 lot: Some(String::from("00")),
             }
         );
+    }
+
+    #[test]
+    fn test_date_code_to_bytes() {
+        let expected = DateCode {
+            date: NaiveDate::from_ymd_opt(2022, 02, 02).unwrap(),
+            lot: Some(String::from("ab")),
+        };
+        let bytes = expected.to_bytes();
+        let deser = DateCode::from(bytes);
+        assert_eq!(expected, deser);
     }
 }

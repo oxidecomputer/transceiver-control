@@ -16,7 +16,6 @@ use slog::info;
 use slog::warn;
 use slog::Logger;
 use std::collections::BTreeMap;
-use std::future::Future;
 use std::net::IpAddr;
 use std::net::Ipv6Addr;
 use std::net::SocketAddr;
@@ -42,17 +41,18 @@ use transceiver_messages::message::HostRequest;
 use transceiver_messages::message::HostResponse;
 use transceiver_messages::message::Message;
 use transceiver_messages::message::MessageBody;
-use transceiver_messages::message::PowerMode;
+pub use transceiver_messages::message::PowerMode;
 use transceiver_messages::message::SpResponse;
-use transceiver_messages::message::Status;
+pub use transceiver_messages::message::Status;
+pub use transceiver_messages::mgmt;
 use transceiver_messages::mgmt::sff8636;
 use transceiver_messages::mgmt::ManagementInterface;
 use transceiver_messages::mgmt::MemoryRead;
 use transceiver_messages::mgmt::MemoryWrite;
 use transceiver_messages::mgmt::Page;
-use transceiver_messages::Error as MessageError;
-use transceiver_messages::ModuleId;
-use transceiver_messages::PortMask;
+pub use transceiver_messages::Error as MessageError;
+pub use transceiver_messages::ModuleId;
+pub use transceiver_messages::PortMask;
 use transceiver_messages::ADDR;
 use transceiver_messages::MAX_PAYLOAD_SIZE;
 use transceiver_messages::PORT;
@@ -78,7 +78,7 @@ pub enum Error {
     #[error("Message type requires data, but none provided")]
     MessageRequiresData,
 
-    #[error("Could not find requested interface")]
+    #[error("Interface not found or lacks IPv6 link-local address")]
     BadInterface(String),
 
     #[error("Maximum number of retries ({0}) reached without a response")]
@@ -148,11 +148,13 @@ const NUM_OUTSTANDING_REQUESTS: usize = 1;
 const RESEND_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_PACKET_SIZE: usize = MAX_PAYLOAD_SIZE + Message::MAX_SIZE;
 
-const fn default_retry_interval() -> Duration {
+/// Return the default retry interval for resending messages.
+pub const fn default_retry_interval() -> Duration {
     RESEND_INTERVAL
 }
 
-fn default_peer_addr() -> Ipv6Addr {
+/// Return the default address of the peer.
+pub fn default_peer_addr() -> Ipv6Addr {
     Ipv6Addr::from(ADDR)
 }
 
@@ -178,6 +180,56 @@ pub struct Config {
     /// The number of retries for a message before failing.
     #[serde(default)]
     pub n_retries: Option<usize>,
+}
+
+// Return `true` if this is a link-local IPv6 address, i.e., in `fe80::/64`.
+fn is_link_local(ip: Ipv6Addr) -> bool {
+    &ip.segments()[..4] == &[0xfe80, 0, 0, 0]
+}
+
+// Yield the IPv6 address of the interface, if its name matches `name` and it
+// has a link-local IPv6 address.
+fn find_valid_address(name: &str, iface: nix::ifaddrs::InterfaceAddress) -> Option<Ipv6Addr> {
+    if name == iface.interface_name {
+        let ip6 = iface
+            .address
+            .map(|s| s.as_sockaddr_in6().map(|x| x.ip()))
+            .flatten()?;
+        if is_link_local(ip6) {
+            Some(ip6)
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
+impl Config {
+    /// Convenience function that uses sensible defaults.
+    ///
+    /// This creates a `Config` on the provide IP interface, using the first
+    /// link-local IPv6 address on that interface. If none is found, and error
+    /// is returned.
+    ///
+    /// It also uses the default retry interval, never times out, and the
+    /// default peer address.
+    pub fn from_interface(interface: &str) -> Result<Self, Error> {
+        let interfaces = nix::ifaddrs::getifaddrs()
+            .map_err(|_| Error::BadInterface(interface.to_string()))?
+            .into_iter();
+        let address = interfaces
+            .filter_map(|iface| find_valid_address(interface, iface))
+            .next()
+            .ok_or_else(|| Error::BadInterface(interface.to_string()))?;
+        Ok(Self {
+            address,
+            interface: interface.to_string(),
+            peer: default_peer_addr(),
+            retry_interval: default_retry_interval(),
+            n_retries: None,
+        })
+    }
 }
 
 /// A type for controlling transceiver modules on a Sidecar.
@@ -209,16 +261,45 @@ impl Drop for Controller {
     }
 }
 
+/// A trait for handling requests from the SP.
+#[async_trait::async_trait]
+pub trait RequestHandler: Send + Sync + 'static {
+    /// Handle a single SP request, generating a response for it.
+    ///
+    /// This lets us implement request handling within types that can maintain
+    /// some state. Note that this will be called from a separate Tokio task,
+    /// and so takes the receiver as `&self`. You'll need to use interior
+    /// mutability if a request requires mutation of any state.
+    async fn handle_request(&self, request: SpRpcRequest) -> Result<HostRpcResponse, Error>;
+}
+
+/// A no-op request handler that just logs requests and responds with a version
+/// mismatch error.
+#[derive(Clone, Debug)]
+pub struct LoggingRequestHandler {
+    pub log: Logger,
+}
+
+#[async_trait::async_trait]
+impl RequestHandler for LoggingRequestHandler {
+    async fn handle_request(&self, request: SpRpcRequest) -> Result<HostRpcResponse, Error> {
+        info!(self.log, "received request"; "request" => ?request);
+        Err(Error::Protocol(MessageError::VersionMismatch {
+            expected: request.message.header.version + 1,
+            actual: request.message.header.version,
+        }))
+    }
+}
+
 impl Controller {
     /// Create a new transceiver controller.
     ///
-    /// `request_handler` is a function that yields responses to SP requests. As
+    /// `request_handler` is a type that generates responses to SP requests. As
     /// requests over the network are received, they'll be passed into the
     /// handler, and the yielded response forwarded back to the SP.
-    pub async fn new<H, F>(config: Config, log: Logger, request_handler: H) -> Result<Self, Error>
+    pub async fn new<H>(config: Config, log: Logger, request_handler: H) -> Result<Self, Error>
     where
-        H: Fn(SpRpcRequest) -> F + Send + Sync + 'static,
-        F: Future<Output = Result<HostRpcResponse, Error>> + Send,
+        H: RequestHandler,
     {
         if let Err(e) = usdt::register_probes() {
             warn!(log, "failed to register DTrace probes"; "reason" => ?e);
@@ -1060,18 +1141,17 @@ impl IoLoop {
     }
 }
 
-async fn request_loop<H, F>(
+async fn request_loop<H>(
     log: Logger,
     mut incoming_request_rx: mpsc::Receiver<SpRpcRequest>,
     outgoing_response_tx: mpsc::Sender<HostRpcResponse>,
     request_handler: H,
 ) where
-    H: Fn(SpRpcRequest) -> F + Send + Sync + 'static,
-    F: Future<Output = Result<HostRpcResponse, Error>> + Send,
+    H: RequestHandler,
 {
     while let Some(incoming_request) = incoming_request_rx.recv().await {
         info!(log, "Incoming request {incoming_request:?}");
-        match request_handler(incoming_request).await {
+        match request_handler.handle_request(incoming_request).await {
             Ok(response) => outgoing_response_tx.send(response).await.unwrap(),
             Err(e) => error!(log, "request handler failed: {e:?}"),
         }

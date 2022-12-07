@@ -37,8 +37,22 @@ use transceiver_messages::Error as MessageError;
 use transceiver_messages::ModuleId;
 use transceiver_messages::PortMask;
 
-async fn request_handler(_: SpRpcRequest) -> Result<HostRpcResponse, Error> {
-    Err(Error::Protocol(MessageError::ProtocolError))
+// Handler for SP requests which only logs them and returns an error.
+#[derive(Debug)]
+struct DummyHandler {
+    log: slog::Logger,
+}
+
+#[async_trait::async_trait]
+impl transceiver_controller::RequestHandler for DummyHandler {
+    async fn handle_request(&self, request: SpRpcRequest) -> Result<HostRpcResponse, Error> {
+        slog::debug!(
+            self.log,
+            "Received SP request, ignoring";
+            "request" => ?request
+        );
+        Err(Error::Protocol(MessageError::ProtocolError))
+    }
 }
 
 fn parse_log_level(s: &str) -> Result<Level, String> {
@@ -316,10 +330,8 @@ async fn main() -> anyhow::Result<()> {
     let drain = slog::LevelFilter::new(drain, args.log_level).fuse();
     let log = slog::Logger::root(drain, slog::o!());
 
-    let request_handler_log = log.new(slog::o!("name" => "request_handler"));
-    let handler = move |message| {
-        slog::info!(request_handler_log, "received sp request"; "message" => ?message);
-        async move { request_handler(message).await }
+    let h = DummyHandler {
+        log: log.new(slog::o!("name" => "request_handler")),
     };
 
     let ports = args
@@ -330,7 +342,7 @@ async fn main() -> anyhow::Result<()> {
         fpga_id: args.fpga_id,
         ports,
     };
-    let controller = Controller::new(config, log.clone(), handler)
+    let controller = Controller::new(config, log.clone(), h)
         .await
         .context("Failed to initialize transceiver controller")?;
 
