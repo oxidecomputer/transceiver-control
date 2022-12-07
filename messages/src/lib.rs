@@ -374,7 +374,7 @@ impl ModuleId {
 
     /// Convenience method to build a `ModuleId` that selects all transceivers
     /// on the given FPGA.
-    pub const fn all_transceivers(&self, fpga_id: u8) -> Self {
+    pub const fn all_transceivers(fpga_id: u8) -> Self {
         Self {
             fpga_id,
             ports: PortMask::all(),

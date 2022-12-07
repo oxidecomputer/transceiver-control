@@ -10,6 +10,7 @@ hubpack = "0.1.0"
 [dependencies.clap]
 version = "4"
 default-features = false
+features =  [ "std", "derive" ]
 optional = true
 
 [dependencies.serde]
