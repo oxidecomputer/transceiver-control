@@ -159,32 +159,33 @@ pub enum Error {
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize, SerializedSize)]
 #[cfg_attr(any(test, feature = "std"), derive(thiserror::Error))]
 pub enum HwError {
-    /// Could not set the reset pin
-    #[cfg_attr(any(test, feature = "std"), error("Could not set reset pin"))]
-    SetResetFailed,
-
-    /// Could not clear the reset pin
-    #[cfg_attr(any(test, feature = "std"), error("Could not clear reset pin"))]
-    ClearResetFailed,
-
-    /// Failed to clear the power enable mask
-    #[cfg_attr(any(test, feature = "std"), error("Failed to clear power enable mask"))]
-    ClearPowerEnableFailed,
-
-    /// Failed to set the power enable mask
-    #[cfg_attr(any(test, feature = "std"), error("Failed to set power enable mask"))]
-    SetPowerEnableFailed,
-
-    /// Failed to clear the low power mode mask
+    /// Failed to write to the `STATUS_PORT` register
     #[cfg_attr(
         any(test, feature = "std"),
-        error("Failed to clear low power mode mask")
+        error("Failed to write `STATUS_PORT` register")
     )]
-    ClearLpModeFailed,
+    StatusPortWriteFailed,
 
-    /// Failed to set the low power mode mask
-    #[cfg_attr(any(test, feature = "std"), error("Failed to set low power mode mask"))]
-    SetLpModeFailed,
+    /// Failed to read the `STATUS_PORT` register
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Failed to read `STATUS_PORT` register")
+    )]
+    StatusPortReadFailed,
+
+    /// Failed to write to the `CONTROL_PORT` register
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Failed to write `CONTROL_PORT` register")
+    )]
+    ControlPortWriteFailed,
+
+    /// Failed to read the `CONTROL_PORT` register
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Failed to read `CONTROL_PORT` register")
+    )]
+    ControlPortReadFailed,
 
     /// Failed to read the `EN` register
     #[cfg_attr(any(test, feature = "std"), error("Failed to read `EN` register"))]
@@ -205,6 +206,21 @@ pub enum HwError {
     /// Failed to read the `IRQ` register
     #[cfg_attr(any(test, feature = "std"), error("Failed to read `IRQ` register"))]
     IrqReadFailed,
+
+    /// Failed to read the `PG` register
+    #[cfg_attr(any(test, feature = "std"), error("Failed to read `PG` register"))]
+    PgReadFailed,
+
+    /// Failed to read the `PG_TIMEOUT` register
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Failed to read `PG_TIMEOUT` register")
+    )]
+    PgTimeoutReadFailed,
+
+    /// Failed to read the `PgLost` register
+    #[cfg_attr(any(test, feature = "std"), error("Failed to read `PgLost` register"))]
+    PgLostReadFailed,
 
     /// Could not set up the write buffer for a page select
     #[cfg_attr(

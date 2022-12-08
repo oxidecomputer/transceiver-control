@@ -18,8 +18,9 @@ use serde::Serialize;
 pub mod version {
     pub const V1: u8 = 1;
     pub const V2: u8 = 2;
+    pub const V3: u8 = 3;
 
-    pub const CURRENT: u8 = V2;
+    pub const CURRENT: u8 = V3;
 }
 
 /// A common header to all messages between host and SP.
@@ -179,25 +180,25 @@ bitflags::bitflags! {
         ///
         /// This translates to the `ModPrsL` pin in SFF-8679 rev 1.8 section
         /// 5.3.4.
-        const PRESENT           = 0b0000_0001;
+        const PRESENT               = 0b0000_0001;
 
         /// The module's power is enabled.
         ///
         /// Note that this is not part of the QSFP specification, but provided
         /// by the Sidecar board design itself.
-        const ENABLED           = 0b0000_0010;
+        const ENABLED               = 0b0000_0010;
 
         /// The module is held in reset.
         ///
         /// This translates to the `ResetL` pin in SFF-8679 rev 1.8 section
         /// 5.3.2.
-        const RESET             = 0b0000_0100;
+        const RESET                 = 0b0000_0100;
 
         /// The module is held in low-power mode.
         ///
         /// This translates to the `ResetL` pin in SFF-8679 rev 1.8 section
         /// 5.3.3.
-        const LOW_POWER_MODE    = 0b0000_1000;
+        const LOW_POWER_MODE        = 0b0000_1000;
 
         /// At least one interrupt is signaled on the module. The details of the
         /// interrupt cause can be queried by reading various bytes of the QSFP
@@ -206,7 +207,25 @@ bitflags::bitflags! {
         ///
         /// This translates to the `IntL` pin in SFF-8679 rev 1.8 section
         /// 5.3.5.
-        const INTERRUPT         = 0b0001_0000;
+        const INTERRUPT             = 0b0001_0000;
+
+        /// This module's power supply has come up successfully.
+        ///
+        /// Note that this is not part of the QSFP specification, but provided
+        /// by the Sidecar board design itself.
+        const POWER_GOOD            = 0b0010_0000;
+
+        /// This module's power supply has not come up after being enabled.
+        ///
+        /// Note that this is not part of the QSFP specification, but provided
+        /// by the Sidecar board design itself.
+        const FAULT_POWER_TIMEOUT   = 0b0100_0000;
+
+        /// This module unexpectedly lost power.
+        ///
+        /// Note that this is not part of the QSFP specification, but provided
+        /// by the Sidecar board design itself.
+        const FAULT_POWER_LOST      = 0b1000_0000;
     }
 }
 
