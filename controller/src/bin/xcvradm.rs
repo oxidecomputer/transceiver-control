@@ -25,8 +25,9 @@ use transceiver_controller::Controller;
 use transceiver_controller::Error;
 use transceiver_controller::HostRpcResponse;
 use transceiver_controller::SpRpcRequest;
-use transceiver_decode::Identity;
+use transceiver_decode::Identifier;
 use transceiver_decode::MemoryModel;
+use transceiver_decode::VendorInfo;
 use transceiver_messages::message::PowerMode;
 use transceiver_messages::message::Status;
 use transceiver_messages::mgmt::cmis;
@@ -143,8 +144,11 @@ enum Cmd {
         mode: PowerMode,
     },
 
-    /// Extract the identity information for a set of modules.
+    /// Read the SFF-8024 identifier for a set of modules.
     Identify,
+
+    /// Read the vendor information for a set of modules.
+    VendorInfo,
 
     /// Read the lower page of a set of transceiver modules.
     #[command(group(ArgGroup::new("interface").required(true).args(["sff", "cmis"])))]
@@ -369,10 +373,18 @@ async fn main() -> anyhow::Result<()> {
 
         Cmd::Identify => {
             let ids = controller
-                .identify(modules)
+                .identifier(modules)
                 .await
                 .context("Failed to identify transceiver modules")?;
-            print_module_identity(modules, ids);
+            print_module_identifier(modules, ids);
+        }
+
+        Cmd::VendorInfo => {
+            let info = controller
+                .vendor_info(modules)
+                .await
+                .context("Failed to fetch vendor information for transceiver modules")?;
+            print_vendor_info(modules, info);
         }
 
         Cmd::ReadLower {
@@ -525,31 +537,50 @@ fn print_read_data(modules: ModuleId, data: Vec<Vec<u8>>, binary: bool) {
     }
 }
 
-const ID_WIDTH: usize = 20;
+const ID_BYTE_WIDTH: usize = 5;
+const ID_DEBUG_WIDTH: usize = 20;
 const VENDOR_WIDTH: usize = 16;
 const PART_WIDTH: usize = 16;
 const REV_WIDTH: usize = 4;
 const SERIAL_WIDTH: usize = 16;
 const DATE_WIDTH: usize = 20;
 
-fn print_module_identity(modules: ModuleId, ids: Vec<Identity>) {
+fn print_module_identifier(modules: ModuleId, ids: Vec<Identifier>) {
+    println!("FPGA Port Ident Description");
+    let fpga_id = modules.fpga_id;
+    for (port, id) in modules.ports.to_indices().zip(ids.into_iter()) {
+        let ident = format!("0x{:02x}", u8::from(id));
+        println!("{fpga_id:>WIDTH$} {port:>WIDTH$} {ident:ID_BYTE_WIDTH$} {id}");
+    }
+}
+
+fn print_vendor_info(modules: ModuleId, info: Vec<VendorInfo>) {
     println!(
-        "FPGA Port {:ID_WIDTH$} {:VENDOR_WIDTH$} {:PART_WIDTH$} \
+        "FPGA Port {:ID_DEBUG_WIDTH$} {:VENDOR_WIDTH$} {:PART_WIDTH$} \
         {:REV_WIDTH$} {:SERIAL_WIDTH$} {:DATE_WIDTH$}",
         "Identifier", "Vendor", "Part", "Rev", "Serial", "Mfg date"
     );
     let fpga_id = modules.fpga_id;
-    for (port, id) in modules.ports.to_indices().zip(ids.into_iter()) {
-        print_single_module_identity(fpga_id, port, id);
+    for (port, inf) in modules.ports.to_indices().zip(info.into_iter()) {
+        print_single_module_vendor_info(fpga_id, port, inf);
     }
 }
 
-fn print_single_module_identity(fpga_id: u8, port: u8, id: Identity) {
-    let ident = format!("{:?} (0x{:02x})", id.identifier, u8::from(id.identifier));
+fn print_single_module_vendor_info(fpga_id: u8, port: u8, info: VendorInfo) {
+    let ident = format!(
+        "{:?} (0x{:02x})",
+        info.identifier,
+        u8::from(info.identifier)
+    );
     println!(
-        "{fpga_id:>WIDTH$} {port:>WIDTH$} {:ID_WIDTH$} {:VENDOR_WIDTH$} \
+        "{fpga_id:>WIDTH$} {port:>WIDTH$} {:ID_DEBUG_WIDTH$} {:VENDOR_WIDTH$} \
         {:PART_WIDTH$} {:REV_WIDTH$} {:SERIAL_WIDTH$} {:DATE_WIDTH$}",
-        ident, id.vendor.name, id.vendor.part, id.vendor.revision, id.vendor.serial, id.vendor.date,
+        ident,
+        info.vendor.name,
+        info.vendor.part,
+        info.vendor.revision,
+        info.vendor.serial,
+        info.vendor.date,
     );
 }
 

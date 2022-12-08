@@ -213,9 +213,9 @@ impl core::fmt::Display for Identifier {
     }
 }
 
-/// The identifying information for a transceiver module.
+/// The vendor information for a transceiver module.
 #[derive(Clone, Debug)]
-pub struct Identity {
+pub struct VendorInfo {
     /// The SFF-8024 identifier.
     pub identifier: Identifier,
     /// The vendor information.
