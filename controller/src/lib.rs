@@ -184,7 +184,7 @@ pub struct Config {
 
 // Return `true` if this is a link-local IPv6 address, i.e., in `fe80::/64`.
 fn is_link_local(ip: Ipv6Addr) -> bool {
-    &ip.segments()[..4] == &[0xfe80, 0, 0, 0]
+    ip.segments()[..4] == [0xfe80, 0, 0, 0]
 }
 
 // Yield the IPv6 address of the interface, if its name matches `name` and it
@@ -193,8 +193,7 @@ fn find_valid_address(name: &str, iface: nix::ifaddrs::InterfaceAddress) -> Opti
     if name == iface.interface_name {
         let ip6 = iface
             .address
-            .map(|s| s.as_sockaddr_in6().map(|x| x.ip()))
-            .flatten()?;
+            .and_then(|s| s.as_sockaddr_in6().map(|x| x.ip()))?;
         if is_link_local(ip6) {
             Some(ip6)
         } else {
@@ -215,9 +214,8 @@ impl Config {
     /// It also uses the default retry interval, never times out, and the
     /// default peer address.
     pub fn from_interface(interface: &str) -> Result<Self, Error> {
-        let interfaces = nix::ifaddrs::getifaddrs()
-            .map_err(|_| Error::BadInterface(interface.to_string()))?
-            .into_iter();
+        let interfaces =
+            nix::ifaddrs::getifaddrs().map_err(|_| Error::BadInterface(interface.to_string()))?;
         let address = interfaces
             .filter_map(|iface| find_valid_address(interface, iface))
             .next()
@@ -683,7 +681,9 @@ impl Controller {
             .send(outstanding_request)
             .await
             .unwrap();
-        response_rx.await.unwrap()
+        response_rx
+            .await
+            .expect("failed to recv response on channel")
     }
 }
 
@@ -1119,7 +1119,7 @@ impl IoLoop {
 
                         // We have a valid response!
                         let response = SpRpcResponse { message, data };
-                        request.response_tx.send(Ok(response)).unwrap();
+                        request.response_tx.send(Ok(response)).expect("failed to send response on channel");
                     } else {
                         // We have no outstanding request.
                         //

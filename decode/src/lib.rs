@@ -392,7 +392,16 @@ impl ParseFromModule for Vendor {
 }
 
 fn ascii_to_string(buf: &[u8]) -> String {
-    std::str::from_utf8(buf).unwrap().trim_end().to_string()
+    match std::str::from_utf8(buf) {
+        Ok(s) => s.trim_end().to_string(),
+        Err(e) => {
+            let (valid, _) = buf.split_at(e.valid_up_to());
+            std::str::from_utf8(valid)
+                .expect("utf8 checked right above")
+                .trim_end()
+                .to_string()
+        }
+    }
 }
 
 /// An SFF-8636 or CMIS date code.
@@ -431,13 +440,20 @@ where
         // - Two digits for the month number.
         // - Two digits for the day number.
         // - An optional 2-digit lot code.
+        const BAD: &str = "01";
         let year = std::str::from_utf8(&buf[..2])
-            .unwrap()
+            .unwrap_or(BAD)
             .parse::<i32>()
             .unwrap()
             + 2000;
-        let month: u32 = std::str::from_utf8(&buf[2..4]).unwrap().parse().unwrap();
-        let day: u32 = std::str::from_utf8(&buf[4..6]).unwrap().parse().unwrap();
+        let month: u32 = std::str::from_utf8(&buf[2..4])
+            .unwrap_or(BAD)
+            .parse()
+            .unwrap();
+        let day: u32 = std::str::from_utf8(&buf[4..6])
+            .unwrap_or(BAD)
+            .parse()
+            .unwrap();
         let lot = std::str::from_utf8(&buf[6..])
             .map(|x| {
                 let x = x.trim_end();
@@ -450,7 +466,7 @@ where
             .unwrap_or(None);
 
         DateCode {
-            date: NaiveDate::from_ymd_opt(year, month, day).unwrap(),
+            date: NaiveDate::from_ymd_opt(year, month, day).expect("bad date code"),
             lot,
         }
     }
