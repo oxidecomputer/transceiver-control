@@ -31,10 +31,10 @@ use tokio::time::interval;
 use tokio::time::Interval;
 use transceiver_decode::Error as DecodeError;
 use transceiver_decode::Identifier;
-use transceiver_decode::Identity;
 use transceiver_decode::MemoryModel;
 use transceiver_decode::ParseFromModule;
 use transceiver_decode::Vendor;
+use transceiver_decode::VendorInfo;
 use transceiver_messages::message;
 use transceiver_messages::message::Header;
 use transceiver_messages::message::HostRequest;
@@ -427,8 +427,8 @@ impl Controller {
         out
     }
 
-    // Read the SFF-8024 identifier for some modules.
-    async fn fetch_sff_identifier(&self, modules: ModuleId) -> Result<Vec<Identifier>, Error> {
+    /// Return the SFF-8024 identifier for a set of modules.
+    pub async fn identifier(&self, modules: ModuleId) -> Result<Vec<Identifier>, Error> {
         let read = MemoryRead::new(sff8636::Page::Lower, 0, 1).unwrap();
         let per_module_data = self.read_impl(modules, read).await?;
         Ok(per_module_data
@@ -437,9 +437,9 @@ impl Controller {
             .collect())
     }
 
-    /// Return the identity of a set of modules.
-    pub async fn identify(&self, modules: ModuleId) -> Result<Vec<Identity>, Error> {
-        let ids = self.fetch_sff_identifier(modules).await?;
+    /// Return the vendor information of a set of modules.
+    pub async fn vendor_info(&self, modules: ModuleId) -> Result<Vec<VendorInfo>, Error> {
+        let ids = self.identifier(modules).await?;
         let modules_by_id = Self::split_modules_by_identifier(modules, &ids);
         let mut identity = BTreeMap::new();
 
@@ -470,7 +470,7 @@ impl Controller {
             for (i, port) in modules.ports.to_indices().enumerate() {
                 let parse_data = vendor_data.iter().map(|read| read[i].as_slice());
                 let vendor = Vendor::parse(id, parse_data)?;
-                let ident = Identity {
+                let ident = VendorInfo {
                     identifier: id,
                     vendor,
                 };
@@ -559,7 +559,7 @@ impl Controller {
         write: MemoryWrite,
         data: &[u8],
     ) -> Result<(), Error> {
-        let ids = self.fetch_sff_identifier(modules).await?;
+        let ids = self.identifier(modules).await?;
         verify_ids_for_page(write.page(), &ids)?;
         self.write_impl(modules, write, data).await
     }
@@ -601,7 +601,7 @@ impl Controller {
     /// the read are valid, such as that the modules conform to the specified
     /// management interface, and that the page is supported.
     pub async fn read(&self, modules: ModuleId, read: MemoryRead) -> Result<Vec<Vec<u8>>, Error> {
-        let ids = self.fetch_sff_identifier(modules).await?;
+        let ids = self.identifier(modules).await?;
         verify_ids_for_page(read.page(), &ids)?;
         self.read_impl(modules, read).await
     }
@@ -640,7 +640,7 @@ impl Controller {
 
     /// Describe the memory model of a set of modules.
     pub async fn memory_model(&self, modules: ModuleId) -> Result<Vec<MemoryModel>, Error> {
-        let ids = self.fetch_sff_identifier(modules).await?;
+        let ids = self.identifier(modules).await?;
         let modules_by_id = Self::split_modules_by_identifier(modules, &ids);
         let mut models = BTreeMap::new();
 
