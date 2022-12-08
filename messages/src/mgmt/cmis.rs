@@ -115,8 +115,10 @@ const fn is_valid_page(page: u8) -> bool {
     )
 }
 
-// See CMIS 5.0 rev 4.0 Figure 8-1 for details.
-const fn page_accepts_bank_number(page: u8) -> bool {
+/// Return `true` if the provided CMIS page number may accept a bank number.
+///
+/// See CMIS 5.0 rev 4.0 Figure 8-1 for details.
+pub const fn page_accepts_bank_number(page: u8) -> bool {
     matches!(page, 0x10..=0x3F | 0x9F | 0xA0..=0xAF)
 }
 

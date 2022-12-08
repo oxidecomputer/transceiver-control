@@ -889,7 +889,7 @@ impl IoLoop {
                             return;
                         }
                     };
-                    debug!(self.log, "received outgoing request: {request:?}");
+                    debug!(self.log, "received outgoing request"; "request" => ?request);
 
                     // Store the outstanding request, sanity-checking that we really
                     // didn't have a prior one.
