@@ -78,7 +78,7 @@ pub enum Error {
     #[error("Message type requires data, but none provided")]
     MessageRequiresData,
 
-    #[error("Interface not found or lacks IPv6 link-local address")]
+    #[error("Interface not found or lacks correct IPv6 link-local address")]
     BadInterface(String),
 
     #[error("Maximum number of retries ({0}) reached without a response")]
@@ -189,7 +189,7 @@ fn is_link_local(ip: Ipv6Addr) -> bool {
 
 // Yield the IPv6 address of the interface, if its name matches `name` and it
 // has a link-local IPv6 address.
-fn find_valid_address(name: &str, iface: nix::ifaddrs::InterfaceAddress) -> Option<Ipv6Addr> {
+fn first_valid_address(name: &str, iface: nix::ifaddrs::InterfaceAddress) -> Option<Ipv6Addr> {
     if name == iface.interface_name {
         let ip6 = iface
             .address
@@ -204,28 +204,97 @@ fn find_valid_address(name: &str, iface: nix::ifaddrs::InterfaceAddress) -> Opti
     }
 }
 
-impl Config {
-    /// Convenience function that uses sensible defaults.
-    ///
-    /// This creates a `Config` on the provide IP interface, using the first
-    /// link-local IPv6 address on that interface. If none is found, and error
-    /// is returned.
-    ///
-    /// It also uses the default retry interval, never times out, and the
-    /// default peer address.
-    pub fn from_interface(interface: &str) -> Result<Self, Error> {
-        let interfaces =
-            nix::ifaddrs::getifaddrs().map_err(|_| Error::BadInterface(interface.to_string()))?;
-        let address = interfaces
-            .filter_map(|iface| find_valid_address(interface, iface))
-            .next()
-            .ok_or_else(|| Error::BadInterface(interface.to_string()))?;
-        Ok(Self {
+// Return true if the provide address is valid for the given interface.
+fn is_valid_address(name: &str, addr: &Ipv6Addr) -> bool {
+    let Ok(mut interfaces) = nix::ifaddrs::getifaddrs() else {
+        return false;
+    };
+    interfaces
+        .find_map(|iface| {
+            if iface.interface_name == name {
+                iface
+                    .address
+                    .and_then(|s| s.as_sockaddr_in6().map(|x| &x.ip() == addr))
+            } else {
+                None
+            }
+        })
+        .unwrap_or(false)
+}
+
+/// Return the first IPv6 link-local address on an interface.
+///
+/// If no such interface or address exists, an `Err` is returned.
+pub fn find_interface_link_local_addr(name: &str) -> Result<Ipv6Addr, Error> {
+    let mut interfaces =
+        nix::ifaddrs::getifaddrs().map_err(|_| Error::BadInterface(name.to_string()))?;
+    interfaces
+        .find_map(|iface| first_valid_address(name, iface))
+        .ok_or_else(|| Error::BadInterface(name.to_string()))
+}
+
+/// A builder interface for generating controller configuration.
+#[derive(Debug, Default)]
+pub struct ConfigBuilder {
+    interface: String,
+    address: Option<Ipv6Addr>,
+    peer: Option<Ipv6Addr>,
+    retry_interval: Option<Duration>,
+    n_retries: Option<usize>,
+}
+
+impl ConfigBuilder {
+    /// Create a new builder using a specific IP interface.
+    pub fn new(interface: impl AsRef<str>) -> Self {
+        Self {
+            interface: String::from(interface.as_ref()),
+            ..Default::default()
+        }
+    }
+
+    /// Set the IPv6 address used for the controller.
+    pub fn address(mut self, address: impl Into<Ipv6Addr>) -> Self {
+        self.address = Some(address.into());
+        self
+    }
+
+    /// Set the address of the peer the controller communicates with.
+    pub fn peer(mut self, peer: impl Into<Ipv6Addr>) -> Self {
+        self.peer = Some(peer.into());
+        self
+    }
+
+    /// Set the interval after which an outgoing request is retried, if no
+    /// response is received.
+    pub fn retry_interval(mut self, interval: Duration) -> Self {
+        self.retry_interval = Some(interval);
+        self
+    }
+
+    /// Set the total number of times a message is retried before failing.
+    pub fn n_retries(mut self, retries: usize) -> Self {
+        self.n_retries = Some(retries);
+        self
+    }
+
+    /// Build a `Config` from `self`.
+    pub fn build(self) -> Result<Config, Error> {
+        let address = match self.address {
+            None => find_interface_link_local_addr(&self.interface)?,
+            Some(a) => {
+                if is_valid_address(&self.interface, &a) {
+                    a
+                } else {
+                    return Err(Error::BadInterface(self.interface));
+                }
+            }
+        };
+        Ok(Config {
+            interface: self.interface,
             address,
-            interface: interface.to_string(),
-            peer: default_peer_addr(),
-            retry_interval: default_retry_interval(),
-            n_retries: None,
+            peer: self.peer.unwrap_or_else(default_peer_addr),
+            retry_interval: self.retry_interval.unwrap_or_else(default_retry_interval),
+            n_retries: self.n_retries,
         })
     }
 }
@@ -1161,10 +1230,13 @@ async fn request_loop<H>(
 
 #[cfg(test)]
 mod tests {
+    use super::is_link_local;
     use super::sff8636;
     use super::verify_ids_for_page;
+    use super::ConfigBuilder;
     use super::Identifier;
     use super::Page;
+    use std::net::Ipv6Addr;
 
     #[test]
     fn test_verify_ids_for_page() {
@@ -1176,5 +1248,34 @@ mod tests {
         assert!(
             verify_ids_for_page(&page, &[Identifier::QsfpDD, Identifier::QsfpPlusCmis]).is_err()
         );
+    }
+
+    #[test]
+    fn test_config_builder() {
+        assert!(ConfigBuilder::new("badif").build().is_err());
+        assert!(ConfigBuilder::new("lo0").build().is_err());
+
+        // Check if the system has a link-local, ensure we can create a config
+        // for it.
+        if let Some((ifname, address)) = nix::ifaddrs::getifaddrs()
+            .expect("could not get IP interfaces")
+            .find_map(|iface| {
+                if let Some(addr) = iface.address {
+                    if let Some(ipv6) = addr.as_sockaddr_in6() {
+                        let ip = ipv6.ip();
+                        if is_link_local(ip) {
+                            return Some((iface.interface_name, ip));
+                        }
+                    }
+                }
+                None
+            })
+        {
+            assert!(ConfigBuilder::new(&ifname).address(address).build().is_ok());
+            assert!(ConfigBuilder::new(&ifname)
+                .address(Ipv6Addr::UNSPECIFIED)
+                .build()
+                .is_err());
+        }
     }
 }
