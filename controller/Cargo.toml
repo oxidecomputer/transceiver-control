@@ -6,7 +6,6 @@ default-run = "xcvradm"
 
 [dependencies]
 anyhow = "1"
-async-trait = "0.1"
 hubpack = "0.1.0"
 serde = "1"
 slog-async = "2"

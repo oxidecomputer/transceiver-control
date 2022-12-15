@@ -142,6 +142,27 @@ struct OutstandingHostRequest {
     response_tx: oneshot::Sender<Result<SpRpcResponse, Error>>,
 }
 
+/// A type for communicating requests from the SP to the host and submitting the
+/// responses.
+///
+/// When the `Controller` receives a request from the SP, the message will be
+/// placed on the `request_channel` channel provided at construction. The
+/// host-side task responsible for processing those requests will receive an
+/// `SpRequest` object; generate a response, if needed; and submit that back on
+/// the `response_tx` field of this type. The `Controller` will await that
+/// response on the receiving end of `response_tx`, and send it back to the SP.
+///
+/// Note that `response_tx` takes an optional response. If the host wishes to
+/// drop the message and do nothing, `None` should be returned. This might be
+/// the case, for example, if the message cannot be processed correctly.
+#[derive(Clone, Debug)]
+pub struct SpRequest {
+    /// The actual request message received from the host.
+    pub request: SpRpcRequest,
+    /// A channel on which the response should sent.
+    pub response_tx: mpsc::Sender<Result<Option<HostRpcResponse>, Error>>,
+}
+
 // We limit ourselves to a single outstanding request in either direction at
 // this point.
 const NUM_OUTSTANDING_REQUESTS: usize = 1;
@@ -313,61 +334,26 @@ pub struct Controller {
     // messages to the SP.
     outgoing_request_tx: mpsc::Sender<OutstandingHostRequest>,
 
-    // The task handling actual network IO with the peer.
+    // The task handling the details of message parsing and sending, including
+    // serializing and sending outgoing messages; awaiting incoming responses;
+    // deserializing and dispatching incoming SP requests; and sending those
+    // outgoing responses back the SP. See `IoLoop` for details.
     io_task: JoinHandle<()>,
-
-    // The task receiving requests from the peer and calling the user-supplied
-    // request handler.
-    request_task: JoinHandle<()>,
 }
 
 impl Drop for Controller {
     fn drop(&mut self) {
         self.io_task.abort();
-        self.request_task.abort();
-    }
-}
-
-/// A trait for handling requests from the SP.
-#[async_trait::async_trait]
-pub trait RequestHandler: Send + Sync + 'static {
-    /// Handle a single SP request, generating a response for it.
-    ///
-    /// This lets us implement request handling within types that can maintain
-    /// some state. Note that this will be called from a separate Tokio task,
-    /// and so takes the receiver as `&self`. You'll need to use interior
-    /// mutability if a request requires mutation of any state.
-    async fn handle_request(&self, request: SpRpcRequest) -> Result<HostRpcResponse, Error>;
-}
-
-/// A no-op request handler that just logs requests and responds with a version
-/// mismatch error.
-#[derive(Clone, Debug)]
-pub struct LoggingRequestHandler {
-    pub log: Logger,
-}
-
-#[async_trait::async_trait]
-impl RequestHandler for LoggingRequestHandler {
-    async fn handle_request(&self, request: SpRpcRequest) -> Result<HostRpcResponse, Error> {
-        info!(self.log, "received request"; "request" => ?request);
-        Err(Error::Protocol(MessageError::VersionMismatch {
-            expected: request.message.header.version + 1,
-            actual: request.message.header.version,
-        }))
     }
 }
 
 impl Controller {
     /// Create a new transceiver controller.
-    ///
-    /// `request_handler` is a type that generates responses to SP requests. As
-    /// requests over the network are received, they'll be passed into the
-    /// handler, and the yielded response forwarded back to the SP.
-    pub async fn new<H>(config: Config, log: Logger, request_handler: H) -> Result<Self, Error>
-    where
-        H: RequestHandler,
-    {
+    pub async fn new(
+        config: Config,
+        log: Logger,
+        request_tx: mpsc::Sender<SpRequest>,
+    ) -> Result<Self, Error> {
         if let Err(e) = usdt::register_probes() {
             warn!(log, "failed to register DTrace probes"; "reason" => ?e);
         }
@@ -401,14 +387,6 @@ impl Controller {
         // channel when sending the request.
         let (outgoing_request_tx, outgoing_request_rx) = mpsc::channel(NUM_OUTSTANDING_REQUESTS);
 
-        // Channel for communicating outgoing responses from the request-handler
-        // task to the I/O loop.
-        let (outgoing_response_tx, outgoing_response_rx) = mpsc::channel(NUM_OUTSTANDING_REQUESTS);
-
-        // Channel for communicating incoming requests from the I/O loop to
-        // the request-handler task.
-        let (incoming_request_tx, incoming_request_rx) = mpsc::channel(NUM_OUTSTANDING_REQUESTS);
-
         // The multicast peer address for our protocol.
         //
         // We can't both `connect` the socket and still `send_to`, which means
@@ -418,7 +396,7 @@ impl Controller {
         let peer_addr = SocketAddrV6::new(config.peer, PORT, 0, iface);
 
         // The I/O task handles the actual network I/O, reading and writing UDP
-        // packets in both directions.
+        // packets in both directions, and dispatching requests from the SP.
         let io_log = log.new(slog::o!("task" => "io"));
         let io_loop = IoLoop::new(
             io_log,
@@ -427,29 +405,12 @@ impl Controller {
             config.n_retries,
             config.retry_interval,
             outgoing_request_rx,
-            outgoing_response_rx,
-            incoming_request_tx,
+            request_tx,
         );
         let io_task = tokio::spawn(async move {
             io_loop.run().await;
         });
         debug!(log, "spawned IO task");
-
-        // The request task runs the user-supplied request handler, receiving
-        // valid requests from the I/O task and sending valid responses back.
-        let request_log = log.new(slog::o!("task" => "request_handler"));
-        let request_task = tokio::spawn(async move {
-            request_loop(
-                request_log,
-                // For receiving requests sent from I/O loop.
-                incoming_request_rx,
-                // For sending responses to I/O loop.
-                outgoing_response_tx,
-                request_handler,
-            )
-            .await;
-        });
-        debug!(log, "spawned request-handler task");
 
         Ok(Self {
             _config: config,
@@ -458,7 +419,6 @@ impl Controller {
             message_id: AtomicU64::new(0),
             outgoing_request_tx,
             io_task,
-            request_task,
         })
     }
 
@@ -786,10 +746,28 @@ struct IoLoop {
     peer_addr: SocketAddrV6,
     n_retries: usize,
     resend: Interval,
-    outstanding_request: Option<OutstandingHostRequest>,
+    // Channel on which we receive outgoing requests from `Controller`. These
+    // are pulled and sent over the UDP socket to the SP, possibly retrying.
     outgoing_request_rx: mpsc::Receiver<OutstandingHostRequest>,
-    outgoing_response_rx: mpsc::Receiver<HostRpcResponse>,
-    incoming_request_tx: mpsc::Sender<SpRpcRequest>,
+
+    // The current outstanding request from `outgoing_request_tx`, if any.
+    outstanding_request: Option<OutstandingHostRequest>,
+
+    // The channel on which we dispatch incoming requests from the SP, to the
+    // request handler. The items sent include a send-half for our
+    // `outgoing_response_rx`.
+    incoming_request_tx: mpsc::Sender<SpRequest>,
+
+    // The channel on which we wait for outgoing responses from the request
+    // handler. These are sent on the UDP socket to the SP.
+    outgoing_response_rx: mpsc::Receiver<Result<Option<HostRpcResponse>, Error>>,
+
+    // A sender for `outgoing_response_rx`.
+    //
+    // This is never used, but we need to maintain a send-half to
+    // `outgoing_response_rx` so that receiving on it does not immediately
+    // return errors.
+    outgoing_response_tx: mpsc::Sender<Result<Option<HostRpcResponse>, Error>>,
 }
 
 impl IoLoop {
@@ -801,19 +779,63 @@ impl IoLoop {
         n_retries: Option<usize>,
         retry_interval: Duration,
         outgoing_request_rx: mpsc::Receiver<OutstandingHostRequest>,
-        outgoing_response_rx: mpsc::Receiver<HostRpcResponse>,
-        incoming_request_tx: mpsc::Sender<SpRpcRequest>,
+        incoming_request_tx: mpsc::Sender<SpRequest>,
     ) -> Self {
+        let (outgoing_response_tx, outgoing_response_rx) = mpsc::channel(NUM_OUTSTANDING_REQUESTS);
         Self {
             log,
             socket,
             peer_addr,
             n_retries: n_retries.unwrap_or(usize::MAX),
             resend: interval(retry_interval),
-            outstanding_request: None,
             outgoing_request_rx,
-            outgoing_response_rx,
+            outstanding_request: None,
             incoming_request_tx,
+            outgoing_response_rx,
+            outgoing_response_tx,
+        }
+    }
+
+    // Send an outgoing response.
+    async fn send_outgoing_response(&mut self, response: HostRpcResponse, tx_buf: &mut [u8]) {
+        let data_start = hubpack::serialize(tx_buf, &response.message).unwrap();
+        let msg_size = if let Some(data) = &response.data {
+            let data_end = data_start + data.len();
+            tx_buf[data_start..data_end].copy_from_slice(data);
+            data_end
+        } else {
+            data_start
+        };
+        match self
+            .socket
+            .send_to(&tx_buf[..msg_size], &self.peer_addr)
+            .await
+        {
+            Err(e) => {
+                error!(
+                    self.log,
+                    "failed to send outgoing response";
+                    "peer" => ?self.peer_addr,
+                    "reason" => ?e,
+                );
+            }
+            Ok(n_bytes) => {
+                assert_eq!(n_bytes, msg_size);
+                debug!(
+                    self.log,
+                    "sent outgoing response";
+                    "peer" => ?self.peer_addr,
+                    "message" => ?response.message,
+                );
+                probes::packet__sent!(|| {
+                    let peer = IpAddr::V6(*self.peer_addr.ip());
+                    (peer, n_bytes as u64, tx_buf.as_ptr())
+                });
+                probes::message__sent!(|| {
+                    let peer = IpAddr::V6(*self.peer_addr.ip());
+                    (peer, &response.message)
+                });
+            }
         }
     }
 
@@ -934,8 +956,10 @@ impl IoLoop {
     // error being sent back immediately.) Assuming they seem reasonable, then they
     // are dispatched as follows:
     //
-    // - Requests from the SP are sent to the request handler, via
-    // `incoming_request_tx`.
+    // - Requests from the SP are sent on `self.incoming_request_tx`. Responses
+    // to those incoming requests are received back by this loop on a channel in
+    // the items sent on the `self.incoming_request_tx` channel.
+    //
     // - Responses to our own initiated requests are sent back on a `oneshot`
     // channel, that is sent in the data on `outgoing_request_tx`.
     async fn run(mut self) {
@@ -999,8 +1023,29 @@ impl IoLoop {
                             return;
                         }
                     };
-                    // TODO-implement
-                    debug!(self.log, "outgoing response: {response:?}");
+                    match response {
+                        Ok(Some(r)) => {
+                            debug!(
+                                self.log,
+                                "received outgoing response";
+                                "message" => ?r.message,
+                            );
+                            self.send_outgoing_response(r, &mut tx_buf).await;
+                        }
+                        Ok(None) => {
+                            debug!(
+                                self.log,
+                                "request handler explicitly dropped message"
+                            );
+                        }
+                        Err(e) => {
+                            error!(
+                                self.log,
+                                "request handler failed";
+                                "error" => ?e
+                            );
+                        }
+                    }
                 }
 
                 // Poll for incoming packets.
@@ -1086,7 +1131,10 @@ impl IoLoop {
                     // Sanity check that the message could possibly be meant for us.
                     //
                     // We never expect these message types to be sent to us.
-                    if matches!(message.body, MessageBody::HostRequest(_) | MessageBody::HostResponse(_)) {
+                    if matches!(
+                        message.body,
+                        MessageBody::HostRequest(_) | MessageBody::HostResponse(_)
+                    ) {
                         // We need to check the message ID to decide how to
                         // proceed.
                         //
@@ -1164,11 +1212,23 @@ impl IoLoop {
                     // If this is a request, let's dispatch to the request handler
                     // channel.
                     if matches!(message.body, MessageBody::SpRequest(_)) {
-                        let request = SpRpcRequest {
-                            message,
-                            data,
+
+                        // Construct a request and a send-half to
+                        // `outgoing_response_rx` on which we'll receive the
+                        // reply.
+                        let request = SpRpcRequest { message, data };
+                        let item = SpRequest {
+                            request,
+                            response_tx: self.outgoing_response_tx.clone(),
                         };
-                        self.incoming_request_tx.send(request).await.unwrap();
+                        self.incoming_request_tx
+                            .send(item)
+                            .await
+                            .expect("failed to dispatch incoming request on handler channel");
+                        info!(
+                            self.log,
+                            "sent incoming SP request on handler channel"
+                        );
                         continue;
                     }
 
@@ -1188,7 +1248,10 @@ impl IoLoop {
 
                         // We have a valid response!
                         let response = SpRpcResponse { message, data };
-                        request.response_tx.send(Ok(response)).expect("failed to send response on channel");
+                        request
+                            .response_tx
+                            .send(Ok(response))
+                            .expect("failed to send response on channel");
                     } else {
                         // We have no outstanding request.
                         //
@@ -1208,24 +1271,6 @@ impl IoLoop {
             }
         }
     }
-}
-
-async fn request_loop<H>(
-    log: Logger,
-    mut incoming_request_rx: mpsc::Receiver<SpRpcRequest>,
-    outgoing_response_tx: mpsc::Sender<HostRpcResponse>,
-    request_handler: H,
-) where
-    H: RequestHandler,
-{
-    while let Some(incoming_request) = incoming_request_rx.recv().await {
-        info!(log, "Incoming request {incoming_request:?}");
-        match request_handler.handle_request(incoming_request).await {
-            Ok(response) => outgoing_response_tx.send(response).await.unwrap(),
-            Err(e) => error!(log, "request handler failed: {e:?}"),
-        }
-    }
-    debug!(log, "request handler channel closed, exiting");
 }
 
 #[cfg(test)]

@@ -20,11 +20,10 @@ use std::io::Read;
 use std::net::Ipv6Addr;
 use std::path::PathBuf;
 use std::time::Duration;
+use tokio::sync::mpsc;
 use transceiver_controller::Config;
 use transceiver_controller::Controller;
-use transceiver_controller::Error;
-use transceiver_controller::HostRpcResponse;
-use transceiver_controller::SpRpcRequest;
+use transceiver_controller::SpRequest;
 use transceiver_decode::Identifier;
 use transceiver_decode::MemoryModel;
 use transceiver_decode::VendorInfo;
@@ -34,27 +33,8 @@ use transceiver_messages::mgmt::cmis;
 use transceiver_messages::mgmt::sff8636;
 use transceiver_messages::mgmt::MemoryRead;
 use transceiver_messages::mgmt::MemoryWrite;
-use transceiver_messages::Error as MessageError;
 use transceiver_messages::ModuleId;
 use transceiver_messages::PortMask;
-
-// Handler for SP requests which only logs them and returns an error.
-#[derive(Debug)]
-struct DummyHandler {
-    log: slog::Logger,
-}
-
-#[async_trait::async_trait]
-impl transceiver_controller::RequestHandler for DummyHandler {
-    async fn handle_request(&self, request: SpRpcRequest) -> Result<HostRpcResponse, Error> {
-        slog::debug!(
-            self.log,
-            "Received SP request, ignoring";
-            "request" => ?request
-        );
-        Err(Error::Protocol(MessageError::ProtocolError))
-    }
-}
 
 fn parse_log_level(s: &str) -> Result<Level, String> {
     s.parse().map_err(|_| String::from("invalid log level"))
@@ -334,9 +314,32 @@ async fn main() -> anyhow::Result<()> {
     let drain = slog::LevelFilter::new(drain, args.log_level).fuse();
     let log = slog::Logger::root(drain, slog::o!());
 
-    let h = DummyHandler {
-        log: log.new(slog::o!("name" => "request_handler")),
-    };
+    // Create a dummy request handler that just logs and drops all messages.
+    let request_log = log.new(slog::o!("name" => "request_handler"));
+    let (request_tx, mut request_rx) = mpsc::channel(1);
+    let _request_handler = tokio::spawn(async move {
+        loop {
+            while let Some(SpRequest {
+                request,
+                response_tx,
+            }) = request_rx.recv().await
+            {
+                slog::debug!(
+                    request_log,
+                    "incoming request, dropping";
+                    "request" => ?request
+                );
+                // Drop the message.
+                if let Err(e) = response_tx.send(Ok(None)).await {
+                    slog::error!(
+                        request_log,
+                        "failed to send response";
+                        "reason" => ?e
+                    );
+                }
+            }
+        }
+    });
 
     let ports = args
         .transceivers
@@ -346,7 +349,7 @@ async fn main() -> anyhow::Result<()> {
         fpga_id: args.fpga_id,
         ports,
     };
-    let controller = Controller::new(config, log.clone(), h)
+    let controller = Controller::new(config, log.clone(), request_tx)
         .await
         .context("Failed to initialize transceiver controller")?;
 
