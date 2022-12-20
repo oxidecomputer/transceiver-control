@@ -6,6 +6,9 @@
 
 //! A host-side control interface to the SP for managing Sidecar transceivers.
 
+#![cfg_attr(not(usdt_stable_asm), feature(asm))]
+#![cfg_attr(all(target_os = "macos", not(usdt_stable_asm_sym)), feature(asm_sym))]
+
 use hubpack::SerializedSize;
 use nix::net::if_::if_nametoindex;
 use serde::Deserialize;
