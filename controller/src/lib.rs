@@ -16,6 +16,7 @@ use serde::Serialize;
 use slog::debug;
 use slog::error;
 use slog::info;
+use slog::trace;
 use slog::warn;
 use slog::Logger;
 use std::collections::BTreeMap;
@@ -824,7 +825,7 @@ impl IoLoop {
             }
             Ok(n_bytes) => {
                 assert_eq!(n_bytes, msg_size);
-                debug!(
+                trace!(
                     self.log,
                     "sent outgoing response";
                     "peer" => ?self.peer_addr,
@@ -873,7 +874,7 @@ impl IoLoop {
             }
             Ok(n_bytes) => {
                 assert_eq!(n_bytes, msg_size);
-                debug!(
+                trace!(
                     self.log,
                     "sent outgoing request";
                     "peer" => ?self.peer_addr,
@@ -985,7 +986,7 @@ impl IoLoop {
                             return;
                         }
                     };
-                    debug!(self.log, "received outgoing request"; "request" => ?request);
+                    trace!(self.log, "received outgoing request"; "request" => ?request);
 
                     // Store the outstanding request, sanity-checking that we really
                     // didn't have a prior one.
@@ -1028,7 +1029,7 @@ impl IoLoop {
                     };
                     match response {
                         Ok(Some(r)) => {
-                            debug!(
+                            trace!(
                                 self.log,
                                 "received outgoing response";
                                 "message" => ?r.message,
@@ -1036,7 +1037,7 @@ impl IoLoop {
                             self.send_outgoing_response(r, &mut tx_buf).await;
                         }
                         Ok(None) => {
-                            debug!(
+                            trace!(
                                 self.log,
                                 "request handler explicitly dropped message"
                             );
@@ -1059,7 +1060,7 @@ impl IoLoop {
                             continue;
                         }
                         Ok((n_bytes, peer)) => {
-                            debug!(
+                            trace!(
                                 self.log,
                                 "packet received";
                                 "n_bytes" => n_bytes,
@@ -1096,7 +1097,7 @@ impl IoLoop {
                         }
                         Ok((msg, remainder)) => (msg, remainder),
                     };
-                    debug!(
+                    trace!(
                         self.log,
                         "message from peer";
                         "peer" => peer,
@@ -1163,6 +1164,20 @@ impl IoLoop {
                                     "message" => ?message,
                                     "peer" => peer,
                                 );
+                                probes::bad__message!(|| {
+                                    let msg = match message.body {
+                                        MessageBody::HostRequest(_) => "HostRequest",
+                                        MessageBody::HostResponse(_) => "HostResponse",
+                                        _ => unreachable!(),
+                                    };
+                                    (
+                                        peer.ip(),
+                                        format!(
+                                            "matching message ID, but wrong \
+                                            message type: {msg}"
+                                        )
+                                    )
+                                });
                                 request.response_tx.send(
                                     Err(Error::Protocol(MessageError::ProtocolError))
                                 ).unwrap();
@@ -1172,13 +1187,19 @@ impl IoLoop {
                             // to inform the SP that this message wasn't
                             // supposed to be sent to us.
                             debug!(self.log, "wrong message type"; "peer" => peer);
-                            let err = MessageError::ProtocolError;
-                            probes::bad__message!(|| (peer.ip(), format!("{:?}", err)));
+                            probes::bad__message!(|| {
+                                let msg = match message.body {
+                                    MessageBody::HostRequest(_) => "HostRequest",
+                                    MessageBody::HostResponse(_) => "HostResponse",
+                                    _ => unreachable!(),
+                                };
+                                (peer.ip(), format!("wrong message type: {msg}"))
+                            });
                             self.send_protocol_error(
                                 &peer,
                                 message.header,
                                 message.modules,
-                                err,
+                                MessageError::ProtocolError,
                                 &mut tx_buf,
                             ).await;
                         }
@@ -1239,6 +1260,12 @@ impl IoLoop {
                     if let Some(request) = self.outstanding_request.take() {
                         // Check if this is for our current outstanding request.
                         if request.request.message.header.message_id != message.header.message_id {
+                            probes::bad__message!(|| {
+                                (
+                                    peer.ip(),
+                                    "response for request that is not outstanding"
+                                )
+                            });
                             debug!(
                                 self.log,
                                 "received response for message that is not outstanding";
@@ -1262,6 +1289,12 @@ impl IoLoop {
                         // as a duplicate response from the SP for a previous
                         // request. It's not obvious what to do here, but for now,
                         // let's log and drop the message.
+                        probes::bad__message!(|| {
+                            (
+                                peer.ip(),
+                                "received response without an outstanding request",
+                            )
+                        });
                         debug!(
                             self.log,
                             "received response without an outstanding request";
