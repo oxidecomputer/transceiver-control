@@ -494,7 +494,7 @@ async fn main() -> anyhow::Result<()> {
                     }
                     .context("Invalid CMIS upper page")?;
                     MemoryWrite::new(cmis::Page::Upper(page), offset, len)
-                        .context("Failed to setup upper page memory read")?
+                        .context("Failed to setup upper page memory write")?
                 }
                 (_, _) => unreachable!("clap didn't do its job"),
             };

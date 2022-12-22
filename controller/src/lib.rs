@@ -1257,9 +1257,22 @@ impl IoLoop {
                     }
 
                     // This is a response, possibly for our outstanding request.
-                    if let Some(request) = self.outstanding_request.take() {
+                    //
+                    // Note that we can't take the message now, since the
+                    // response may not actually correspond to our outstanding
+                    // request. We replace the message below if needed.
+                    let maybe_response = if let Some(request) = &self.outstanding_request {
                         // Check if this is for our current outstanding request.
-                        if request.request.message.header.message_id != message.header.message_id {
+                        let outstanding_message_id = request
+                            .request
+                            .message
+                            .header
+                            .message_id;
+                        if outstanding_message_id == message.header.message_id {
+                            // We have a valid response! Return it for
+                            // processing.
+                            Some(SpRpcResponse { message, data })
+                        } else {
                             probes::bad__message!(|| {
                                 (
                                     peer.ip(),
@@ -1270,18 +1283,11 @@ impl IoLoop {
                                 self.log,
                                 "received response for message that is not outstanding";
                                 "message" => ?message,
-                                "outstanding_message_id" => request.request.message.header.message_id,
+                                "outstanding_message_id" => outstanding_message_id,
                                 "peer" => peer,
                             );
-                            continue;
+                            None
                         }
-
-                        // We have a valid response!
-                        let response = SpRpcResponse { message, data };
-                        request
-                            .response_tx
-                            .send(Ok(response))
-                            .expect("failed to send response on channel");
                     } else {
                         // We have no outstanding request.
                         //
@@ -1301,7 +1307,19 @@ impl IoLoop {
                             "message" => ?message,
                             "peer" => peer,
                         );
-                        continue;
+                        None
+                    };
+
+                    // If we have a valid response, take out the outstanding
+                    // message and forward the response on its channel.
+                    if let Some(response) = maybe_response {
+                        self
+                            .outstanding_request
+                            .take()
+                            .expect("verified as Some(_) above")
+                            .response_tx
+                            .send(Ok(response))
+                            .expect("failed to send response on channel");
                     }
                 }
             }
