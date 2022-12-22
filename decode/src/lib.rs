@@ -7,6 +7,7 @@
 //! Decode various transceiver module memory maps and data.
 
 use chrono::NaiveDate;
+use std::borrow::Cow;
 use std::fmt;
 use std::ops::Range;
 use thiserror::Error;
@@ -223,14 +224,18 @@ pub struct VendorInfo {
 }
 
 /// Vendor-specific information about a transceiver module.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Vendor {
-    pub name: String,
+    pub name: [u8; 16],
     pub oui: [u8; 3],
-    pub part: String,
-    pub revision: String,
-    pub serial: String,
-    pub date: DateCode,
+    pub part: [u8; 16],
+    pub revision: [u8; 2],
+    pub serial: [u8; 16],
+    pub date: [u8; 8],
+}
+
+fn maybe_ascii(bytes: &[u8]) -> Option<&str> {
+    std::str::from_utf8(bytes).map(str::trim_end).ok()
 }
 
 impl Vendor {
@@ -241,24 +246,75 @@ impl Vendor {
             self.oui[0], self.oui[1], self.oui[2]
         )
     }
-}
 
-impl fmt::Display for Vendor {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{} {}", &self.name, &self.part)
+    /// Return the Organizational Unique Identifier.
+    pub fn oui(&self) -> &[u8; 3] {
+        &self.oui
     }
-}
 
-impl fmt::Debug for Vendor {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        f.debug_struct("Vendor")
-            .field("name", &self.name)
-            .field("oui", &self.format_oui())
-            .field("part", &self.part)
-            .field("revision", &self.revision)
-            .field("serial", &self.serial)
-            .field("date", &self.date)
-            .finish()
+    /// Return the vendor name as an ASCII string, if possible.
+    ///
+    /// If the data is malformed, `None` is returned.
+    pub fn name(&self) -> Option<&str> {
+        maybe_ascii(&self.name)
+    }
+
+    /// Lossily convert the name to a string.
+    pub fn name_lossy(&self) -> Cow<'_, str> {
+        String::from_utf8_lossy(&self.name)
+    }
+
+    /// Return the vendor part as an ASCII string, if possible.
+    ///
+    /// If the data is malformed, `None` is returned.
+    pub fn part(&self) -> Option<&str> {
+        maybe_ascii(&self.part)
+    }
+
+    /// Lossily convert the part number to a string.
+    pub fn part_lossy(&self) -> Cow<'_, str> {
+        String::from_utf8_lossy(&self.part)
+    }
+
+    /// Return the vendor revision as an ASCII string, if possible.
+    ///
+    /// If the data is malformed, `None` is returned.
+    pub fn revision(&self) -> Option<&str> {
+        maybe_ascii(&self.revision)
+    }
+
+    /// Lossily convert the revision to a string.
+    pub fn revision_lossy(&self) -> Cow<'_, str> {
+        String::from_utf8_lossy(&self.revision)
+    }
+
+    /// Return the vendor serial number as an ASCII string, if possible.
+    ///
+    /// If the data is malformed, `None` is returned.
+    pub fn serial(&self) -> Option<&str> {
+        maybe_ascii(&self.serial)
+    }
+
+    /// Lossily convert the serial number into a string.
+    pub fn serial_lossy(&self) -> Cow<'_, str> {
+        String::from_utf8_lossy(&self.serial)
+    }
+
+    /// Return the date code, if possible.
+    ///
+    /// If the data is malformed, `None` is returned.
+    pub fn date(&self) -> Option<DateCode> {
+        DateCode::try_from(self.date.as_slice()).ok()
+    }
+
+    /// Lossily convert the date code into a string.
+    pub fn date_lossy(&self) -> Cow<'_, str> {
+        String::from_utf8_lossy(&self.date)
+    }
+
+    /// Return the date code as a string, if possible.
+    pub fn date_str(&self) -> Option<&str> {
+        maybe_ascii(&self.date)
     }
 }
 
@@ -339,12 +395,12 @@ impl ParseFromModule for Vendor {
                     Some(d) => d,
                 };
 
-                let name = ascii_to_string(&data[NAME]);
+                let name = data[NAME].try_into().unwrap();
                 let oui = data[OUI].try_into().unwrap();
-                let part = ascii_to_string(&data[PART]);
-                let revision = ascii_to_string(&data[REVISION]);
-                let serial = ascii_to_string(&data[SERIAL]);
-                let date = DateCode::from(&data[DATE]);
+                let part = data[PART].try_into().unwrap();
+                let revision = data[REVISION].try_into().unwrap();
+                let serial = data[SERIAL].try_into().unwrap();
+                let date = data[DATE].try_into().unwrap();
 
                 Ok(Self {
                     name,
@@ -371,12 +427,12 @@ impl ParseFromModule for Vendor {
                 // to how the checked methods for converting bytes to strings
                 // work.
                 let buf: Vec<_> = reads.flat_map(|b| b.iter().copied()).collect();
-                let name = ascii_to_string(&buf[NAME]);
+                let name = buf[NAME].try_into().unwrap();
                 let oui = buf[OUI].try_into().unwrap();
-                let part = ascii_to_string(&buf[PART]);
-                let revision = ascii_to_string(&buf[REVISION]);
-                let serial = ascii_to_string(&buf[SERIAL]);
-                let date = DateCode::from(&buf[DATE]);
+                let part = buf[PART].try_into().unwrap();
+                let revision = buf[REVISION].try_into().unwrap();
+                let serial = buf[SERIAL].try_into().unwrap();
+                let date = buf[DATE].try_into().unwrap();
                 Ok(Self {
                     name,
                     oui,
@@ -387,19 +443,6 @@ impl ParseFromModule for Vendor {
                 })
             }
             _ => Err(Error::UnsupportedIdentifier(id)),
-        }
-    }
-}
-
-fn ascii_to_string(buf: &[u8]) -> String {
-    match std::str::from_utf8(buf) {
-        Ok(s) => s.trim_end().to_string(),
-        Err(e) => {
-            let (valid, _) = buf.split_at(e.valid_up_to());
-            std::str::from_utf8(valid)
-                .expect("utf8 checked right above")
-                .trim_end()
-                .to_string()
         }
     }
 }
@@ -425,13 +468,13 @@ impl DateCode {
     }
 }
 
-impl<T> From<T> for DateCode
-where
-    T: AsRef<[u8]>,
-{
-    fn from(buf: T) -> Self {
-        let buf = buf.as_ref();
-        assert!(buf.len() >= 8);
+impl TryFrom<&[u8]> for DateCode {
+    type Error = ();
+
+    fn try_from(buf: &[u8]) -> Result<Self, Self::Error> {
+        if buf.len() < 8 {
+            return Err(());
+        }
 
         // The date code is specified in SFF-8636 section 6.2.36 or CMIS
         // 8.3.2.6. It is 8-octets, including:
@@ -440,34 +483,34 @@ where
         // - Two digits for the month number.
         // - Two digits for the day number.
         // - An optional 2-digit lot code.
-        const BAD: &str = "01";
         let year = std::str::from_utf8(&buf[..2])
-            .unwrap_or(BAD)
+            .map_err(|_| ())?
             .parse::<i32>()
-            .unwrap()
-            + 2000;
+            .map(|x| x + 2000)
+            .map_err(|_| ())?;
         let month: u32 = std::str::from_utf8(&buf[2..4])
-            .unwrap_or(BAD)
+            .map_err(|_| ())?
             .parse()
-            .unwrap();
+            .map_err(|_| ())?;
         let day: u32 = std::str::from_utf8(&buf[4..6])
-            .unwrap_or(BAD)
+            .map_err(|_| ())?
             .parse()
-            .unwrap();
+            .map_err(|_| ())?;
         let lot = std::str::from_utf8(&buf[6..])
-            .map(|x| {
-                let x = x.trim_end();
-                if x.is_empty() {
+            .map(|s| {
+                let s = s.trim();
+                if s.is_empty() || s == "\0\0" {
                     None
                 } else {
-                    Some(x.to_string())
+                    Some(s.to_string())
                 }
             })
-            .unwrap_or(None);
+            .map_err(|_| ())?;
 
-        DateCode {
-            date: NaiveDate::from_ymd_opt(year, month, day).expect("bad date code"),
-            lot,
+        if let Some(date) = NaiveDate::from_ymd_opt(year, month, day) {
+            Ok(DateCode { date, lot })
+        } else {
+            Err(())
         }
     }
 }
@@ -776,13 +819,13 @@ mod tests {
 
         let parsed = Vendor::parse(id, std::iter::once(data.as_slice())).unwrap();
 
-        assert_prefix(VENDOR_NAME, &parsed.name);
-        assert_eq!(OUI, parsed.oui);
-        assert_prefix(PART, &parsed.part);
-        assert_prefix(REVISION, &parsed.revision);
-        assert_prefix(SERIAL, &parsed.serial);
+        assert_prefix(VENDOR_NAME, parsed.name().unwrap());
+        assert_eq!(&OUI, parsed.oui());
+        assert_prefix(PART, parsed.part().unwrap());
+        assert_prefix(REVISION, parsed.revision().unwrap());
+        assert_prefix(SERIAL, parsed.serial().unwrap());
         assert_eq!(
-            parsed.date,
+            parsed.date().unwrap(),
             DateCode {
                 date: NaiveDate::from_ymd_opt(2020, 01, 01).unwrap(),
                 lot: None,
@@ -816,13 +859,13 @@ mod tests {
         let reads = all_data.chunks(8);
 
         let parsed = Vendor::parse(id, reads).unwrap();
-        assert_prefix(VENDOR_NAME, &parsed.name);
-        assert_eq!(OUI, parsed.oui);
-        assert_prefix(PART, &parsed.part);
-        assert_prefix(REVISION, &parsed.revision);
-        assert_prefix(SERIAL, &parsed.serial);
+        assert_prefix(VENDOR_NAME, parsed.name().unwrap());
+        assert_eq!(&OUI, parsed.oui());
+        assert_prefix(PART, parsed.part().unwrap());
+        assert_prefix(REVISION, parsed.revision().unwrap());
+        assert_prefix(SERIAL, parsed.serial().unwrap());
         assert_eq!(
-            parsed.date,
+            parsed.date().unwrap(),
             DateCode {
                 date: NaiveDate::from_ymd_opt(2020, 01, 01).unwrap(),
                 lot: Some(String::from("00")),
@@ -837,7 +880,7 @@ mod tests {
             lot: Some(String::from("ab")),
         };
         let bytes = expected.to_bytes();
-        let deser = DateCode::from(bytes);
+        let deser = DateCode::try_from(bytes.as_slice()).unwrap();
         assert_eq!(expected, deser);
     }
 }
