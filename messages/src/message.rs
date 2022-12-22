@@ -47,14 +47,20 @@ pub struct Message {
 
 impl Message {
     /// Return the length of the expected data that should follow `self`.
-    pub fn expected_data_len(&self) -> usize {
+    ///
+    /// If the message expects no data at all, `None` is returned. If the
+    /// message generally expects data, but the particular contents of this one
+    /// imply the data should be empty (e.g., zero transceivers were addressed),
+    /// then `Some(0)` is returned. Otherwise, `Some(x)` is returned for a
+    /// nonzero `x`.
+    pub fn expected_data_len(&self) -> Option<usize> {
         let bytes_per_xcvr = match self.body {
             MessageBody::HostRequest(HostRequest::Write(inner)) => usize::from(inner.len()),
             MessageBody::SpResponse(SpResponse::Read(inner)) => usize::from(inner.len()),
             MessageBody::SpResponse(SpResponse::Status) => core::mem::size_of::<Status>(),
-            _ => 0,
+            _ => return None,
         };
-        self.modules.selected_transceiver_count() * bytes_per_xcvr
+        Some(self.modules.selected_transceiver_count() * bytes_per_xcvr)
     }
 }
 

@@ -31,6 +31,7 @@ use transceiver_messages::message::PowerMode;
 use transceiver_messages::message::Status;
 use transceiver_messages::mgmt::cmis;
 use transceiver_messages::mgmt::sff8636;
+use transceiver_messages::mgmt::ManagementInterface;
 use transceiver_messages::mgmt::MemoryRead;
 use transceiver_messages::mgmt::MemoryWrite;
 use transceiver_messages::ModuleId;
@@ -38,6 +39,75 @@ use transceiver_messages::PortMask;
 
 fn parse_log_level(s: &str) -> Result<Level, String> {
     s.parse().map_err(|_| String::from("invalid log level"))
+}
+
+// Method for addressing a set of transceivers by index or state.
+#[derive(Clone, Debug, PartialEq)]
+enum Transceivers {
+    // All transceivers on an FPGA, the default.
+    All,
+    // All present transceivers on an FGPA.
+    Present,
+    // All transceivers in a specific power mode.
+    PowerMode(PowerMode),
+    // All transceivers of a specific kind.
+    Kind(ManagementInterface),
+    // A comma-separated list of transceiver indices. These can be specified as
+    // single integers, e.g., `4,5,6` or an inclusive range, e.g., `4-6`.
+    Ports(PortMask),
+}
+
+fn parse_transceivers(s: &str) -> Result<Transceivers, String> {
+    let s = s.to_lowercase();
+    match s.as_str() {
+        "all" => Ok(Transceivers::All),
+        "present" => Ok(Transceivers::Present),
+        "off" => Ok(Transceivers::PowerMode(PowerMode::Off)),
+        "low-power" => Ok(Transceivers::PowerMode(PowerMode::Low)),
+        "hi-power" => Ok(Transceivers::PowerMode(PowerMode::High)),
+        "sff" => Ok(Transceivers::Kind(ManagementInterface::Sff8636)),
+        "cmis" => Ok(Transceivers::Kind(ManagementInterface::Cmis)),
+        _maybe_list => {
+            let parts = s.split(',').map(|p| p.trim());
+            let mut indices: Vec<u8> = Vec::new();
+            for part in parts {
+                // Try to convert to a simple index first.
+                if let Ok(ix) = part.parse() {
+                    indices.push(ix);
+                    continue;
+                }
+
+                // Check for a range, e.g., `x-y`.
+                if let Some((start, end)) = part.split_once('-') {
+                    if start.is_empty() || end.is_empty() {
+                        return Err(String::from("transceiver ranges must include both bounds"));
+                    }
+                    match (start.trim().parse::<u8>(), end.trim().parse::<u8>()) {
+                        (Ok(x), Ok(y)) => {
+                            if x >= y {
+                                return Err(String::from("transceiver ranges must be increasing"));
+                            }
+                            indices.extend(x..=y);
+                        }
+                        _ => {
+                            return Err(String::from("transceiver ranges must have integer bounds"))
+                        }
+                    }
+                    continue;
+                }
+
+                return Err(format!(
+                    "invalid transceiver list: '{s}', \
+                    transceivers must be specified as a \
+                    comma-separated list of integers or ranges, \
+                    e.g., '0-3'"
+                ));
+            }
+            PortMask::from_indices(&indices)
+                .map(|p| Transceivers::Ports(p))
+                .map_err(|e| format!("invalid port indices: {e:?}"))
+        }
+    }
 }
 
 /// Administer optical network transceiver modules.
@@ -54,11 +124,24 @@ struct Args {
     #[arg(short, long, default_value_t = 0)]
     fpga_id: u8,
 
-    /// The comma-separated list of transcievers on the FPGA to address.
+    /// The list of transcievers on the FPGA to address.
     ///
-    /// The default is all transceivers on an FPGA.
-    #[arg(short, long, use_value_delimiter = true)]
-    transceivers: Option<Vec<u8>>,
+    /// Transceivers may be addressed in a number of ways:
+    ///
+    /// - "all" addresses all transceivers on the FPGA. This is the default.
+    ///
+    /// - "present" addresses all present transceivers on the FPGA.
+    ///
+    /// - "off", "low-power", "hi-power" address the transceivers in the given
+    /// power mode.
+    ///
+    /// - "cmis" and "sff" address all transceivers of the provided management
+    /// interface.
+    ///
+    /// - A comma-separated list of integers or integer ranges. E.g., `0,1,2` or
+    /// `0-2,4`. Ranges are inclusive of both ends.
+    #[arg(short, long, value_parser = parse_transceivers)]
+    transceivers: Option<Transceivers>,
 
     /// The source IP address on which to listen for messages.
     #[arg(short, long, default_value_t = Ipv6Addr::UNSPECIFIED)]
@@ -341,17 +424,18 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    let ports = args
-        .transceivers
-        .map(|ix| PortMask::from_indices(&ix).unwrap())
-        .unwrap_or_else(PortMask::all);
-    let modules = ModuleId {
-        fpga_id: args.fpga_id,
-        ports,
-    };
     let controller = Controller::new(config, log.clone(), request_tx)
         .await
         .context("Failed to initialize transceiver controller")?;
+
+    // Determine the actual module ID of the transceivers the caller requested
+    // we operate on. Note that this may result in zero transceivers being
+    // addressed. We're choosing not to return an error in this case, so that
+    // callers can distinguish between a successful "request for status of all
+    // low-power module transceivers" from a failure to do so (e.g., a network
+    // error), _without_ having to parse stderr.
+    let transceivers = args.transceivers.unwrap_or(Transceivers::All);
+    let modules = address_transceivers(&controller, args.fpga_id, transceivers).await?;
 
     match args.cmd {
         Cmd::Status => {
@@ -514,6 +598,86 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
+async fn address_transceivers(
+    controller: &Controller,
+    fpga_id: u8,
+    transceivers: Transceivers,
+) -> anyhow::Result<ModuleId> {
+    fn filter_ports<D: IntoIterator>(
+        ports: PortMask,
+        data: D,
+        predicate: impl Fn(D::Item) -> bool,
+    ) -> PortMask {
+        let ix: Vec<_> = ports
+            .to_indices()
+            .zip(data.into_iter())
+            .filter_map(|(ix, datum)| if predicate(datum) { Some(ix) } else { None })
+            .collect();
+        PortMask::from_indices(&ix).unwrap()
+    }
+
+    let ports = match transceivers {
+        Transceivers::All => PortMask::all(),
+        Transceivers::Present => {
+            // Fetch all status bits, and find those which match.
+            let modules = ModuleId::all_transceivers(fpga_id);
+            let status = controller
+                .status(modules)
+                .await
+                .context("Failed to retrieve module status")?;
+            filter_ports(modules.ports, status, |st| st.contains(Status::PRESENT))
+        }
+        Transceivers::PowerMode(mode) => {
+            // Fetch all power modes, and find those which match.
+            let modules = ModuleId::all_transceivers(fpga_id);
+            let status = controller
+                .status(modules)
+                .await
+                .context("Failed to retrieve module status")?;
+            let predicate = match mode {
+                PowerMode::Off => |st: Status| !st.contains(Status::POWER_GOOD),
+                PowerMode::Low => {
+                    |st: Status| st.contains(Status::POWER_GOOD | Status::LOW_POWER_MODE)
+                }
+                PowerMode::High => |st: Status| {
+                    st.contains(Status::POWER_GOOD) && !st.contains(Status::LOW_POWER_MODE)
+                },
+            };
+            filter_ports(modules.ports, status, predicate)
+        }
+        Transceivers::Kind(kind) => {
+            // Fetch all modules that have power enabled, thus are readable.
+            let modules = ModuleId::all_transceivers(fpga_id);
+            let status = controller
+                .status(modules)
+                .await
+                .context("Failed to retrieve module status")?;
+            let readable =
+                filter_ports(modules.ports, status, |st| st.contains(Status::POWER_GOOD));
+
+            // Then the management interface for those.
+            let modules = ModuleId {
+                fpga_id,
+                ports: readable,
+            };
+            let identifiers = controller
+                .identifier(modules)
+                .await
+                .context("Failed to retrieve module identifiers")?;
+            let predicate = |id: Identifier| {
+                if let Ok(iface) = id.management_interface() {
+                    iface == kind
+                } else {
+                    false
+                }
+            };
+            filter_ports(modules.ports, identifiers, predicate)
+        }
+        Transceivers::Ports(p) => p,
+    };
+    Ok(ModuleId { fpga_id, ports })
+}
+
 // Column width for printing data below.
 const WIDTH: usize = 4;
 
@@ -598,7 +762,12 @@ fn print_module_memory_model(modules: ModuleId, models: Vec<MemoryModel>) {
 #[cfg(test)]
 mod tests {
     use super::load_write_data;
+    use super::parse_transceivers;
     use super::InputKind;
+    use super::ManagementInterface;
+    use super::PortMask;
+    use super::PowerMode;
+    use super::Transceivers;
     use std::io::Write;
     use tempfile::NamedTempFile;
 
@@ -630,5 +799,55 @@ mod tests {
             load_write_data(Some(f.path().to_path_buf()), InputKind::Decimal).unwrap(),
             vec![10, 20, 30]
         );
+    }
+
+    #[test]
+    fn test_parse_transceivers() {
+        assert_eq!(parse_transceivers("all").unwrap(), Transceivers::All);
+        assert_eq!(
+            parse_transceivers("present").unwrap(),
+            Transceivers::Present
+        );
+        assert_eq!(
+            parse_transceivers("off").unwrap(),
+            Transceivers::PowerMode(PowerMode::Off)
+        );
+        assert_eq!(
+            parse_transceivers("low-power").unwrap(),
+            Transceivers::PowerMode(PowerMode::Low)
+        );
+        assert_eq!(
+            parse_transceivers("hi-power").unwrap(),
+            Transceivers::PowerMode(PowerMode::High)
+        );
+        assert_eq!(
+            parse_transceivers("cmis").unwrap(),
+            Transceivers::Kind(ManagementInterface::Cmis)
+        );
+        assert_eq!(
+            parse_transceivers("sff").unwrap(),
+            Transceivers::Kind(ManagementInterface::Sff8636)
+        );
+
+        let test_data = &[
+            ("0", PortMask(0b1)),
+            ("0,1,2", PortMask(0b111)),
+            ("0-2", PortMask(0b111)),
+            ("0,1-2", PortMask(0b111)),
+            ("0,0-2", PortMask(0b111)),
+            ("0,1,2,0-3", PortMask(0b1111)),
+        ];
+        for (s, m) in test_data.iter() {
+            assert_eq!(parse_transceivers(s).unwrap(), Transceivers::Ports(*m));
+        }
+
+        assert!(parse_transceivers(" ").is_err());
+        assert!(parse_transceivers("10000000").is_err());
+        assert!(parse_transceivers("0,-1").is_err());
+        assert!(parse_transceivers("1-").is_err());
+        assert!(parse_transceivers("1-0").is_err());
+        assert!(parse_transceivers("0,1000000").is_err());
+        assert!(parse_transceivers("0-10,1000000").is_err());
+        assert!(parse_transceivers("0-100").is_err());
     }
 }

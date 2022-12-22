@@ -1207,8 +1207,7 @@ impl IoLoop {
 
                     // Check that we have data, if the message is supposed to
                     // contain it.
-                    let expected_len = message.expected_data_len();
-                    let data = if expected_len > 0  {
+                    let data = if let Some(expected_len) = message.expected_data_len() {
                         if remainder.len() < expected_len {
                             error!(
                                 self.log,
