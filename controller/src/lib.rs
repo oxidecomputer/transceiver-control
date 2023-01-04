@@ -888,12 +888,14 @@ impl IoLoop {
                     let peer = IpAddr::V6(*self.peer_addr.ip());
                     (peer, &request.request.message)
                 });
-
-                // Reset the resend timer and increment the number of attempts.
                 self.resend.reset();
-                request.n_retries += 1;
             }
         }
+        // Increment the number of attempts, regardless of whether we could
+        // successfully send the request or not. The error could be on "our"
+        // side, e.g. an IP address or interface went away, but that should
+        // still be considered an attempt. Otherwise, we may retry indefinitely.
+        request.n_retries += 1;
     }
 
     async fn send_protocol_error(
