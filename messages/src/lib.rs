@@ -187,25 +187,50 @@ pub enum HwError {
     )]
     ControlPortReadFailed,
 
-    /// Failed to read the `EN` register
-    #[cfg_attr(any(test, feature = "std"), error("Failed to read `EN` register"))]
-    EnableReadFailed,
+    /// Failed while adjusting the power mode
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Failed while adjusting the power mode")
+    )]
+    PowerModeChangeFailed,
 
-    /// Failed to read the `RESET` register
-    #[cfg_attr(any(test, feature = "std"), error("Failed to read `RESET` register"))]
-    ResetReadFailed,
+    /// Failed to read the `POWER_EN` register
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Failed to read `POWER_EN` register")
+    )]
+    PowerEnableReadFailed,
+
+    /// Failed to write the `POWER_EN` register
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Failed to write `POWER_EN` register")
+    )]
+    PowerEnableWriteFailed,
+
+    /// Failed to read the `RESETL` register
+    #[cfg_attr(any(test, feature = "std"), error("Failed to read `RESETL` register"))]
+    ResetLReadFailed,
+
+    /// Failed to write the `RESETL` register
+    #[cfg_attr(any(test, feature = "std"), error("Failed to write `RESETL` register"))]
+    ResetLWriteFailed,
 
     /// Failed to read the `LPMODE` register
     #[cfg_attr(any(test, feature = "std"), error("Failed to read `LPMODE` register"))]
-    LpReadFailed,
+    LpModeReadFailed,
 
-    /// Failed to read the `PRESENT` register
-    #[cfg_attr(any(test, feature = "std"), error("Failed to read `PRESENT` register"))]
-    PresentReadFailed,
+    /// Failed to write the `LPMODE` register
+    #[cfg_attr(any(test, feature = "std"), error("Failed to write `LPMODE` register"))]
+    LpModeWriteFailed,
 
-    /// Failed to read the `IRQ` register
-    #[cfg_attr(any(test, feature = "std"), error("Failed to read `IRQ` register"))]
-    IrqReadFailed,
+    /// Failed to read the `MODPRSL` register
+    #[cfg_attr(any(test, feature = "std"), error("Failed to read `MODPRSL` register"))]
+    ModPrsLReadFailed,
+
+    /// Failed to read the `INTL` register
+    #[cfg_attr(any(test, feature = "std"), error("Failed to read `INTL` register"))]
+    IntLReadFailed,
 
     /// Failed to read the `PG` register
     #[cfg_attr(any(test, feature = "std"), error("Failed to read `PG` register"))]
