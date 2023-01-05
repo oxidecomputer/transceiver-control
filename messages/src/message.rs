@@ -108,6 +108,24 @@ pub enum HostRequest {
     /// Request that the modules be reset.
     Reset,
 
+    /// Request that the ResetL line be asserted.
+    AssertReset,
+
+    /// Request that the ResetL line be de-asserted.
+    DeassertReset,
+
+    /// Request that the LpMode line be asserted.
+    AssertLpMode,
+
+    /// Request that the LpMode line be de-asserted.
+    DeassertLpMode,
+
+    /// Request that power be enabled to a module should it be inserted.
+    EnablePower,
+
+    /// Request that power be disabled to a module should it be inserted.
+    DisablePower,
+
     /// Explicity request that the modules go into a specific power mode.
     ///
     /// Note that this includes the low- and high-power modes defined by the

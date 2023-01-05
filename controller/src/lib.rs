@@ -569,6 +569,72 @@ impl Controller {
         }
     }
 
+    /// Enable the hot swap controller for a set of transceiver modules.
+    pub async fn enable_power(&self, modules: ModuleId) -> Result<(), Error> {
+        self.no_payload_request(modules, HostRequest::EnablePower)
+            .await?;
+        Ok(())
+    }
+
+    /// Disable the hot swap controller for a set of transceiver modules.
+    pub async fn disable_power(&self, modules: ModuleId) -> Result<(), Error> {
+        self.no_payload_request(modules, HostRequest::DisablePower)
+            .await?;
+        Ok(())
+    }
+
+    /// Assert reset for a set of transceiver modules.
+    pub async fn assert_reset(&self, modules: ModuleId) -> Result<(), Error> {
+        self.no_payload_request(modules, HostRequest::AssertReset)
+            .await?;
+        Ok(())
+    }
+
+    /// Deassert reset for a set of transceiver modules.
+    pub async fn deassert_reset(&self, modules: ModuleId) -> Result<(), Error> {
+        self.no_payload_request(modules, HostRequest::DeassertReset)
+            .await?;
+        Ok(())
+    }
+
+    /// Assert lpmode for a set of transceiver modules.
+    pub async fn assert_lpmode(&self, modules: ModuleId) -> Result<(), Error> {
+        self.no_payload_request(modules, HostRequest::AssertLpMode)
+            .await?;
+        Ok(())
+    }
+
+    /// Deassert lpmode for a set of transceiver modules.
+    pub async fn deassert_lpmode(&self, modules: ModuleId) -> Result<(), Error> {
+        self.no_payload_request(modules, HostRequest::DeassertLpMode)
+            .await?;
+        Ok(())
+    }
+
+    /// Helper to create a request where the body is configurable and there is
+    /// no data payload needed.
+    async fn no_payload_request(
+        &self,
+        modules: ModuleId,
+        request: HostRequest,
+    ) -> Result<(), Error> {
+        let message = Message {
+            header: self.next_header(),
+            modules,
+            body: MessageBody::HostRequest(request),
+        };
+        let request = HostRpcRequest {
+            message,
+            data: None,
+        };
+        let response = self.rpc(request).await?;
+        match response.message.body {
+            MessageBody::SpResponse(SpResponse::Ack) => Ok(()),
+            MessageBody::SpResponse(SpResponse::Error(e)) => Err(Error::from(e)),
+            other => Err(Error::UnexpectedMessage(other)),
+        }
+    }
+
     /// Report the status of a set of transceiver modules.
     pub async fn status(&self, modules: ModuleId) -> Result<Vec<Status>, Error> {
         let message = Message {
