@@ -189,6 +189,13 @@ pub struct Config {
     /// The address on which to listen for messages.
     pub address: Ipv6Addr,
 
+    /// The source UDP port.
+    ///
+    /// This _must_ be [`PORT`] in order to receive unsolicited messages, but
+    /// may be anything else if one only cares about responses to outgoing
+    /// requests.
+    pub port: u16,
+
     /// The name of the interface on which to listen.
     pub interface: String,
 
@@ -263,6 +270,7 @@ pub fn find_interface_link_local_addr(name: &str) -> Result<Ipv6Addr, Error> {
 pub struct ConfigBuilder {
     interface: String,
     address: Option<Ipv6Addr>,
+    port: Option<u16>,
     peer: Option<Ipv6Addr>,
     retry_interval: Option<Duration>,
     n_retries: Option<usize>,
@@ -280,6 +288,12 @@ impl ConfigBuilder {
     /// Set the IPv6 address used for the controller.
     pub fn address(mut self, address: impl Into<Ipv6Addr>) -> Self {
         self.address = Some(address.into());
+        self
+    }
+
+    /// Set the UDP port used for the controller.
+    pub fn port(mut self, port: u16) -> Self {
+        self.port = Some(port);
         self
     }
 
@@ -317,6 +331,7 @@ impl ConfigBuilder {
         Ok(Config {
             interface: self.interface,
             address,
+            port: self.port.unwrap_or(PORT),
             peer: self.peer.unwrap_or_else(default_peer_addr),
             retry_interval: self.retry_interval.unwrap_or_else(default_retry_interval),
             n_retries: self.n_retries,
@@ -364,13 +379,13 @@ impl Controller {
 
         let iface = if_nametoindex(config.interface.as_str())
             .map_err(|_| Error::BadInterface(config.interface.clone()))?;
-        let local_addr = SocketAddrV6::new(config.address, PORT, 0, iface);
+        let local_addr = SocketAddrV6::new(config.address, config.port, 0, iface);
         let socket = UdpSocket::bind(local_addr).await?;
         debug!(
             log,
             "bound UDP socket";
             "interface" => &config.interface,
-            "local_addr" => ?local_addr,
+            "local_addr" => ?socket.local_addr(),
         );
 
         // Join the group for the multicast protocol address, so that we can
