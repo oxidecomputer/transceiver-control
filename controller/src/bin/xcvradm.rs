@@ -151,6 +151,10 @@ struct Args {
     #[arg(short, long)]
     interface: String,
 
+    /// The source UDP port from which to send messages.
+    #[arg(short = 'P', long, default_value_t = 0)]
+    port: u16,
+
     /// The unicast peer address to assume.
     ///
     /// The protocol is normally run using a multicast address, but a single
@@ -384,6 +388,7 @@ async fn main() -> anyhow::Result<()> {
     let config = Config {
         address: args.address,
         interface: args.interface,
+        port: args.port,
         peer: args
             .peer
             .unwrap_or_else(|| Ipv6Addr::from(transceiver_messages::ADDR)),
