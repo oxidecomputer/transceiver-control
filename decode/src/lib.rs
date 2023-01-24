@@ -669,6 +669,76 @@ impl ParseFromModule for MemoryModel {
     }
 }
 
+/// Description of software power control override status for a module.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PowerControl {
+    /// If true, the module is configured for software control of low power
+    /// mode. In this case, the `LPMode` pin has no effect.
+    pub software_override: bool,
+    /// If true, the module is set to low power mode by software. If `false`,
+    /// then the module is allowed to enter high power mode.
+    ///
+    /// This is _only meaningful_ if `software_override` is `true`.
+    pub low_power: bool,
+}
+
+impl ParseFromModule for PowerControl {
+    fn reads(id: Identifier) -> Result<Vec<MemoryRead>, Error> {
+        match id {
+            Identifier::QsfpPlusSff8636 | Identifier::Qsfp28 => {
+                // See SFF-8636 rev 2.10a Table 6-9.
+                //
+                // Byte 93, bit 0 contains the software override bit, and bit 1
+                // if the module is forced to low power.
+                let page = sff8636::Page::Lower;
+                let power = MemoryRead::new(page, 93, 1).unwrap();
+                Ok(vec![power])
+            }
+            Identifier::QsfpPlusCmis | Identifier::QsfpDD => {
+                // See CMIS 5.0 table 8-10.
+                //
+                // Byte 26, bit 6 contains the software override bit, and bit 4
+                // if the module is forced to low power. Note that the override
+                // bit is really phrased as "allow the module to evaluate the
+                // LPMode pin." That is, `0b1` means `LPMode` controls the
+                // system, and `0b0` means software does.
+                let page = cmis::Page::Lower;
+                let power = MemoryRead::new(page, 26, 1).unwrap();
+                Ok(vec![power])
+            }
+            _ => Err(Error::UnsupportedIdentifier(id)),
+        }
+    }
+
+    fn parse<'a>(id: Identifier, mut reads: impl Iterator<Item = &'a [u8]>) -> Result<Self, Error> {
+        match id {
+            Identifier::QsfpPlusSff8636 | Identifier::Qsfp28 => {
+                // Bit 0 -> override, bit 1 -> force low-power.
+                reads
+                    .next()
+                    .and_then(|bytes| bytes.first())
+                    .ok_or(Error::ParseFailed)
+                    .map(|power| PowerControl {
+                        software_override: (power & 0b1) == 0b1,
+                        low_power: (power & 0b10) == 0b10,
+                    })
+            }
+            Identifier::QsfpPlusCmis | Identifier::QsfpDD => {
+                // Bit 6 -> override (but see above), bit 4 -> force low-power.
+                reads
+                    .next()
+                    .and_then(|bytes| bytes.first())
+                    .ok_or(Error::ParseFailed)
+                    .map(|power| PowerControl {
+                        software_override: (power & 0b0100_0000) == 0,
+                        low_power: (power & 0b0001_0000) == 0b0001_0000,
+                    })
+            }
+            _ => Err(Error::UnsupportedIdentifier(id)),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::DateCode;
@@ -676,6 +746,7 @@ mod tests {
     use super::MemoryModel;
     use super::NaiveDate;
     use super::ParseFromModule;
+    use super::PowerControl;
     use super::Vendor;
 
     #[test]
@@ -839,5 +910,39 @@ mod tests {
         let bytes = expected.to_bytes();
         let deser = DateCode::from(bytes);
         assert_eq!(expected, deser);
+    }
+
+    #[test]
+    fn test_power_control_from_module_sff8636() {
+        let id = Identifier::Qsfp28;
+
+        let bytes = [0b11u8]; // Power override, set to low power.
+        let control = PowerControl::parse(id, std::iter::once(bytes.as_slice())).unwrap();
+        assert!(control.software_override);
+        assert!(control.low_power);
+
+        let bytes = [0b01u8]; // Power override, _not_ set to low power.
+        let control = PowerControl::parse(id, std::iter::once(bytes.as_slice())).unwrap();
+        assert!(control.software_override);
+        assert!(!control.low_power);
+    }
+
+    #[test]
+    fn test_power_control_from_module_cmis() {
+        let id = Identifier::QsfpPlusCmis;
+
+        let bytes = [0b0100_0000]; // NOT power override.
+        let control = PowerControl::parse(id, std::iter::once(bytes.as_slice())).unwrap();
+        assert!(!control.software_override);
+
+        let bytes = [0b0000_0000]; // YES power override, not low power
+        let control = PowerControl::parse(id, std::iter::once(bytes.as_slice())).unwrap();
+        assert!(control.software_override);
+        assert!(!control.low_power);
+
+        let bytes = [0b0001_0000]; // Power override, set to low power.
+        let control = PowerControl::parse(id, std::iter::once(bytes.as_slice())).unwrap();
+        assert!(control.software_override);
+        assert!(control.low_power);
     }
 }

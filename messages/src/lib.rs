@@ -345,18 +345,25 @@ impl PortMask {
         }
     }
 
-    /// Construct a port bitmask from a slice of indices.
+    /// Construct a port bitmask from an iterator over indices.
     ///
     /// If any index is out of bounds, an error is returned.
-    pub fn from_indices(indices: &[u8]) -> Result<Self, Error> {
+    pub fn from_index_iter<I: Iterator<Item = u8>>(it: I) -> Result<Self, Error> {
         let mut out = 0;
-        for index in indices.iter().copied() {
+        for index in it {
             if index >= Self::MAX_INDEX {
                 return Err(Error::InvalidPort(index));
             }
             out |= 1 << index;
         }
         Ok(Self(out))
+    }
+
+    /// Construct a port bitmask from a slice of indices.
+    ///
+    /// If any index is out of bounds, an error is returned.
+    pub fn from_indices(indices: &[u8]) -> Result<Self, Error> {
+        Self::from_index_iter(indices.iter().copied())
     }
 
     /// Return the indices of the ports identified by the bitmask.
@@ -383,6 +390,17 @@ impl PortMask {
     pub const fn all() -> Self {
         Self(!0)
     }
+
+    /// Return the set of modules that are in `self` and not `other`.
+    pub const fn remove(&self, other: PortMask) -> PortMask {
+        Self(self.0 & !other.0)
+    }
+
+    /// Return `true` if the provided index is contained in set of addressed
+    /// modules.
+    pub const fn contains(&self, ix: u8) -> bool {
+        (self.0 & (1 << ix)) != 0
+    }
 }
 
 /// Identifier for a set of transceiver modules accessed through a single FPGA.
@@ -405,6 +423,12 @@ impl ModuleId {
             fpga_id,
             ports: PortMask::all(),
         }
+    }
+
+    /// Return `true` if the provided index is contained in set of addressed
+    /// modules.
+    pub const fn contains(&self, ix: u8) -> bool {
+        self.ports.contains(ix)
     }
 }
 
@@ -459,5 +483,19 @@ mod tests {
     #[test]
     fn test_selected_transceiver_count() {
         assert_eq!(PortMask(0b101).selected_transceiver_count(), 2);
+    }
+
+    #[test]
+    fn test_port_mask_remove() {
+        let mask = PortMask(0b111);
+        let other = PortMask(0b001);
+        assert_eq!(mask.remove(other), PortMask(0b110));
+    }
+
+    #[test]
+    fn test_port_mask_contains() {
+        let mask = PortMask(0b01);
+        assert!(mask.contains(0));
+        assert!(!mask.contains(1));
     }
 }

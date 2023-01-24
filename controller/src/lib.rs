@@ -37,6 +37,7 @@ use transceiver_decode::Error as DecodeError;
 use transceiver_decode::Identifier;
 use transceiver_decode::MemoryModel;
 use transceiver_decode::ParseFromModule;
+use transceiver_decode::PowerControl;
 use transceiver_decode::Vendor;
 use transceiver_decode::VendorInfo;
 use transceiver_messages::message;
@@ -102,10 +103,13 @@ pub enum Error {
         memory operation ({0:?})"
     )]
     InvalidInterfaceForModule(ManagementInterface),
+
+    #[error("Invalid power state transition")]
+    InvalidPowerStateTransition,
 }
 
 /// An allowed power mode for the module.
-#[derive(Clone, Debug, PartialEq, clap::ValueEnum)]
+#[derive(Clone, Copy, Debug, PartialEq, clap::ValueEnum)]
 pub enum PowerMode {
     /// A module is entirely powered off, using the EFuse.
     Off,
@@ -508,48 +512,14 @@ impl Controller {
 
     /// Return the vendor information of a set of modules.
     pub async fn vendor_info(&self, modules: ModuleId) -> Result<Vec<VendorInfo>, Error> {
-        let ids = self.identifier(modules).await?;
-        let modules_by_id = Self::split_modules_by_identifier(modules, &ids);
-        let mut identity = BTreeMap::new();
-
-        // Read data for each kind of module independently.
-        for (id, modules) in modules_by_id.into_iter() {
-            // Issue the reads for each chunk of data for this kind of module.
-            let reads = Vendor::reads(id)?;
-            let vendor_data = {
-                let mut vendor_data = Vec::with_capacity(reads.len());
-                for read in reads.into_iter() {
-                    vendor_data.push(self.read(modules, read).await?);
-                }
-                vendor_data
-            };
-
-            // Parse the vendor data itself for each module.
-            //
-            // `vendor_data` is a Vec<Vec<Vec<u8>>> where they are, from outer
-            // to inner:
-            //
-            // - Each read, defined by `Vendor::reads`.
-            // - Each _module_ of the same kind.
-            // - Bytes for that read and module.
-            //
-            // So the data for each module is at a single index of the second
-            // array, and the full contents along the other two dimensions. (In
-            // ndarray notation, something like `vendor_data[..][i][..]`.)
-            for (i, port) in modules.ports.to_indices().enumerate() {
-                let parse_data = vendor_data.iter().map(|read| read[i].as_slice());
-                let vendor = Vendor::parse(id, parse_data)?;
-                let ident = VendorInfo {
-                    identifier: id,
-                    vendor,
-                };
-                identity.insert(port, ident);
-            }
-        }
-
-        // Sort by index, so that the returned `Vec<_>` maps to the return value
-        // of `modules.ports.to_indices()`.
-        Ok(identity.into_iter().map(|(_k, v)| v).collect())
+        self.parse_modules_by_identifier::<Vendor>(modules)
+            .await
+            .map(|collection| {
+                collection
+                    .into_values()
+                    .map(|(identifier, vendor)| VendorInfo { identifier, vendor })
+                    .collect()
+            })
     }
 
     /// Reset a set of transceiver modules.
@@ -557,12 +527,148 @@ impl Controller {
         todo!()
     }
 
-    /// Set the power mode for a set of transceiver modules.
-    pub async fn set_power_mode(&self, _modules: ModuleId, _mode: PowerMode) -> Result<(), Error> {
-        todo!()
+    // Fetch the software power control state of a set of modules.
+    async fn power_control(&self, modules: ModuleId) -> Result<Vec<PowerControl>, Error> {
+        self.parse_modules_by_identifier::<PowerControl>(modules)
+            .await
+            .map(|collection| {
+                collection
+                    .into_values()
+                    .map(|(_id, control)| control)
+                    .collect()
+            })
+    }
+
+    // Return the subset of `modules` where `f(status) == true`.
+    fn filter_modules_with<F>(modules: ModuleId, status: &[Status], f: F) -> Result<ModuleId, Error>
+    where
+        F: Fn(Status) -> bool,
+    {
+        PortMask::from_index_iter(
+            modules
+                .ports
+                .to_indices()
+                .zip(status.into_iter())
+                .filter_map(|(ix, st)| if f(*st) { Some(ix) } else { None }),
+        )
+        .map(|ports| ModuleId {
+            fpga_id: modules.fpga_id,
+            ports,
+        })
+        .map_err(Error::from)
+    }
+
+    /// Get the power mode of a set of transceiver modules.
+    ///
+    /// For each module, this returns the actual `PowerMode`, as well as whether
+    /// the module has set software-override of power control. In the case where
+    /// the module is in off, that can't be determined, and `None` is returned.
+    pub async fn power_mode(
+        &self,
+        modules: ModuleId,
+    ) -> Result<Vec<(PowerMode, Option<bool>)>, Error> {
+        // Split the requested modules into those with power enabled via the
+        // e-fuse, and those without. The latter are always reported as off.
+        let status = self.status(modules).await?;
+        let unpowered_modules = Self::filter_modules_with(modules, &status, |status| {
+            !status.contains(Status::POWER_GOOD | Status::ENABLED)
+        })?;
+        let powered_modules = ModuleId {
+            fpga_id: modules.fpga_id,
+            ports: modules.ports.remove(unpowered_modules.ports),
+        };
+
+        // Of the powered modules, those in reset must be also be considered
+        // Off.
+        //
+        // Filter down the status of all modules to those that are powered.
+        let powered_status: Vec<_> = status
+            .iter()
+            .copied()
+            .enumerate()
+            .filter_map(|(ix, st)| {
+                let index = u8::try_from(ix).expect("Impossible index");
+                if powered_modules.contains(index) {
+                    Some(st)
+                } else {
+                    None
+                }
+            })
+            .collect();
+        let in_reset = Self::filter_modules_with(powered_modules, &powered_status, |status| {
+            status.contains(Status::RESET)
+        })?;
+
+        // Let's collect the set of modules we already know the power mode for.
+        // We'll add in the mode for those that are readable below, since we
+        // only want to _issue_ the read request if we have 1 or more modules to
+        // read.
+        //
+        // Note that we don't explicitly set the power mode of the unpowered
+        // modules or those in reset. Those are off, which is the value we fill
+        // this array with, so setting those is redundant.
+        let mut out = vec![(PowerMode::Off, None); modules.selected_transceiver_count()];
+
+        // We've whittled this down to the set of modules we can read from,
+        // which means we can determine whether software-override of power
+        // control is enabled.
+        let readable_modules = ModuleId {
+            fpga_id: modules.fpga_id,
+            ports: powered_modules.ports.remove(in_reset.ports),
+        };
+        let readable_status: Vec<_> = status
+            .iter()
+            .copied()
+            .enumerate()
+            .filter_map(|(ix, st)| {
+                let index = u8::try_from(ix).expect("Impossible index");
+                if readable_modules.contains(index) {
+                    Some(st)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // If there are any such modules, read from them and write in their
+        // power mode.
+        if readable_modules.selected_transceiver_count() > 0 {
+            let ctl = self.power_control(readable_modules).await?;
+            let readable_power_mode =
+                ctl.into_iter()
+                    .zip(readable_status.into_iter())
+                    .map(|(ctl, status)| {
+                        // If software is in charge, report what it says.
+                        if ctl.software_override {
+                            let mode = if ctl.low_power {
+                                PowerMode::Low
+                            } else {
+                                PowerMode::High
+                            };
+                            (mode, Some(true))
+                        } else {
+                            // Hardware is in charge, so report the state of the
+                            // `LPMode` pin itself.
+                            let mode = if status.contains(Status::LOW_POWER_MODE) {
+                                PowerMode::Low
+                            } else {
+                                PowerMode::High
+                            };
+                            (mode, Some(false))
+                        }
+                    });
+            for (i, state) in readable_modules.ports.to_indices().zip(readable_power_mode) {
+                out[usize::from(i)] = state;
+            }
+        }
+
+        Ok(out)
     }
 
     /// Enable the hot swap controller for a set of transceiver modules.
+    ///
+    /// See the `set_power_mode` method for a higher-level interface to set the
+    /// power to a specific mode.
     pub async fn enable_power(&self, modules: ModuleId) -> Result<(), Error> {
         self.no_payload_request(modules, HostRequest::EnablePower)
             .await?;
@@ -570,6 +676,9 @@ impl Controller {
     }
 
     /// Disable the hot swap controller for a set of transceiver modules.
+    ///
+    /// See the `set_power_mode` method for a higher-level interface to set the
+    /// power to a specific mode.
     pub async fn disable_power(&self, modules: ModuleId) -> Result<(), Error> {
         self.no_payload_request(modules, HostRequest::DisablePower)
             .await?;
@@ -593,6 +702,9 @@ impl Controller {
     /// Assert physical lpmode pin for a set of transceiver modules. Note: The
     /// effect this pin has on operation can change depending on if the software
     /// override of power control is set.
+    ///
+    /// See the `set_power_mode` method for a higher-level interface to set the
+    /// power to a specific mode.
     pub async fn assert_lpmode(&self, modules: ModuleId) -> Result<(), Error> {
         self.no_payload_request(modules, HostRequest::AssertLpMode)
             .await?;
@@ -602,6 +714,9 @@ impl Controller {
     /// Deassert physical lpmode pin for a set of transceiver modules. Note: The
     /// effect this pin has on operation can change depending on if the software
     /// override of power control is set.
+    ///
+    /// See the `set_power_mode` method for a higher-level interface to set the
+    /// power to a specific mode.
     pub async fn deassert_lpmode(&self, modules: ModuleId) -> Result<(), Error> {
         self.no_payload_request(modules, HostRequest::DeassertLpMode)
             .await?;
@@ -630,6 +745,215 @@ impl Controller {
             MessageBody::SpResponse(SpResponse::Error(e)) => Err(Error::from(e)),
             other => Err(Error::UnexpectedMessage(other)),
         }
+    }
+
+    /// Set the power mode for a set of transceiver modules.
+    ///
+    /// This method may be used regardless of whether a module uses hardware
+    /// control or software override for controlling the power.
+    pub async fn set_power_mode(&self, modules: ModuleId, mode: PowerMode) -> Result<(), Error> {
+        // How we proceed largely depends on two things: whether we're turning
+        // the power OFF entirely, and whether a module has set software
+        // override of the `LPMode` pin.
+        match mode {
+            PowerMode::Off => {
+                self.assert_lpmode(modules).await?;
+                self.assert_reset(modules).await?;
+                self.disable_power(modules).await
+            }
+            other => {
+                // Validate the power state transition.
+                //
+                // For now, we enforce that modules may not go directly to high
+                // power, they have to go through low-lower first.
+                //
+                // We can always set modules to low power, though, since that's
+                // valid from both off and high-power, and a no-op if it's
+                // already set.
+                let current_power_state = self.power_mode(modules).await?;
+                if matches!(mode, PowerMode::High) {
+                    if current_power_state
+                        .iter()
+                        .any(|(mode, _override)| mode == &PowerMode::Off)
+                    {
+                        return Err(Error::InvalidPowerStateTransition);
+                    }
+                }
+
+                // We need the status bits to determine if we also need to
+                // twiddle `ResetL`.
+                let status = self.status(modules).await?;
+
+                // Check whether power is enabled / good, and / or reset
+                // asserted for any of the requested modules. We need to manage
+                // those pin states to control the power. Note that this is true
+                // regardless of whether the module has software-override of
+                // power control set. That's because we want the pins and the
+                // memory map to reflect the same state, so that toggling the
+                // software override doesn't change the power state of the
+                // module, only which hardware signals it responds to.
+                let need_power_enabled = Self::filter_modules_with(modules, &status, |st| {
+                    !st.contains(Status::POWER_GOOD | Status::ENABLED)
+                })?;
+                let need_reset_deasserted =
+                    Self::filter_modules_with(modules, &status, |st| st.contains(Status::RESET))?;
+                if need_power_enabled.selected_transceiver_count() > 0 {
+                    self.enable_power(need_power_enabled).await?;
+                }
+                if need_reset_deasserted.selected_transceiver_count() > 0 {
+                    self.deassert_reset(need_reset_deasserted).await?;
+
+                    // The SFF-8769 specifies that modules may take up to 2
+                    // seconds after asserting ResetL before they are ready for
+                    // reads.
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+
+                // Actually write the power mode, the pin and to the memory map.
+                self.set_lp_mode(modules, &current_power_state, other).await
+            }
+        }
+    }
+
+    // Set the LPMode, either via the pin if under hardware control, or by
+    // writing to a specific bit of the map, if under software control.
+    //
+    // # Note
+    //
+    // This method always sets both the hardware `LPMode` signal and writes the
+    // corresponding value to the module's memory map. That's true, even if the
+    // module will ignore one of those values. The goal here is to keep both in
+    // sync, so that modifying software override doesn't also change the power
+    // state.
+    //
+    // # Panics
+    //
+    // Panics if `mode` is not `PowerMode::{Low,High}`, since `PowerMode::Off`
+    // isn't relevant to this interface.
+    async fn set_lp_mode(
+        &self,
+        modules: ModuleId,
+        current_power_state: &[(PowerMode, Option<bool>)],
+        mode: PowerMode,
+    ) -> Result<(), Error> {
+        assert!(matches!(mode, PowerMode::Low | PowerMode::High));
+
+        // Set the `LPMode` pin of all addressed modules to the correct state.
+        // Note that we do this even if the module will ignore that.
+        if matches!(mode, PowerMode::Low) {
+            self.assert_lpmode(modules).await?;
+        } else {
+            self.deassert_lpmode(modules).await?;
+        }
+
+        // Also write to the memory map to describe the power mode.
+        //
+        // Note that we also do this for all modules, again to keep the power
+        // state in sync between the memory map and the hardware signals.
+        self.set_software_power_mode(modules, current_power_state, mode)
+            .await
+    }
+
+    // Set the power mode assuming software control. _NO CHECKING_ is done as to
+    // whether that is the case.
+    //
+    // # Panics
+    //
+    // Panics if `mode` is not `PowerMode::{Low,High}` since `PowerMode::Off`
+    // isn't relevant to this interface.
+    async fn set_software_power_mode(
+        &self,
+        modules: ModuleId,
+        current_power_state: &[(PowerMode, Option<bool>)],
+        mode: PowerMode,
+    ) -> Result<(), Error> {
+        assert!(matches!(mode, PowerMode::Low | PowerMode::High));
+
+        // Split the software controlled modules by their identifiers, since we
+        // need to write to different regions of the memory map in that case.
+        let identifiers = self.identifier(modules).await?;
+        let split = Self::split_modules_by_identifier(modules, &identifiers);
+        for (ident, modules) in split.into_iter() {
+            // Splitting by identifier is not enough, as it is for other cases.
+            // We also need to avoid changing the software override bit, so
+            // we'll further split this set of modules into those _with_ and
+            // _without_ software override.
+            let (with_override, without_override): (Vec<_>, Vec<_>) = modules
+                .ports
+                .to_indices()
+                .partition(|ix| matches!(current_power_state[usize::from(*ix)].1, Some(true)));
+
+            let with_override = ModuleId {
+                fpga_id: modules.fpga_id,
+                ports: PortMask::from_index_iter(with_override.into_iter())?,
+            };
+            let without_override = ModuleId {
+                fpga_id: modules.fpga_id,
+                ports: PortMask::from_index_iter(without_override.into_iter())?,
+            };
+
+            for (with_override, modules) in [(true, with_override), (false, without_override)] {
+                // TODO-completeness: Consider adding this to the
+                // `ParseFromModule` trait, since that encodes these locations
+                // for _reads_, but not writes. We could require the implementor
+                // to specify these locations themselves in the trait, and the
+                // _provide_ a function that converts them to reads / writes.
+                let (write, word) = match ident {
+                    Identifier::QsfpPlusSff8636 | Identifier::Qsfp28 => {
+                        let write = MemoryWrite::new(sff8636::Page::Lower, 93, 1)?;
+                        // Byte 93.
+                        //
+                        // Bit 0: Set software override.
+                        //
+                        // Bit 1: Set to LPMode.
+                        //
+                        // TODO-correctness: We're technically clobbering whether
+                        // the other, higher power classes are enabled. If we're
+                        // setting into LPMode, that's fine. It seems like this only
+                        // matters if we're setting into high-power mode, when we
+                        // were already there, _and_ something had enabled those
+                        // higher power classes. These bits are also optional, so
+                        // we're deferring this for now.
+                        let override_bit = if with_override { 0b01 } else { 0b00 };
+                        let mode_bit = if matches!(mode, PowerMode::Low) {
+                            0b10
+                        } else {
+                            0b00
+                        };
+                        (write, mode_bit | override_bit)
+                    }
+                    Identifier::QsfpPlusCmis | Identifier::QsfpDD => {
+                        let write = MemoryWrite::new(sff8636::Page::Lower, 26, 1)?;
+                        // Byte 26.
+                        //
+                        // Bit 6: 1 if the module should evaluate the hardware pin.
+                        //
+                        // Bit 4: Request low power mode.
+                        //
+                        // TODO-correctness: We're technically clobbering bit 5,
+                        // which selects the squelch method. We should really be
+                        // reading, OR'ing that bit, and writing back.
+                        let override_bit = if with_override {
+                            0b0000_0000
+                        } else {
+                            0b0100_0000
+                        };
+                        let mode_bit = if matches!(mode, PowerMode::Low) {
+                            0b0001_0000
+                        } else {
+                            0b0000_0000
+                        };
+                        (write, mode_bit | override_bit)
+                    }
+                    id => return Err(Error::from(DecodeError::UnsupportedIdentifier(id))),
+                };
+
+                // Issue the write.
+                self.write_impl(modules, write, &[word]).await?;
+            }
+        }
+
+        Ok(())
     }
 
     /// Report the status of a set of transceiver modules.
@@ -751,33 +1075,48 @@ impl Controller {
 
     /// Describe the memory model of a set of modules.
     pub async fn memory_model(&self, modules: ModuleId) -> Result<Vec<MemoryModel>, Error> {
+        self.parse_modules_by_identifier::<MemoryModel>(modules)
+            .await
+            .map(|collection| collection.into_values().map(|(_id, model)| model).collect())
+    }
+
+    // Parse a decodable piece of data from each module.
+    //
+    // This uses the `ParseFromModule` trait to decode the memory map for each
+    // _kind_ of module in `modules` depending on their identifier. That is, it
+    // issues one message for all modules of the same kind.
+    //
+    // Data is returned as a map from module index (u8) to pairs of (Identifier,
+    // P). This allows users to collect data into collections based on the index
+    // or Identifier.
+    async fn parse_modules_by_identifier<P: ParseFromModule>(
+        &self,
+        modules: ModuleId,
+    ) -> Result<BTreeMap<u8, (Identifier, P)>, Error> {
         let ids = self.identifier(modules).await?;
         let modules_by_id = Self::split_modules_by_identifier(modules, &ids);
-        let mut models = BTreeMap::new();
+        let mut data_by_module = BTreeMap::new();
 
         // Read data for each _kind_ of module independently.
         for (id, modules) in modules_by_id.into_iter() {
             // Issue the reads for each chunk of data for this kind of module.
-            let reads = MemoryModel::reads(id)?;
-            let model_data = {
-                let mut model_data = Vec::with_capacity(reads.len());
+            let reads = P::reads(id)?;
+            let data = {
+                let mut data = Vec::with_capacity(reads.len());
                 for read in reads.into_iter() {
-                    model_data.push(self.read(modules, read).await?);
+                    data.push(self.read(modules, read).await?);
                 }
-                model_data
+                data
             };
 
-            // Parse the memory model for each module.
+            // Parse the data for each module.
             for (i, port) in modules.ports.to_indices().enumerate() {
-                let parse_data = model_data.iter().map(|read| read[i].as_slice());
-                let model = MemoryModel::parse(id, parse_data)?;
-                models.insert(port, model);
+                let parse_data = data.iter().map(|read| read[i].as_slice());
+                let parsed = P::parse(id, parse_data)?;
+                data_by_module.insert(port, (id, parsed));
             }
         }
-
-        // Sort by index, so that the returned `Vec<_>` maps to the return value
-        // of `modules.ports.to_indices()`.
-        Ok(models.into_iter().map(|(_k, v)| v).collect())
+        Ok(data_by_module)
     }
 
     // Issue one RPC, possibly retrying, and await the response.
