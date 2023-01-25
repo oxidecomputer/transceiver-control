@@ -45,7 +45,6 @@ use transceiver_messages::message::HostRequest;
 use transceiver_messages::message::HostResponse;
 use transceiver_messages::message::Message;
 use transceiver_messages::message::MessageBody;
-pub use transceiver_messages::message::PowerMode;
 use transceiver_messages::message::SpResponse;
 pub use transceiver_messages::message::Status;
 pub use transceiver_messages::mgmt;
@@ -103,6 +102,29 @@ pub enum Error {
         memory operation ({0:?})"
     )]
     InvalidInterfaceForModule(ManagementInterface),
+}
+
+/// An allowed power mode for the module.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, SerializedSize)]
+#[cfg_attr(feature = "std", derive(clap::ValueEnum))]
+pub enum PowerMode {
+    /// A module is entirely powered off, using the EFuse.
+    Off,
+
+    /// Power is enabled to the module, but the `LPMode` pin is set to high.
+    ///
+    /// Note: This requires that we never set the `Power_override` bit (SFF-8636
+    /// rev 2.10a, section 6.2.6, byte 93 bit 2), as that defeats the purpose of
+    /// hardware control.
+    Low,
+
+    /// The module is in high-power mode.
+    ///
+    /// Note that additional configuration may be required to correctly
+    /// configure the module, such as described in SFF-8636 rev 2.10a table
+    /// 6-10, and that the _host side_ is responsible for ensuring that the
+    /// relevant configuration is applied.
+    High,
 }
 
 // A request sent from host to SP, possibly with trailing data.
@@ -552,21 +574,7 @@ impl Controller {
 
     /// Set the power mode for a set of transceiver modules.
     pub async fn set_power_mode(&self, modules: ModuleId, mode: PowerMode) -> Result<(), Error> {
-        let message = Message {
-            header: self.next_header(),
-            modules,
-            body: MessageBody::HostRequest(HostRequest::SetPowerMode(mode)),
-        };
-        let request = HostRpcRequest {
-            message,
-            data: None,
-        };
-        let response = self.rpc(request).await?;
-        match response.message.body {
-            MessageBody::SpResponse(SpResponse::Ack) => Ok(()),
-            MessageBody::SpResponse(SpResponse::Error(e)) => Err(Error::from(e)),
-            other => Err(Error::UnexpectedMessage(other)),
-        }
+        todo!()
     }
 
     /// Enable the hot swap controller for a set of transceiver modules.
@@ -597,14 +605,18 @@ impl Controller {
         Ok(())
     }
 
-    /// Assert lpmode for a set of transceiver modules.
+    /// Assert physical lpmode pin for a set of transceiver modules. Note: The
+    /// effect this pin has on operation can change depending on if the software
+    /// override of power control is set.
     pub async fn assert_lpmode(&self, modules: ModuleId) -> Result<(), Error> {
         self.no_payload_request(modules, HostRequest::AssertLpMode)
             .await?;
         Ok(())
     }
 
-    /// Deassert lpmode for a set of transceiver modules.
+    /// Deassert physical lpmode pin for a set of transceiver modules. Note: The
+    /// effect this pin has on operation can change depending on if the software
+    /// override of power control is set.
     pub async fn deassert_lpmode(&self, modules: ModuleId) -> Result<(), Error> {
         self.no_payload_request(modules, HostRequest::DeassertLpMode)
             .await?;

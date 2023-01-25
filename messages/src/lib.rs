@@ -103,10 +103,6 @@ pub enum Error {
     #[cfg_attr(any(test, feature = "std"), error("Failure reading status: {0}"))]
     StatusFailed(HwError),
 
-    /// Failed to set power mode
-    #[cfg_attr(any(test, feature = "std"), error("Failure to set power mode: {0}"))]
-    PowerModeFailed(HwError),
-
     /// A request would result in a response that is too large to fit in a
     /// single UDP message.
     #[cfg_attr(
@@ -186,13 +182,6 @@ pub enum HwError {
         error("Failed to read `CONTROL_PORT` register")
     )]
     ControlPortReadFailed,
-
-    /// Failed while adjusting the power mode
-    #[cfg_attr(
-        any(test, feature = "std"),
-        error("Failed while adjusting the power mode")
-    )]
-    PowerModeChangeFailed,
 
     /// Failed to read the `POWER_EN` register
     #[cfg_attr(
