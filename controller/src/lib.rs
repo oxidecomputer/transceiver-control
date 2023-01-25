@@ -105,7 +105,7 @@ pub enum Error {
 }
 
 /// An allowed power mode for the module.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, SerializedSize)]
+#[derive(Clone, Debug,)]
 #[cfg_attr(feature = "std", derive(clap::ValueEnum))]
 pub enum PowerMode {
     /// A module is entirely powered off, using the EFuse.
@@ -573,7 +573,7 @@ impl Controller {
     }
 
     /// Set the power mode for a set of transceiver modules.
-    pub async fn set_power_mode(&self, modules: ModuleId, mode: PowerMode) -> Result<(), Error> {
+    pub async fn set_power_mode(&self, _modules: ModuleId, _mode: PowerMode) -> Result<(), Error> {
         todo!()
     }
 
