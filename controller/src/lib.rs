@@ -106,7 +106,7 @@ pub enum Error {
 
 /// An allowed power mode for the module.
 #[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "std", derive(clap::ValueEnum))]
+#[derive(clap::ValueEnum)]
 pub enum PowerMode {
     /// A module is entirely powered off, using the EFuse.
     Off,
