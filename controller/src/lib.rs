@@ -553,7 +553,7 @@ impl Controller {
     }
 
     /// Reset a set of transceiver modules.
-    pub async fn reset(&self, modules: ModuleId) -> Result<(), Error> {
+    pub async fn reset(&self, _modules: ModuleId) -> Result<(), Error> {
         todo!()
     }
 
