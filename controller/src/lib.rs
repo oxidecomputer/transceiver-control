@@ -554,21 +554,7 @@ impl Controller {
 
     /// Reset a set of transceiver modules.
     pub async fn reset(&self, modules: ModuleId) -> Result<(), Error> {
-        let message = Message {
-            header: self.next_header(),
-            modules,
-            body: MessageBody::HostRequest(HostRequest::Reset),
-        };
-        let request = HostRpcRequest {
-            message,
-            data: None,
-        };
-        let response = self.rpc(request).await?;
-        match response.message.body {
-            MessageBody::SpResponse(SpResponse::Ack) => Ok(()),
-            MessageBody::SpResponse(SpResponse::Error(e)) => Err(Error::from(e)),
-            other => Err(Error::UnexpectedMessage(other)),
-        }
+        todo!()
     }
 
     /// Set the power mode for a set of transceiver modules.

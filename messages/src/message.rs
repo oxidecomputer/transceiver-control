@@ -106,9 +106,6 @@ pub enum HostRequest {
     /// Request to return the status of the transceiver's modules.
     Status,
 
-    /// Request that the modules be reset.
-    Reset,
-
     /// Request that the ResetL line be asserted.
     AssertReset,
 

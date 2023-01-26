@@ -95,10 +95,6 @@ pub enum Error {
     #[cfg_attr(any(test, feature = "std"), error("Failure during write: {0}"))]
     WriteFailed(HwError),
 
-    /// A reset failed for some reason.
-    #[cfg_attr(any(test, feature = "std"), error("Failure during reset: {0}"))]
-    ResetFailed(HwError),
-
     /// Reading transceiver status failed for some reason.
     #[cfg_attr(any(test, feature = "std"), error("Failure reading status: {0}"))]
     StatusFailed(HwError),
