@@ -19,8 +19,9 @@ pub mod version {
     pub const V1: u8 = 1;
     pub const V2: u8 = 2;
     pub const V3: u8 = 3;
+    pub const V4: u8 = 4;
 
-    pub const CURRENT: u8 = V3;
+    pub const CURRENT: u8 = V4;
 }
 
 /// A common header to all messages between host and SP.
@@ -105,22 +106,23 @@ pub enum HostRequest {
     /// Request to return the status of the transceiver's modules.
     Status,
 
-    /// Request that the modules be reset.
-    Reset,
+    /// Request that the ResetL line be asserted.
+    AssertReset,
 
-    /// Explicity request that the modules go into a specific power mode.
-    ///
-    /// Note that this includes the low- and high-power modes defined by the
-    /// electrical specifications such as SFF-8679 (the `LPMode` pin), but also
-    /// allows us to explicitly power down a transceiver. That is useful for
-    /// ensuring that there's no wasted power, for example, when a customer
-    /// purposefully disables a transceiver via the control plane.
-    ///
-    /// Note that the _host side_ is responsible for ensuring that a transition
-    /// to high-power mode is valid. The host guarantees that it has applied
-    /// the configuration required by the module, prior to requesting such a
-    /// transition.
-    SetPowerMode(PowerMode),
+    /// Request that the ResetL line be de-asserted.
+    DeassertReset,
+
+    /// Request that the LpMode line be asserted.
+    AssertLpMode,
+
+    /// Request that the LpMode line be de-asserted.
+    DeassertLpMode,
+
+    /// Request that power be enabled to a module should it be inserted.
+    EnablePower,
+
+    /// Request that power be disabled to a module should it be inserted.
+    DisablePower,
 
     /// Assert type of management interface that a set of modules uses.
     ///
@@ -233,27 +235,4 @@ bitflags::bitflags! {
         /// by the Sidecar board design itself.
         const FAULT_POWER_LOST      = 0b1000_0000;
     }
-}
-
-/// An allowed power mode for the module.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, SerializedSize)]
-#[cfg_attr(feature = "std", derive(clap::ValueEnum))]
-pub enum PowerMode {
-    /// A module is entirely powered off, using the EFuse.
-    Off,
-
-    /// Power is enabled to the module, but the `LPMode` pin is set to high.
-    ///
-    /// Note: This requires that we never set the `Power_override` bit (SFF-8636
-    /// rev 2.10a, section 6.2.6, byte 93 bit 2), as that defeats the purpose of
-    /// hardware control.
-    Low,
-
-    /// The module is in high-power mode.
-    ///
-    /// Note that additional configuration may be required to correctly
-    /// configure the module, such as described in SFF-8636 rev 2.10a table
-    /// 6-10, and that the _host side_ is responsible for ensuring that the
-    /// relevant configuration is applied.
-    High,
 }

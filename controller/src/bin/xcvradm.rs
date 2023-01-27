@@ -23,11 +23,11 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use transceiver_controller::Config;
 use transceiver_controller::Controller;
+use transceiver_controller::PowerMode;
 use transceiver_controller::SpRequest;
 use transceiver_decode::Identifier;
 use transceiver_decode::MemoryModel;
 use transceiver_decode::VendorInfo;
-use transceiver_messages::message::PowerMode;
 use transceiver_messages::message::Status;
 use transceiver_messages::mgmt::cmis;
 use transceiver_messages::mgmt::sff8636;
@@ -201,7 +201,7 @@ enum Cmd {
     /// enable, and power mode.
     Status,
 
-    /// Reset the addressed modules.
+    /// Have the SP execute a reset of the addressed modules.
     Reset,
 
     /// Set the power module of the addressed modules.
@@ -210,6 +210,24 @@ enum Cmd {
         #[arg(value_enum)]
         mode: PowerMode,
     },
+
+    /// Enable the hot swap controller for the addressed modules
+    EnablePower,
+
+    /// Disable the hot swap controller for the addressed modules
+    DisablePower,
+
+    /// Assert ResetL for the addressed modules.
+    AssertReset,
+
+    /// Deassert ResetL for the addressed modules.
+    DeassertReset,
+
+    /// Assert LpMode for the addressed modules.
+    AssertLpMode,
+
+    /// Deassert LpMode for the addressed modules.
+    DeassertLpMode,
 
     /// Read the SFF-8024 identifier for a set of modules.
     Identify,
@@ -451,16 +469,60 @@ async fn main() -> anyhow::Result<()> {
             print_module_status(modules, status);
         }
 
-        Cmd::Reset => controller
-            .reset(modules)
-            .await
-            .context("Failed to reset modules")?,
+        Cmd::Reset => {
+            controller
+                .reset(modules)
+                .await
+                .context("Failed to reset modules")?;
+        }
 
         Cmd::SetPower { mode } => {
             controller
                 .set_power_mode(modules, mode)
                 .await
                 .context("Failed to set power mode")?;
+        }
+
+        Cmd::EnablePower => {
+            controller
+                .enable_power(modules)
+                .await
+                .context("Failed to enable power for modules")?;
+        }
+
+        Cmd::DisablePower => {
+            controller
+                .disable_power(modules)
+                .await
+                .context("Failed to disable power for modules")?;
+        }
+
+        Cmd::AssertReset => {
+            controller
+                .assert_reset(modules)
+                .await
+                .context("Failed to assert reset for modules")?;
+        }
+
+        Cmd::DeassertReset => {
+            controller
+                .deassert_reset(modules)
+                .await
+                .context("Failed to deassert reset for modules")?;
+        }
+
+        Cmd::AssertLpMode => {
+            controller
+                .assert_lpmode(modules)
+                .await
+                .context("Failed to assert lpmode for modules")?;
+        }
+
+        Cmd::DeassertLpMode => {
+            controller
+                .deassert_lpmode(modules)
+                .await
+                .context("Failed to deassert lpmode for modules")?;
         }
 
         Cmd::Identify => {
