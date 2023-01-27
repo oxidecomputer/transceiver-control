@@ -3,7 +3,7 @@
 #: name = "build-and-test (helios)"
 #: variety = "basic"
 #: target = "helios-latest"
-#: rust_toolchain = "stable"
+#: rust_toolchain = "1.66"
 #: output_rules = []
 #:
 
