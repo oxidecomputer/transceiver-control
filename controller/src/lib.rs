@@ -765,7 +765,7 @@ impl Controller {
                 self.assert_reset(modules).await?;
                 self.disable_power(modules).await
             }
-            new_mode @ PowerMode::Low | new_mode @ PowerMode::High => {
+            PowerMode::Low | PowerMode::High => {
                 // Validate the power state transition.
                 //
                 // For now, we enforce that modules may not go directly to high
@@ -845,8 +845,7 @@ impl Controller {
                 }
 
                 // Actually write the power mode, the pin and to the memory map.
-                self.set_lp_mode(modules, &current_power_state, new_mode)
-                    .await
+                self.set_lp_mode(modules, &current_power_state, mode).await
             }
         }
     }
