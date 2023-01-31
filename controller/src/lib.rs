@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2022 Oxide Computer Company
+// Copyright 2023 Oxide Computer Company
 
 //! A host-side control interface to the SP for managing Sidecar transceivers.
 
@@ -114,11 +114,11 @@ pub enum PowerMode {
     /// A module is entirely powered off, using the EFuse.
     Off,
 
-    /// Power is enabled to the module, but the `LPMode` pin is set to high.
+    /// Power is enabled to the module, but module remains in low-power mode.
     ///
-    /// Note: This requires that we never set the `Power_override` bit (SFF-8636
-    /// rev 2.10a, section 6.2.6, byte 93 bit 2), as that defeats the purpose of
-    /// hardware control.
+    /// In this state, modules will not establish a link or transmit traffic,
+    /// but they may be managed and queried for information through their memory
+    /// maps.
     Low,
 
     /// The module is in high-power mode.
@@ -369,7 +369,7 @@ impl ConfigBuilder {
 pub struct Controller {
     _config: Config,
     _iface: u32,
-    _log: Logger,
+    log: Logger,
     message_id: AtomicU64,
 
     // Channel onto which requests from the host to SP are sent.
@@ -459,7 +459,7 @@ impl Controller {
         Ok(Self {
             _config: config,
             _iface: iface,
-            _log: log,
+            log,
             message_id: AtomicU64::new(0),
             outgoing_request_tx,
             io_task,
@@ -575,7 +575,7 @@ impl Controller {
         })?;
         let powered_modules = ModuleId {
             fpga_id: modules.fpga_id,
-            ports: modules.ports.remove(unpowered_modules.ports),
+            ports: modules.ports.remove(&unpowered_modules.ports),
         };
 
         // Of the powered modules, those in reset must be also be considered
@@ -584,16 +584,13 @@ impl Controller {
         // Filter down the status of all modules to those that are powered.
         let powered_status: Vec<_> = status
             .iter()
-            .copied()
             .enumerate()
-            .filter_map(|(ix, st)| {
-                let index = u8::try_from(ix).expect("Impossible index");
-                if powered_modules.contains(index) {
-                    Some(st)
-                } else {
-                    None
-                }
+            .filter(|(ix, _st)| {
+                let index = u8::try_from(*ix).expect("Impossible index");
+                powered_modules.contains(index)
             })
+            .map(|(_ix, st)| st)
+            .copied()
             .collect();
         let in_reset = Self::filter_modules_with(powered_modules, &powered_status, |status| {
             status.contains(Status::RESET)
@@ -614,20 +611,17 @@ impl Controller {
         // control is enabled.
         let readable_modules = ModuleId {
             fpga_id: modules.fpga_id,
-            ports: powered_modules.ports.remove(in_reset.ports),
+            ports: powered_modules.ports.remove(&in_reset.ports),
         };
         let readable_status: Vec<_> = status
             .iter()
-            .copied()
             .enumerate()
-            .filter_map(|(ix, st)| {
-                let index = u8::try_from(ix).expect("Impossible index");
-                if readable_modules.contains(index) {
-                    Some(st)
-                } else {
-                    None
-                }
+            .filter(|(ix, _st)| {
+                let index = u8::try_from(*ix).expect("Impossible index");
+                readable_modules.contains(index)
             })
+            .map(|(_ix, st)| st)
+            .copied()
             .collect();
 
         // If there are any such modules, read from them and write in their
@@ -638,23 +632,26 @@ impl Controller {
                 ctl.into_iter()
                     .zip(readable_status.into_iter())
                     .map(|(ctl, status)| {
-                        // If software is in charge, report what it says.
-                        if ctl.software_override {
-                            let mode = if ctl.low_power {
-                                PowerMode::Low
-                            } else {
-                                PowerMode::High
-                            };
-                            (mode, Some(true))
-                        } else {
+                        match ctl {
+                            // If software is in charge, report what it says.
+                            PowerControl::OverrideLpModePin { low_power } => {
+                                let mode = if low_power {
+                                    PowerMode::Low
+                                } else {
+                                    PowerMode::High
+                                };
+                                (mode, Some(true))
+                            }
                             // Hardware is in charge, so report the state of the
                             // `LPMode` pin itself.
-                            let mode = if status.contains(Status::LOW_POWER_MODE) {
-                                PowerMode::Low
-                            } else {
-                                PowerMode::High
-                            };
-                            (mode, Some(false))
+                            PowerControl::UseLpModePin => {
+                                let mode = if status.contains(Status::LOW_POWER_MODE) {
+                                    PowerMode::Low
+                                } else {
+                                    PowerMode::High
+                                };
+                                (mode, Some(false))
+                            }
                         }
                     });
             for (i, state) in readable_modules.ports.to_indices().zip(readable_power_mode) {
@@ -757,27 +754,33 @@ impl Controller {
         // override of the `LPMode` pin.
         match mode {
             PowerMode::Off => {
-                self.assert_lpmode(modules).await?;
+                // We would technically like to assert `LPMode` here. However,
+                // we can't do that without unintentionally back-powering the
+                // modules themselves. For now we deassert `LPMode`, but see
+                // https://github.com/oxidecomputer/hardware-qsfp-x32/issues/47
+                // for the hardware issue and
+                // https://rfd.shared.oxide.computer/rfd/0244#_fpga_module_sequencing
+                // for a general discussion.
+                self.deassert_lpmode(modules).await?;
                 self.assert_reset(modules).await?;
                 self.disable_power(modules).await
             }
-            other => {
+            new_mode @ PowerMode::Low | new_mode @ PowerMode::High => {
                 // Validate the power state transition.
                 //
                 // For now, we enforce that modules may not go directly to high
-                // power, they have to go through low-lower first.
+                // power, they have to go through low-power first.
                 //
                 // We can always set modules to low power, though, since that's
                 // valid from both off and high-power, and a no-op if it's
                 // already set.
                 let current_power_state = self.power_mode(modules).await?;
-                if matches!(mode, PowerMode::High) {
-                    if current_power_state
+                if matches!(mode, PowerMode::High)
+                    && current_power_state
                         .iter()
                         .any(|(mode, _override)| mode == &PowerMode::Off)
-                    {
-                        return Err(Error::InvalidPowerStateTransition);
-                    }
+                {
+                    return Err(Error::InvalidPowerStateTransition);
                 }
 
                 // We need the status bits to determine if we also need to
@@ -795,22 +798,55 @@ impl Controller {
                 let need_power_enabled = Self::filter_modules_with(modules, &status, |st| {
                     !st.contains(Status::POWER_GOOD | Status::ENABLED)
                 })?;
+
+                // Check for any modules which need power applied, but which do
+                // _not_ already have reset asserted. We're going to assert
+                // reset on them now, but emit a warning.
                 let need_reset_deasserted =
                     Self::filter_modules_with(modules, &status, |st| st.contains(Status::RESET))?;
+                let need_power_but_not_reset = ModuleId {
+                    fpga_id: modules.fpga_id,
+                    ports: need_power_enabled
+                        .ports
+                        .remove(&need_reset_deasserted.ports),
+                };
+                if need_power_but_not_reset.selected_transceiver_count() > 0 {
+                    warn!(
+                        self.log,
+                        "Found modules with power disabled, but reset deasserted. \
+                        It will be asserted before enabling power.";
+                        "need_power_enabled" => ?need_power_enabled,
+                        "need_reset_deasserted" => ?need_reset_deasserted,
+                        "suspicious_modules" => ?need_power_but_not_reset,
+                    );
+                    self.assert_reset(need_power_but_not_reset).await?;
+
+                    // Wait for SFF-8679 `t_reset_init`. It's a bit silly to
+                    // wait 10us here, but we're trying to be careful.
+                    tokio::time::sleep(Duration::from_micros(10)).await;
+                }
+
+                // Enable power and deassert reset for the required modules.
+                //
+                // Note that we are explicitly ensuring above that all modules
+                // which need reset deasserted also need power enabled. (This
+                // cannot apply to modules in high-power mode.) So we can use
+                // the `need_power_enabled` modules for both operations.
                 if need_power_enabled.selected_transceiver_count() > 0 {
                     self.enable_power(need_power_enabled).await?;
                 }
-                if need_reset_deasserted.selected_transceiver_count() > 0 {
-                    self.deassert_reset(need_reset_deasserted).await?;
+                if need_power_enabled.selected_transceiver_count() > 0 {
+                    self.deassert_reset(need_power_enabled).await?;
 
                     // The SFF-8769 specifies that modules may take up to 2
                     // seconds after asserting ResetL before they are ready for
-                    // reads.
+                    // reads. This is `t_reset`.
                     tokio::time::sleep(Duration::from_secs(2)).await;
                 }
 
                 // Actually write the power mode, the pin and to the memory map.
-                self.set_lp_mode(modules, &current_power_state, other).await
+                self.set_lp_mode(modules, &current_power_state, new_mode)
+                    .await
             }
         }
     }

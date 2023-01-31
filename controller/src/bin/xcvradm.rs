@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2022 Oxide Computer Company
+// Copyright 2023 Oxide Computer Company
 
 //! Command-line tool to administer optical transceivers.
 
@@ -773,7 +773,7 @@ const WIDTH: usize = 4;
 const POWER_WIDTH: usize = 5;
 
 fn print_power_mode(modules: ModuleId, modes: Vec<(PowerMode, Option<bool>)>) {
-    println!("FPGA Port Power Software override");
+    println!("FPGA  Port  Power  Software-override");
     for (port, (mode, override_)) in modules.ports.to_indices().zip(modes.into_iter()) {
         let over = match override_ {
             None => "-",
@@ -782,7 +782,7 @@ fn print_power_mode(modules: ModuleId, modes: Vec<(PowerMode, Option<bool>)>) {
         };
         let mode = format!("{mode:?}");
         println!(
-            "{:>WIDTH$} {port:>WIDTH$} {mode:POWER_WIDTH$} {over}",
+            "{:>WIDTH$}  {port:>WIDTH$}  {mode:POWER_WIDTH$}  {over}",
             modules.fpga_id
         );
     }

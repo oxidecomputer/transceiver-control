@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2022 Oxide Computer Company
+// Copyright 2023 Oxide Computer Company
 
 //! Decode various transceiver module memory maps and data.
 
@@ -671,15 +671,16 @@ impl ParseFromModule for MemoryModel {
 
 /// Description of software power control override status for a module.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct PowerControl {
-    /// If true, the module is configured for software control of low power
-    /// mode. In this case, the `LPMode` pin has no effect.
-    pub software_override: bool,
-    /// If true, the module is set to low power mode by software. If `false`,
-    /// then the module is allowed to enter high power mode.
-    ///
-    /// This is _only meaningful_ if `software_override` is `true`.
-    pub low_power: bool,
+pub enum PowerControl {
+    /// The module uses the `LPMode` hardware signal to select low power mode.
+    UseLpModePin,
+
+    /// The module is configured for software control of low power mode.
+    OverrideLpModePin {
+        /// If true, the module is held in low power mode by software. If false,
+        /// the module is allowed to enter high power mode.
+        low_power: bool,
+    },
 }
 
 impl ParseFromModule for PowerControl {
@@ -718,9 +719,14 @@ impl ParseFromModule for PowerControl {
                     .next()
                     .and_then(|bytes| bytes.first())
                     .ok_or(Error::ParseFailed)
-                    .map(|power| PowerControl {
-                        software_override: (power & 0b1) == 0b1,
-                        low_power: (power & 0b10) == 0b10,
+                    .map(|power| {
+                        if power & 0b1 == 0 {
+                            PowerControl::UseLpModePin
+                        } else {
+                            PowerControl::OverrideLpModePin {
+                                low_power: (power & 0b10) != 0,
+                            }
+                        }
                     })
             }
             Identifier::QsfpPlusCmis | Identifier::QsfpDD => {
@@ -729,9 +735,14 @@ impl ParseFromModule for PowerControl {
                     .next()
                     .and_then(|bytes| bytes.first())
                     .ok_or(Error::ParseFailed)
-                    .map(|power| PowerControl {
-                        software_override: (power & 0b0100_0000) == 0,
-                        low_power: (power & 0b0001_0000) == 0b0001_0000,
+                    .map(|power| {
+                        if (power & 0b0100_0000) != 0 {
+                            PowerControl::UseLpModePin
+                        } else {
+                            PowerControl::OverrideLpModePin {
+                                low_power: (power & 0b0001_0000) != 0,
+                            }
+                        }
                     })
             }
             _ => Err(Error::UnsupportedIdentifier(id)),
@@ -916,15 +927,23 @@ mod tests {
     fn test_power_control_from_module_sff8636() {
         let id = Identifier::Qsfp28;
 
+        let bytes = [0b10u8]; // NOT power override
+        let control = PowerControl::parse(id, std::iter::once(bytes.as_slice())).unwrap();
+        assert!(matches!(control, PowerControl::UseLpModePin));
+
         let bytes = [0b11u8]; // Power override, set to low power.
         let control = PowerControl::parse(id, std::iter::once(bytes.as_slice())).unwrap();
-        assert!(control.software_override);
-        assert!(control.low_power);
+        assert!(matches!(
+            control,
+            PowerControl::OverrideLpModePin { low_power: true }
+        ));
 
         let bytes = [0b01u8]; // Power override, _not_ set to low power.
         let control = PowerControl::parse(id, std::iter::once(bytes.as_slice())).unwrap();
-        assert!(control.software_override);
-        assert!(!control.low_power);
+        assert!(matches!(
+            control,
+            PowerControl::OverrideLpModePin { low_power: false }
+        ));
     }
 
     #[test]
@@ -933,16 +952,20 @@ mod tests {
 
         let bytes = [0b0100_0000]; // NOT power override.
         let control = PowerControl::parse(id, std::iter::once(bytes.as_slice())).unwrap();
-        assert!(!control.software_override);
+        assert!(matches!(control, PowerControl::UseLpModePin));
 
         let bytes = [0b0000_0000]; // YES power override, not low power
         let control = PowerControl::parse(id, std::iter::once(bytes.as_slice())).unwrap();
-        assert!(control.software_override);
-        assert!(!control.low_power);
+        assert!(matches!(
+            control,
+            PowerControl::OverrideLpModePin { low_power: false }
+        ));
 
         let bytes = [0b0001_0000]; // Power override, set to low power.
         let control = PowerControl::parse(id, std::iter::once(bytes.as_slice())).unwrap();
-        assert!(control.software_override);
-        assert!(control.low_power);
+        assert!(matches!(
+            control,
+            PowerControl::OverrideLpModePin { low_power: true }
+        ));
     }
 }

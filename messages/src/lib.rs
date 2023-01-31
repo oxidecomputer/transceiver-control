@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2022 Oxide Computer Company
+// Copyright 2023 Oxide Computer Company
 
 #![cfg_attr(all(not(test), not(feature = "std")), no_std)]
 
@@ -392,7 +392,7 @@ impl PortMask {
     }
 
     /// Return the set of modules that are in `self` and not `other`.
-    pub const fn remove(&self, other: PortMask) -> PortMask {
+    pub const fn remove(&self, other: &PortMask) -> PortMask {
         Self(self.0 & !other.0)
     }
 
@@ -489,7 +489,7 @@ mod tests {
     fn test_port_mask_remove() {
         let mask = PortMask(0b111);
         let other = PortMask(0b001);
-        assert_eq!(mask.remove(other), PortMask(0b110));
+        assert_eq!(mask.remove(&other), PortMask(0b110));
     }
 
     #[test]
