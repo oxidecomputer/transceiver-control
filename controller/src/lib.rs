@@ -814,7 +814,7 @@ impl Controller {
                     warn!(
                         self.log,
                         "Found modules with power disabled, but reset deasserted. \
-                        It will be asserted before enabling power.";
+                        It will be asserted before enabling power";
                         "need_power_enabled" => ?need_power_enabled,
                         "need_reset_deasserted" => ?need_reset_deasserted,
                         "suspicious_modules" => ?need_power_but_not_reset,
@@ -826,15 +826,59 @@ impl Controller {
                     tokio::time::sleep(Duration::from_micros(10)).await;
                 }
 
-                // Enable power and deassert reset for the required modules.
+                // Enable power for the required modules.
+                if need_power_enabled.selected_transceiver_count() > 0 {
+                    self.enable_power(need_power_enabled).await?;
+                }
+
+                // Set the hardware `LPMode` signal.
+                //
+                // We do this in between enabling power and deasserting reset
+                // intentionally, in order to better handle the back-power issue
+                // linked above.
+                //
+                // Note that this means we set the hardware signal now, and the
+                // software signal later. The latter is because reset must be
+                // deasserted to be able to write the memory maps. There are a
+                // few cases to consider:
+                //
+                // - Off -> Low
+                // - Low -> High or High -> Low
+                //
+                // If a module is in the first case, then it sees:
+                //
+                // - enable_power
+                // - assert_lpmode
+                // - deassert_reset
+                // - wait 2s
+                // - set_software_power_mode
+                //
+                // That's fine, and the best we can do, since the module may not
+                // respond to the write until we wait.
+                //
+                // For modules in the second case, they'll see:
+                //
+                // - assert_lpmode or deassert_lpmode
+                // - set_software_power_mode
+                //
+                // Note that there may be a wait of up to 2s in between the last
+                // steps, because other modules may have required twiddling
+                // reset. That does lead to a window in which the hardware
+                // signal and memory map bit can be out of sync. No
+                // functionality here really relies on it, but it is
+                // unfortunate.
+                if matches!(mode, PowerMode::Low) {
+                    self.assert_lpmode(modules).await?;
+                } else {
+                    self.deassert_lpmode(modules).await?;
+                }
+
+                // Deassert reset for the required modules.
                 //
                 // Note that we are explicitly ensuring above that all modules
                 // which need reset deasserted also need power enabled. (This
                 // cannot apply to modules in high-power mode.) So we can use
                 // the `need_power_enabled` modules for both operations.
-                if need_power_enabled.selected_transceiver_count() > 0 {
-                    self.enable_power(need_power_enabled).await?;
-                }
                 if need_power_enabled.selected_transceiver_count() > 0 {
                     self.deassert_reset(need_power_enabled).await?;
 
@@ -844,49 +888,13 @@ impl Controller {
                     tokio::time::sleep(Duration::from_secs(2)).await;
                 }
 
-                // Actually write the power mode, the pin and to the memory map.
-                self.set_lp_mode(modules, &current_power_state, mode).await
+                // Set the bits indicating the new power mode in the memory map.
+                //
+                // See note above for why this is here.
+                self.set_software_power_mode(modules, &current_power_state, mode)
+                    .await
             }
         }
-    }
-
-    // Set the LPMode, either via the pin if under hardware control, or by
-    // writing to a specific bit of the map, if under software control.
-    //
-    // # Note
-    //
-    // This method always sets both the hardware `LPMode` signal and writes the
-    // corresponding value to the module's memory map. That's true, even if the
-    // module will ignore one of those values. The goal here is to keep both in
-    // sync, so that modifying software override doesn't also change the power
-    // state.
-    //
-    // # Panics
-    //
-    // Panics if `mode` is not `PowerMode::{Low,High}`, since `PowerMode::Off`
-    // isn't relevant to this interface.
-    async fn set_lp_mode(
-        &self,
-        modules: ModuleId,
-        current_power_state: &[(PowerMode, Option<bool>)],
-        mode: PowerMode,
-    ) -> Result<(), Error> {
-        assert!(matches!(mode, PowerMode::Low | PowerMode::High));
-
-        // Set the `LPMode` pin of all addressed modules to the correct state.
-        // Note that we do this even if the module will ignore that.
-        if matches!(mode, PowerMode::Low) {
-            self.assert_lpmode(modules).await?;
-        } else {
-            self.deassert_lpmode(modules).await?;
-        }
-
-        // Also write to the memory map to describe the power mode.
-        //
-        // Note that we also do this for all modules, again to keep the power
-        // state in sync between the memory map and the hardware signals.
-        self.set_software_power_mode(modules, current_power_state, mode)
-            .await
     }
 
     // Set the power mode assuming software control. _NO CHECKING_ is done as to
