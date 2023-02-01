@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2022 Oxide Computer Company
+// Copyright 2023 Oxide Computer Company
 
 //! Command-line tool to administer optical transceivers.
 
@@ -63,8 +63,8 @@ fn parse_transceivers(s: &str) -> Result<Transceivers, String> {
         "all" => Ok(Transceivers::All),
         "present" => Ok(Transceivers::Present),
         "off" => Ok(Transceivers::PowerMode(PowerMode::Off)),
-        "low-power" => Ok(Transceivers::PowerMode(PowerMode::Low)),
-        "hi-power" => Ok(Transceivers::PowerMode(PowerMode::High)),
+        "low-power" | "lp" => Ok(Transceivers::PowerMode(PowerMode::Low)),
+        "hi-power" | "high-power" | "hp" => Ok(Transceivers::PowerMode(PowerMode::High)),
         "sff" => Ok(Transceivers::Kind(ManagementInterface::Sff8636)),
         "cmis" => Ok(Transceivers::Kind(ManagementInterface::Cmis)),
         _maybe_list => {
@@ -211,10 +211,24 @@ enum Cmd {
         mode: PowerMode,
     },
 
-    /// Enable the hot swap controller for the addressed modules
+    /// Return the power mode of the addressed modules.
+    ///
+    /// This takes into account whether a module has specified software override
+    /// of power control.
+    Power,
+
+    /// Enable the hot swap controller for the addressed modules.
+    ///
+    /// Note that this is a lower-level method for specifically controlling the
+    /// hot swap controller directly. See the `set-power` subcommand for a
+    /// higher-level interface to set the module power to a specific state.
     EnablePower,
 
-    /// Disable the hot swap controller for the addressed modules
+    /// Disable the hot swap controller for the addressed modules.
+    ///
+    /// Note that this is a lower-level method for specifically controlling the
+    /// hot swap controller directly. See the `set-power` subcommand for a
+    /// higher-level interface to set the module power to a specific state.
     DisablePower,
 
     /// Assert ResetL for the addressed modules.
@@ -224,9 +238,17 @@ enum Cmd {
     DeassertReset,
 
     /// Assert LpMode for the addressed modules.
+    ///
+    /// Note that this is a lower-level method for specifically controlling the
+    /// LPMode hardware signal directly. See the `set-power` subcommand for a
+    /// higher-level interface to set the module power to a specific state.
     AssertLpMode,
 
     /// Deassert LpMode for the addressed modules.
+    ///
+    /// Note that this is a lower-level method for specifically controlling the
+    /// LPMode hardware signal directly. See the `set-power` subcommand for a
+    /// higher-level interface to set the module power to a specific state.
     DeassertLpMode,
 
     /// Read the SFF-8024 identifier for a set of modules.
@@ -483,6 +505,14 @@ async fn main() -> anyhow::Result<()> {
                 .context("Failed to set power mode")?;
         }
 
+        Cmd::Power => {
+            let states = controller
+                .power_mode(modules)
+                .await
+                .context("Failed to get power mode")?;
+            print_power_mode(modules, states);
+        }
+
         Cmd::EnablePower => {
             controller
                 .enable_power(modules)
@@ -697,30 +727,23 @@ async fn address_transceivers(
         Transceivers::PowerMode(mode) => {
             // Fetch all power modes, and find those which match.
             let modules = ModuleId::all_transceivers(fpga_id);
-            let status = controller
-                .status(modules)
+            let module_modes = controller
+                .power_mode(modules)
                 .await
-                .context("Failed to retrieve module status")?;
-            let predicate = match mode {
-                PowerMode::Off => |st: Status| !st.contains(Status::POWER_GOOD),
-                PowerMode::Low => {
-                    |st: Status| st.contains(Status::POWER_GOOD | Status::LOW_POWER_MODE)
-                }
-                PowerMode::High => |st: Status| {
-                    st.contains(Status::POWER_GOOD) && !st.contains(Status::LOW_POWER_MODE)
-                },
-            };
-            filter_ports(modules.ports, status, predicate)
+                .context("Failed to retrieve module power mode")?;
+            filter_ports(modules.ports, module_modes, |m| m.0 == mode)
         }
         Transceivers::Kind(kind) => {
-            // Fetch all modules that have power enabled, thus are readable.
+            // Fetch all modules that are in at least low-power mode, and thus
+            // readable.
             let modules = ModuleId::all_transceivers(fpga_id);
-            let status = controller
-                .status(modules)
+            let power_modes = controller
+                .power_mode(modules)
                 .await
-                .context("Failed to retrieve module status")?;
-            let readable =
-                filter_ports(modules.ports, status, |st| st.contains(Status::POWER_GOOD));
+                .context("Failed to retrieve module power mode")?;
+            let readable = filter_ports(modules.ports, power_modes, |m| {
+                matches!(m.0, PowerMode::Low | PowerMode::High)
+            });
 
             // Then the management interface for those.
             let modules = ModuleId {
@@ -747,6 +770,23 @@ async fn address_transceivers(
 
 // Column width for printing data below.
 const WIDTH: usize = 4;
+const POWER_WIDTH: usize = 5;
+
+fn print_power_mode(modules: ModuleId, modes: Vec<(PowerMode, Option<bool>)>) {
+    println!("FPGA  Port  Power  Software-override");
+    for (port, (mode, override_)) in modules.ports.to_indices().zip(modes.into_iter()) {
+        let over = match override_ {
+            None => "-",
+            Some(true) => "Yes",
+            Some(false) => "No",
+        };
+        let mode = format!("{mode:?}");
+        println!(
+            "{:>WIDTH$}  {port:>WIDTH$}  {mode:POWER_WIDTH$}  {over}",
+            modules.fpga_id
+        );
+    }
+}
 
 fn print_module_status(modules: ModuleId, status: Vec<Status>) {
     println!("FPGA Port Status");
