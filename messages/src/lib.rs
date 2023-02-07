@@ -278,12 +278,13 @@ pub enum HwError {
     #[cfg_attr(any(test, feature = "std"), error("Read setup operation failed"))]
     ReadSetupFailed,
 
-    /// Reading back the read buffer failed
+    /// Reading back the read buffer failed. u32 is a logical mask for which
+    /// ports saw a failure.
     #[cfg_attr(
         any(test, feature = "std"),
-        error("Reading back the FPGA read buffer failed")
+        error("Reading back the FPGA read buffer failed. u32 is a logical mask for which ports saw a failure.")
     )]
-    ReadBufFailed,
+    ReadBufFailed(u32),
 
     /// Loading the write buffer failed
     #[cfg_attr(
