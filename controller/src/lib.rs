@@ -55,6 +55,7 @@ use transceiver_messages::mgmt::MemoryRead;
 use transceiver_messages::mgmt::MemoryWrite;
 use transceiver_messages::mgmt::Page;
 pub use transceiver_messages::Error as MessageError;
+pub use transceiver_messages::MacAddrs;
 pub use transceiver_messages::ModuleId;
 pub use transceiver_messages::PortMask;
 use transceiver_messages::ADDR;
@@ -500,6 +501,26 @@ impl Controller {
         out
     }
 
+    /// Return the MAC addresses allotted to a system by its FRUID data.
+    pub async fn mac_addrs(&self) -> Result<MacAddrs, Error> {
+        let request = HostRequest::MacAddrs;
+        let message = Message {
+            header: self.next_header(),
+            modules: ModuleId::empty(0), // Irrelevant for this message.
+            body: MessageBody::HostRequest(request),
+        };
+        let request = HostRpcRequest {
+            message,
+            data: None,
+        };
+        let response = self.rpc(request).await?;
+        match response.message.body {
+            MessageBody::SpResponse(SpResponse::MacAddrs(macs)) => Ok(macs),
+            MessageBody::SpResponse(SpResponse::Error(e)) => Err(Error::from(e)),
+            other => Err(Error::UnexpectedMessage(other)),
+        }
+    }
+
     /// Return the SFF-8024 identifier for a set of modules.
     pub async fn identifier(&self, modules: ModuleId) -> Result<Vec<Identifier>, Error> {
         let read = MemoryRead::new(sff8636::Page::Lower, 0, 1).unwrap();
@@ -720,8 +741,8 @@ impl Controller {
         Ok(())
     }
 
-    /// Helper to create a request where the body is configurable and there is
-    /// no data payload needed.
+    // Helper to create a request where the body is configurable and there is
+    // no data payload needed.
     async fn no_payload_request(
         &self,
         modules: ModuleId,

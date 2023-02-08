@@ -392,6 +392,11 @@ impl PortMask {
         Self(!0)
     }
 
+    /// Convience function to address zero transceivers.
+    pub const fn empty() -> Self {
+        Self(0)
+    }
+
     /// Return the set of modules that are in `self` and not `other`.
     pub const fn remove(&self, other: &PortMask) -> PortMask {
         Self(self.0 & !other.0)
@@ -426,6 +431,15 @@ impl ModuleId {
         }
     }
 
+    /// Convenience method to build a `ModuleId` that selects no transceivers on
+    /// the given FPGA.
+    pub const fn empty(fpga_id: u8) -> Self {
+        Self {
+            fpga_id,
+            ports: PortMask::empty(),
+        }
+    }
+
     /// Return `true` if the provided index is contained in set of addressed
     /// modules.
     pub const fn contains(&self, ix: u8) -> bool {
@@ -433,9 +447,71 @@ impl ModuleId {
     }
 }
 
+/// The MAC address allocation for the target system.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, SerializedSize)]
+pub struct MacAddrs {
+    /// The first valid MAC address for the system.
+    pub base_mac: [u8; 6],
+    /// The number of available addresses following `base_mac`.
+    pub count: u16,
+    /// The stride pattern used to compute the next available MAC address.
+    ///
+    /// This is used in situations in which subsystems may make assumptions
+    /// about spacing between addresses. At the time of writing, this applies to
+    /// the Chelsio T6 NICs.
+    pub stride: u8,
+}
+
+impl MacAddrs {
+    /// Return an iterator over the MAC addresses in `self`.
+    pub const fn iter(&self) -> MacAddrIter {
+        MacAddrIter {
+            mac_addrs: *self,
+            current: 0,
+        }
+    }
+
+    /// Return the `n`th address in the range of MACs provided by `self`.
+    ///
+    /// If `n` is outside of the range of `self`, `None` is returned.
+    pub fn nth(&self, n: u16) -> Option<[u8; 6]> {
+        if n >= self.count {
+            return None;
+        }
+        let base_n = u16::from_be_bytes([self.base_mac[4], self.base_mac[5]]);
+        let shift = (base_n + n * u16::from(self.stride)).to_be_bytes();
+        let mut new = self.base_mac.clone();
+        new[4] = shift[0];
+        new[5] = shift[1];
+        Some(new)
+    }
+}
+
+/// An iterator over the MAC addresses in `MacAddrs`. Constructed with
+/// [`MacAddrs::iter()`].
+pub struct MacAddrIter {
+    mac_addrs: MacAddrs,
+    current: u16,
+}
+
+impl core::iter::Iterator for MacAddrIter {
+    type Item = [u8; 6];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.mac_addrs.nth(self.current) {
+            None => None,
+            Some(n) => {
+                self.current += 1;
+                Some(n)
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Error;
+    use super::MacAddrs;
     use super::PortMask;
 
     #[test]
@@ -498,5 +574,21 @@ mod tests {
         let mask = PortMask(0b01);
         assert!(mask.contains(0));
         assert!(!mask.contains(1));
+    }
+
+    #[test]
+    fn test_mac_addrs() {
+        let macs = MacAddrs {
+            base_mac: [0xa8, 0x40, 0x25, 0x00, 0x00, 0x00],
+            count: 8,
+            stride: 2,
+        };
+        let all_macs = macs.iter().collect::<Vec<_>>();
+        assert_eq!(all_macs.len(), 8);
+        for (mac0, mac1) in macs.iter().take(3).zip(macs.iter().skip(1)) {
+            let off0 = u16::from_be_bytes([mac0[4], mac0[5]]);
+            let off1 = u16::from_be_bytes([mac1[4], mac1[5]]);
+            assert_eq!(off1 - off0, u16::from(macs.stride));
+        }
     }
 }

@@ -10,6 +10,7 @@ use super::mgmt::ManagementInterface;
 use super::mgmt::MemoryRead;
 use super::mgmt::MemoryWrite;
 use super::Error;
+use super::MacAddrs;
 use super::ModuleId;
 use hubpack::SerializedSize;
 use serde::Deserialize;
@@ -21,8 +22,9 @@ pub mod version {
     pub const V3: u8 = 3;
     pub const V4: u8 = 4;
     pub const V5: u8 = 5;
+    pub const V6: u8 = 6;
 
-    pub const CURRENT: u8 = V5;
+    pub const CURRENT: u8 = V6;
 }
 
 /// A common header to all messages between host and SP.
@@ -131,6 +133,9 @@ pub enum HostRequest {
     /// transceivers' memory maps such as the temperature or power draw, for the
     /// purposes of health and safety monitoring.
     ManagementInterface(ManagementInterface),
+
+    /// Ask the SP to return the available MAC addresses for host system use.
+    MacAddrs,
 }
 
 /// A response to a host request, sent from SP to host.
@@ -164,6 +169,9 @@ pub enum SpResponse {
     /// A generic acknowledgement of a specific message, where no further data
     /// is required from the SP.
     Ack,
+
+    /// The requested MAC address information for the host.
+    MacAddrs(MacAddrs),
 }
 
 /// A request from the SP to the host.
