@@ -271,7 +271,7 @@ pub enum HwError {
     /// ports saw a failure.
     #[cfg_attr(
         any(test, feature = "std"),
-        error("FPGA reported an I2C error, module may not be present. u32 is a logical mask for which ports saw a failure.")
+        error("FPGA reported an I2C error, module may not be present. Logical mask for which ports saw a failure: {0:x}")
     )]
     I2cError(u32),
 
