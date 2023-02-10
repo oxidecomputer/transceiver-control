@@ -271,9 +271,9 @@ pub enum HwError {
     /// ports saw a failure.
     #[cfg_attr(
         any(test, feature = "std"),
-        error("FPGA reported an I2C error, module may not be present. Logical mask for which ports saw a failure: 0x{0:08x}")
+        error("FPGA reported an I2C error at the following indices: {:?}", .0.to_indices().collect::<Vec<_>>())
     )]
-    I2cError(u32),
+    I2cError(PortMask),
 
     /// The read setup operation failed
     #[cfg_attr(any(test, feature = "std"), error("Read setup operation failed"))]
