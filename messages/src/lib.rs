@@ -271,7 +271,7 @@ pub enum HwError {
     /// ports saw a failure.
     #[cfg_attr(
         any(test, feature = "std"),
-        error("FPGA reported an I2C error at the following indices: {:?}", .0.to_indices().collect::<Vec<_>>())
+        error("FPGA reported an I2C error on the following ports: {:?}", .0.to_indices().collect::<Vec<_>>())
     )]
     I2cError(PortMask),
 
