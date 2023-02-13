@@ -267,12 +267,13 @@ pub enum HwError {
     )]
     WaitFailed,
 
-    /// The FPGA reported an I2C error
+    /// The FPGA reported an I2C error.  u32 is a logical mask for which
+    /// ports saw a failure.
     #[cfg_attr(
         any(test, feature = "std"),
-        error("FPGA reported an I2C error, module may not be present")
+        error("FPGA reported an I2C error on the following ports: {:?}", .0.to_indices().collect::<Vec<_>>())
     )]
-    I2cError,
+    I2cError(PortMask),
 
     /// The read setup operation failed
     #[cfg_attr(any(test, feature = "std"), error("Read setup operation failed"))]

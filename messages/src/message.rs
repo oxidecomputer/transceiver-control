@@ -20,8 +20,9 @@ pub mod version {
     pub const V2: u8 = 2;
     pub const V3: u8 = 3;
     pub const V4: u8 = 4;
+    pub const V5: u8 = 5;
 
-    pub const CURRENT: u8 = V4;
+    pub const CURRENT: u8 = V5;
 }
 
 /// A common header to all messages between host and SP.
