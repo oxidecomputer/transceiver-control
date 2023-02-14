@@ -1607,30 +1607,65 @@ impl IoLoop {
                     );
                     probes::message__received!(|| (peer.ip(), &message));
 
-                    // Sanity check the protocol version.
-                    if message.header.version != message::version::CURRENT {
-                        // If the version does not match, we're choosing to drop
-                        // the packet rather than reply with a version mismatch
-                        // error. Without a matching version, we can't really
-                        // trust the message kind we have deserialized, so won't
-                        // be able to reliably send protocol errors.
+                    // Check the version in the response.
+                    //
+                    // Beginning at version `MIN` (V5), we committed to
+                    // backwards compatibility. In particular, any existing
+                    // messages must still be decodable by software running a
+                    // later version of the protocol.
+                    //
+                    // In this case we're processing a response to our own
+                    // request. If we _get_ a response at all, it means that the
+                    // peer is running at least `MIN`. There are actually no
+                    // other checks that need to be performed, which would
+                    // prevent us from decoding the message.
+                    //
+                    // Suppose the peer is running between `MIN` and `CURRENT`.
+                    // Then we can clearly process their response, because the
+                    // version is one that we've committed to compatibility
+                    // with. This could be a version-mismatch error message,
+                    // because the _peer_ may not be able to handle the message.
+                    //
+                    // If the version is _newer_ than `CURRENT`, we can still
+                    // process it. That's because all of our messages can be
+                    // decoded and processed by the peer, who has also committed
+                    // to this compatibility.
+                    if message.header.version < message::version::MIN {
                         debug!(
                             self.log,
-                            "deserialized message with incorrect version";
-                            "expected" => message::version::CURRENT,
-                            "actual" => message.header.version,
+                            "deserialized message with incompatible version";
+                            "current" => message::version::CURRENT,
+                            "min" => message::version::MIN,
+                            "message_version" => message.header.version,
                             "peer" => peer,
                         );
                         probes::bad__message!(|| {
                             (
                                 peer.ip(),
                                 format!(
-                                    "incorrect version: expected {}, actual {}",
+                                    "incompatible version: \
+                                    current {}, min {}, message_version {}",
                                     message::version::CURRENT,
+                                    message::version::MIN,
                                     message.header.version,
                                 ),
                             )
                         });
+
+                        // In this case, we're never going to be able to process
+                        // a response from the peer. If this is a response to
+                        // our outstanding message; send an error message on its
+                        // response channel; and throw it away. If this is a
+                        // message from the peer, just do nothing, since they
+                        // won't be able to handle our response anyway.
+                        if let Some(request) = self.outstanding_request.take() {
+                            request.response_tx.send(
+                                Err(Error::Protocol(MessageError::VersionMismatch {
+                                    expected: message::version::CURRENT,
+                                    actual: message.header.version
+                                }))
+                            ).unwrap();
+                        }
                         continue;
                     }
 
@@ -1831,12 +1866,32 @@ impl IoLoop {
 #[cfg(test)]
 mod tests {
     use super::is_link_local;
+    use super::message;
+    use super::mpsc;
+    use super::oneshot;
     use super::sff8636;
     use super::verify_ids_for_page;
     use super::ConfigBuilder;
+    use super::Duration;
+    use super::Error;
+    use super::Header;
+    use super::HostRequest;
+    use super::HostRpcRequest;
     use super::Identifier;
+    use super::IoLoop;
+    use super::Logger;
+    use super::Message;
+    use super::MessageBody;
+    use super::MessageError;
+    use super::ModuleId;
+    use super::OutstandingHostRequest;
     use super::Page;
     use super::PowerMode;
+    use super::SocketAddr;
+    use super::SocketAddrV6;
+    use super::SpResponse;
+    use super::SpRpcResponse;
+    use super::UdpSocket;
     use std::net::Ipv6Addr;
 
     #[test]
@@ -1892,5 +1947,150 @@ mod tests {
         assert_eq!(serde_json::to_string(&PowerMode::Off).unwrap(), "\"off\"");
         assert_eq!(serde_json::to_string(&PowerMode::Low).unwrap(), "\"low\"");
         assert_eq!(serde_json::to_string(&PowerMode::High).unwrap(), "\"high\"");
+    }
+
+    // Sanity checks for the handling of "responses" from the SP when their
+    // version does not match our own. In particular, we simulate:
+    //
+    // - An SP running before the minimum committed version. This should
+    // actually never generate a response, but we test the logic anyway. We
+    // expect that this causes us to return a version-mismatch error.
+    //
+    // - An SP running between committed and our own version, exclusive. We
+    // should still handle this response correctly.
+    #[tokio::test]
+    async fn test_version_mismatch_handling() {
+        // In this test, the SP sends us an extremely old version.
+        //
+        // They should never do that, because of the implementations that we've
+        // already put in the field. But if they do, this exercises our code in
+        // the IO loop which detects that and injects a version mismatch error
+        // into the response channel.
+        let response = test_version_mismatch_impl(message::version::V1).await;
+        assert!(matches!(
+            response,
+            Err(Error::Protocol(MessageError::VersionMismatch { .. }))
+        ));
+
+        // In this test, the SP sends us something below our version, but that's
+        // been committed. We should handle this correctly, and not fail to
+        // deserialize anything. I.e., both peers are respecting the protocol.
+        let response = test_version_mismatch_impl(message::version::MIN).await;
+        assert!(matches!(
+            response,
+            Ok(SpRpcResponse {
+                message: Message {
+                    header: Header {
+                        version: message::version::MIN,
+                        ..
+                    },
+                    body: MessageBody::SpResponse(SpResponse::Ack),
+                    ..
+                },
+                ..
+            })
+        ));
+
+        // In this test, the SP is beyond our own version. Assuming they're
+        // respecting the protocol, they should be able to handle our message
+        // (which is part of the committed protocol), and send us a decodable
+        // response.
+        let the_future = message::version::CURRENT + 1;
+        let response = test_version_mismatch_impl(the_future).await;
+        assert!(matches!(
+            response,
+            Ok(SpRpcResponse {
+                message: Message {
+                    header: Header {
+                        version: _the_future,
+                        ..
+                    },
+                    body: MessageBody::SpResponse(SpResponse::Ack),
+                    ..
+                },
+                ..
+            })
+        ));
+    }
+
+    async fn test_version_mismatch_impl(sp_version: u8) -> Result<SpRpcResponse, Error> {
+        let io_log = Logger::root(slog::Discard, slog::o!());
+        let sp_address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
+        let sp_socket = UdpSocket::bind(sp_address).await.unwrap();
+        let SocketAddr::V6(sp_address) = sp_socket.local_addr().unwrap() else {
+            panic!("Should be V6 socket address");
+        };
+        let (outgoing_request_tx, outgoing_request_rx) = mpsc::channel(1);
+        let (request_tx, _request_rx) = mpsc::channel(1);
+
+        let host_address = SocketAddrV6::new(Ipv6Addr::LOCALHOST, 0, 0, 0);
+        let socket = UdpSocket::bind(host_address).await.unwrap();
+        let SocketAddr::V6(host_address) = socket.local_addr().unwrap() else {
+            panic!("Should be V6 socket address");
+        };
+        let io_loop = IoLoop::new(
+            io_log,
+            socket,
+            sp_address,
+            Some(3),
+            Duration::from_secs(1),
+            outgoing_request_rx,
+            request_tx,
+        );
+        let _io_task = tokio::spawn(async move {
+            io_loop.run().await;
+        });
+
+        // Spawn a task to emulate the SP.
+        let sp_task = tokio::spawn(async move {
+            let mut buf = [0; 2048];
+            let n_bytes = tokio::time::timeout(Duration::from_secs(1), sp_socket.recv(&mut buf))
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(n_bytes > 0);
+
+            // Send back an absurd version.
+            let message = Message {
+                header: Header {
+                    version: sp_version,
+                    message_id: 0,
+                },
+                modules: ModuleId::all_transceivers(0),
+                body: MessageBody::SpResponse(SpResponse::Ack),
+            };
+            let n_bytes = hubpack::serialize(&mut buf, &message).unwrap();
+            assert_eq!(
+                sp_socket
+                    .send_to(&buf[..n_bytes], host_address)
+                    .await
+                    .unwrap(),
+                n_bytes
+            );
+        });
+
+        // Send a single message, something where an ACK is all that's required.
+        let (response_tx, response_rx) = oneshot::channel();
+        let message = Message {
+            header: Header {
+                version: message::version::CURRENT,
+                message_id: 0,
+            },
+            modules: ModuleId::all_transceivers(0),
+            body: MessageBody::HostRequest(HostRequest::DisablePower),
+        };
+        let request = HostRpcRequest {
+            message,
+            data: None,
+        };
+        let req = OutstandingHostRequest {
+            request,
+            n_retries: 0,
+            response_tx,
+        };
+        outgoing_request_tx.send(req).await.unwrap();
+        let response = response_rx.await.unwrap();
+        assert!(sp_task.await.is_ok());
+        response
     }
 }

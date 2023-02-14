@@ -31,7 +31,7 @@ pub const PORT: u16 = 11112;
 
 /// The IPv6 multicast address on which both peers should listen.
 ///
-/// See RFD 250 for backgroun on this specific address. Briefly, this is a
+/// See RFD 250 for background on this specific address. Briefly, this is a
 /// link-local multicast address that is unlikely to conflict with others, such
 /// as the All-Nodes address.
 //
