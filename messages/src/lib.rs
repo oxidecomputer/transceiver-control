@@ -450,19 +450,58 @@ impl ModuleId {
 /// The MAC address allocation for the target system.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, SerializedSize)]
 pub struct MacAddrs {
-    /// The first valid MAC address for the system.
-    pub base_mac: [u8; 6],
-    /// The number of available addresses following `base_mac`.
-    pub count: u16,
-    /// The stride pattern used to compute the next available MAC address.
-    ///
-    /// This is used in situations in which subsystems may make assumptions
-    /// about spacing between addresses. At the time of writing, this applies to
-    /// the Chelsio T6 NICs.
-    pub stride: u8,
+    // The first valid MAC address for the system.
+    base_mac: [u8; 6],
+    // The number of available addresses following `base_mac`.
+    count: u16,
+    // The stride pattern used to compute the next available MAC address.
+    //
+    // This is used in situations in which subsystems may make assumptions
+    // about spacing between addresses. At the time of writing, this applies to
+    // the Chelsio T6 NICs.
+    stride: u8,
 }
 
 impl MacAddrs {
+    /// Create a new MAC address range.
+    ///
+    /// This will do some basic sanity checks on the provided data to make sure
+    /// that the full range is valid. Specifically, we check that the base MAC
+    /// is not a multicast address, that all addresses in the range share the
+    /// same OUI, and that count/stride are nonzero.
+    pub const fn new(base_mac: [u8; 6], count: u16, stride: u8) -> Option<Self> {
+        if Self::is_valid(base_mac, count, stride) {
+            Some(Self {
+                base_mac,
+                count,
+                stride,
+            })
+        } else {
+            None
+        }
+    }
+
+    const fn is_valid(base_mac: [u8; 6], count: u16, stride: u8) -> bool {
+        if count == 0 || stride == 0 {
+            return false;
+        }
+
+        // Check the multicast bit.
+        if (base_mac[0] & 0b1) != 0 {
+            return false;
+        }
+
+        // Check that the last address, at `n * stride` does not change the OUI.
+        let base_n = u32::from_be_bytes([base_mac[2], base_mac[3], base_mac[4], base_mac[5]]);
+        let n = count as u32;
+        let stride = stride as u32;
+        let offset = n * stride; // Cannot overflow based on types.
+        match base_n.checked_add(offset) {
+            Some(last) => last.to_be_bytes()[0] == base_mac[2],
+            None => false,
+        }
+    }
+
     /// Return an iterator over the MAC addresses in `self`.
     pub const fn iter(&self) -> MacAddrIter {
         MacAddrIter {
@@ -472,18 +511,36 @@ impl MacAddrs {
     }
 
     /// Return the `n`th address in the range of MACs provided by `self`.
-    ///
-    /// If `n` is outside of the range of `self`, `None` is returned.
-    pub fn nth(&self, n: u16) -> Option<[u8; 6]> {
+    pub const fn nth(&self, n: u16) -> Option<[u8; 6]> {
         if n >= self.count {
             return None;
         }
-        let base_n = u16::from_be_bytes([self.base_mac[4], self.base_mac[5]]);
-        let shift = (base_n + n * u16::from(self.stride)).to_be_bytes();
-        let mut new = self.base_mac.clone();
-        new[4] = shift[0];
-        new[5] = shift[1];
-        Some(new)
+        let base_n = u32::from_be_bytes([
+            self.base_mac[2],
+            self.base_mac[3],
+            self.base_mac[4],
+            self.base_mac[5],
+        ]);
+
+        // Compute the total offset as a `u32`. Based on the types of `n` and
+        // `self.stride` this cannot overflow.
+        let n = n as u32;
+        let stride = self.stride as u32;
+        let offset = n * stride;
+
+        // This also cannot overflow, by construction, since we do
+        // `base_n.checked_add` in `Self::is_valid`.
+        let new_n = base_n + offset;
+        let new_bytes = new_n.to_be_bytes();
+
+        Some([
+            self.base_mac[0],
+            self.base_mac[1],
+            self.base_mac[2],
+            new_bytes[1],
+            new_bytes[2],
+            new_bytes[3],
+        ])
     }
 }
 
@@ -590,5 +647,35 @@ mod tests {
             let off1 = u16::from_be_bytes([mac1[4], mac1[5]]);
             assert_eq!(off1 - off0, u16::from(macs.stride));
         }
+    }
+
+    // Check that we fail to build a MAC address range if we don't pass the
+    // basic sanity checks.
+    #[test]
+    fn test_mac_addrs_is_valid() {
+        assert!(
+            !MacAddrs::is_valid([0xa8, 0x40, 0x25, 0xff, 0xff, 0xff], 0, 1),
+            "Should not be able to make MAC range with count of zero",
+        );
+        assert!(
+            !MacAddrs::is_valid([0xa8, 0x40, 0x25, 0xff, 0xff, 0xff], 2, 0),
+            "Should not be able to make MAC range with stride of zero",
+        );
+        assert!(
+            !MacAddrs::is_valid([0xa8, 0x40, 0x25, 0xff, 0xff, 0xff], 2, 1),
+            "Should not be able to make MAC range with addresses that change OUI",
+        );
+        assert!(
+            !MacAddrs::is_valid([0xa8 | 0b1, 0x40, 0x25, 0xff, 0xff, 0xff], 2, 1),
+            "Should not be able to make MAC range with multicast MACs",
+        );
+        assert!(
+            !MacAddrs::is_valid([0xa8, 0x40, 0xff, 0x01, 0x00, 0xff], u16::MAX, u8::MAX),
+            "Should not be able to make MAC range that would overflow",
+        );
+        assert!(
+            MacAddrs::is_valid([0xa8, 0x40, 0xff, 0x01, 0x00, 0xfe], u16::MAX, u8::MAX),
+            "Should be able to make MAC range that would not overflow",
+        );
     }
 }
