@@ -32,6 +32,7 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tokio::time::interval;
+use tokio::time::sleep;
 use tokio::time::Interval;
 use transceiver_decode::Error as DecodeError;
 use transceiver_decode::Identifier;
@@ -198,6 +199,10 @@ pub struct SpRequest {
 const NUM_OUTSTANDING_REQUESTS: usize = 1;
 const RESEND_INTERVAL: Duration = Duration::from_secs(1);
 const MAX_PACKET_SIZE: usize = MAX_PAYLOAD_SIZE + Message::MAX_SIZE;
+
+// Durations related to reset, as mandated by SFF-8679, table 8-1.
+const T_RESET: Duration = Duration::from_secs(2);
+const T_RESET_INIT: Duration = Duration::from_micros(10);
 
 /// Return the default retry interval for resending messages.
 pub const fn default_retry_interval() -> Duration {
@@ -544,8 +549,17 @@ impl Controller {
     }
 
     /// Reset a set of transceiver modules.
-    pub async fn reset(&self, _modules: ModuleId) -> Result<(), Error> {
-        todo!()
+    pub async fn reset(&self, modules: ModuleId) -> Result<(), Error> {
+        // According to SFF-8679, the host is required to pulse `ResetL` for at
+        // least `t_reset_init` to effect an actual reset of the module. Modules
+        // are then afforded `t_reset` after the rising edge of the `ResetL`
+        // pulse until they're required to become fully functional. See SFF-8679
+        // Table 8-1, and section 5.3.2.
+        self.assert_reset(modules).await?;
+        sleep(T_RESET_INIT).await;
+        self.deassert_reset(modules).await?;
+        sleep(T_RESET).await;
+        Ok(())
     }
 
     // Fetch the software power control state of a set of modules.
@@ -844,7 +858,7 @@ impl Controller {
 
                     // Wait for SFF-8679 `t_reset_init`. It's a bit silly to
                     // wait 10us here, but we're trying to be careful.
-                    tokio::time::sleep(Duration::from_micros(10)).await;
+                    sleep(T_RESET_INIT).await;
                 }
 
                 // Enable power for the required modules.
@@ -906,7 +920,7 @@ impl Controller {
                     // The SFF-8769 specifies that modules may take up to 2
                     // seconds after asserting ResetL before they are ready for
                     // reads. This is `t_reset`.
-                    tokio::time::sleep(Duration::from_secs(2)).await;
+                    sleep(T_RESET).await;
                 }
 
                 // Set the bits indicating the new power mode in the memory map.

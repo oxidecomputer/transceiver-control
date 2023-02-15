@@ -202,7 +202,10 @@ enum Cmd {
     /// enable, and power mode.
     Status,
 
-    /// Have the SP execute a reset of the addressed modules.
+    /// Reset the addressed modules.
+    ///
+    /// A reset returns the module to its default state, clearing all module
+    /// settings and data. This may take up to 2s to complete.
     Reset,
 
     /// Set the power module of the addressed modules.
@@ -215,7 +218,7 @@ enum Cmd {
     /// Return the power mode of the addressed modules.
     ///
     /// This takes into account whether a module has specified software override
-    /// of power control.
+    /// of power control, and may take up to 2s to complete.
     Power,
 
     /// Enable the hot swap controller for the addressed modules.
