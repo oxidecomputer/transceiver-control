@@ -34,6 +34,7 @@ use transceiver_messages::mgmt::sff8636;
 use transceiver_messages::mgmt::ManagementInterface;
 use transceiver_messages::mgmt::MemoryRead;
 use transceiver_messages::mgmt::MemoryWrite;
+use transceiver_messages::MacAddrs;
 use transceiver_messages::ModuleId;
 use transceiver_messages::PortMask;
 
@@ -385,6 +386,14 @@ enum Cmd {
     /// indicates that page `0x10` is supported, and the module implements banks
     /// 0 and 1 (16 lanes).
     MemoryModel,
+
+    /// Return the MAC addresses for the particular system allotted by its
+    /// FRUID.
+    Macs {
+        /// Print a summary of the MAC range, rather than each address.
+        #[arg(short, long, default_value_t = false)]
+        summary: bool,
+    },
 }
 
 fn load_write_data(file: Option<PathBuf>, kind: InputKind) -> anyhow::Result<Vec<u8>> {
@@ -691,6 +700,13 @@ async fn main() -> anyhow::Result<()> {
                 .context("Failed to get memory model")?;
             print_module_memory_model(modules, layout);
         }
+        Cmd::Macs { summary } => {
+            let macs = controller
+                .mac_addrs()
+                .await
+                .context("Failed to get MAC addresses")?;
+            print_mac_address_range(macs, summary);
+        }
     }
     Ok(())
 }
@@ -863,6 +879,29 @@ fn print_module_memory_model(modules: ModuleId, models: Vec<MemoryModel>) {
     let fpga_id = modules.fpga_id;
     for (port, model) in modules.ports.to_indices().zip(models.into_iter()) {
         println!("{fpga_id:>WIDTH$} {port:>WIDTH$} {model}");
+    }
+}
+
+fn print_mac_address_range(macs: MacAddrs, summary: bool) {
+    if summary {
+        let base: String = macs
+            .base_mac()
+            .iter()
+            .map(|octet| format!("{octet:02x}"))
+            .collect::<Vec<_>>()
+            .join(":");
+        println!("Base:   {base}");
+        println!("Count:  {}", macs.count());
+        println!("Stride: {}", macs.stride());
+    } else {
+        for mac in macs.iter() {
+            let mac_s: String = mac
+                .iter()
+                .map(|octet| format!("{octet:02x}"))
+                .collect::<Vec<_>>()
+                .join(":");
+            println!("{mac_s}");
+        }
     }
 }
 
