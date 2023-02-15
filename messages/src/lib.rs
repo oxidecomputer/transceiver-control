@@ -152,12 +152,15 @@ pub enum Error {
         any(test, feature = "std"),
         error(
             "The MAC address range is invalid, \
-            reason: {reason}, range: {range:?}"
+            reason: {reason}, base: {base_mac:?}, \
+            count: {count}, stride: {stride}"
         )
     )]
     BadMacAddrRange {
         reason: BadMacAddrReason,
-        range: MacAddrs,
+        base_mac: [u8; 6],
+        count: u16,
+        stride: u8,
     },
 }
 
@@ -505,15 +508,12 @@ impl MacAddrs {
     /// is not a multicast address, that all addresses in the range share the
     /// same OUI, and that count/stride are nonzero.
     pub const fn new(base_mac: [u8; 6], count: u16, stride: u8) -> Result<Self, Error> {
-        let range = Self {
-            base_mac,
-            count,
-            stride,
-        };
         if count == 0 || stride == 0 {
             return Err(Error::BadMacAddrRange {
                 reason: BadMacAddrReason::ZeroStrideOrCount,
-                range,
+                base_mac,
+                count,
+                stride,
             });
         }
 
@@ -521,20 +521,27 @@ impl MacAddrs {
         if (base_mac[0] & 0b1) != 0 {
             return Err(Error::BadMacAddrRange {
                 reason: BadMacAddrReason::MulticastBaseAddr,
-                range,
+                base_mac,
+                count,
+                stride,
             });
         }
 
         // Check that the last address, at `n * stride` does not change the OUI.
         let base_n = u32::from_be_bytes([base_mac[2], base_mac[3], base_mac[4], base_mac[5]]);
         let n = count as u32;
-        let stride = stride as u32;
-        let offset = n * stride; // Cannot overflow based on types.
+        let offset = n * stride as u32; // Cannot overflow based on types.
         match base_n.checked_add(offset) {
-            Some(last) if last.to_be_bytes()[0] == base_mac[2] => Ok(range),
+            Some(last) if last.to_be_bytes()[0] == base_mac[2] => Ok(Self {
+                base_mac,
+                count,
+                stride,
+            }),
             _ => Err(Error::BadMacAddrRange {
                 reason: BadMacAddrReason::SpansMultipleOuis,
-                range,
+                base_mac,
+                count,
+                stride,
             }),
         }
     }
