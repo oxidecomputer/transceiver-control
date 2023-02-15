@@ -147,12 +147,18 @@ pub enum Error {
         interface: ManagementInterface,
     },
 
-    /// The MAC address block is invalid.
+    /// The MAC address range is invalid.
     #[cfg_attr(
         any(test, feature = "std"),
-        error("The MAC address block is invalid: {0}")
+        error(
+            "The MAC address range is invalid, \
+            reason: {reason}, range: {range:?}"
+        )
     )]
-    BadMacAddrBlock(BadMacAddrReason),
+    BadMacAddrRange {
+        reason: BadMacAddrReason,
+        range: MacAddrs,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize, SerializedSize)]
@@ -499,24 +505,24 @@ impl MacAddrs {
     /// is not a multicast address, that all addresses in the range share the
     /// same OUI, and that count/stride are nonzero.
     pub const fn new(base_mac: [u8; 6], count: u16, stride: u8) -> Result<Self, Error> {
-        match Self::is_valid(base_mac, count, stride) {
-            Ok(()) => Ok(Self {
-                base_mac,
-                count,
-                stride,
-            }),
-            Err(e) => Err(e),
-        }
-    }
-
-    const fn is_valid(base_mac: [u8; 6], count: u16, stride: u8) -> Result<(), Error> {
+        let range = Self {
+            base_mac,
+            count,
+            stride,
+        };
         if count == 0 || stride == 0 {
-            return Err(Error::BadMacAddrBlock(BadMacAddrReason::ZeroStrideOrCount));
+            return Err(Error::BadMacAddrRange {
+                reason: BadMacAddrReason::ZeroStrideOrCount,
+                range,
+            });
         }
 
         // Check the multicast bit.
         if (base_mac[0] & 0b1) != 0 {
-            return Err(Error::BadMacAddrBlock(BadMacAddrReason::MulticastBaseAddr));
+            return Err(Error::BadMacAddrRange {
+                reason: BadMacAddrReason::MulticastBaseAddr,
+                range,
+            });
         }
 
         // Check that the last address, at `n * stride` does not change the OUI.
@@ -525,8 +531,11 @@ impl MacAddrs {
         let stride = stride as u32;
         let offset = n * stride; // Cannot overflow based on types.
         match base_n.checked_add(offset) {
-            Some(last) if last.to_be_bytes()[0] == base_mac[2] => Ok(()),
-            _ => Err(Error::BadMacAddrBlock(BadMacAddrReason::SpansMultipleOuis)),
+            Some(last) if last.to_be_bytes()[0] == base_mac[2] => Ok(range),
+            _ => Err(Error::BadMacAddrRange {
+                reason: BadMacAddrReason::SpansMultipleOuis,
+                range,
+            }),
         }
     }
 
@@ -699,42 +708,55 @@ mod tests {
     fn test_mac_addrs_is_valid() {
         assert!(
             matches!(
-                MacAddrs::is_valid([0xa8, 0x40, 0x25, 0xff, 0xff, 0xff], 0, 1),
-                Err(Error::BadMacAddrBlock(BadMacAddrReason::ZeroStrideOrCount)),
+                MacAddrs::new([0xa8, 0x40, 0x25, 0xff, 0xff, 0xff], 0, 1),
+                Err(Error::BadMacAddrRange {
+                    reason: BadMacAddrReason::ZeroStrideOrCount,
+                    ..
+                }),
             ),
             "Should not be able to make MAC range with count of zero",
         );
         assert!(
             matches!(
-                MacAddrs::is_valid([0xa8, 0x40, 0x25, 0xff, 0xff, 0xff], 2, 0),
-                Err(Error::BadMacAddrBlock(BadMacAddrReason::ZeroStrideOrCount)),
+                MacAddrs::new([0xa8, 0x40, 0x25, 0xff, 0xff, 0xff], 2, 0),
+                Err(Error::BadMacAddrRange {
+                    reason: BadMacAddrReason::ZeroStrideOrCount,
+                    ..
+                }),
             ),
             "Should not be able to make MAC range with stride of zero",
         );
         assert!(
             matches!(
-                MacAddrs::is_valid([0xa8, 0x40, 0x25, 0xff, 0xff, 0xff], 2, 1),
-                Err(Error::BadMacAddrBlock(BadMacAddrReason::SpansMultipleOuis)),
+                MacAddrs::new([0xa8, 0x40, 0x25, 0xff, 0xff, 0xff], 2, 1),
+                Err(Error::BadMacAddrRange {
+                    reason: BadMacAddrReason::SpansMultipleOuis,
+                    ..
+                }),
             ),
             "Should not be able to make MAC range with addresses that change OUI",
         );
         assert!(
             matches!(
-                MacAddrs::is_valid([0xa8 | 0b1, 0x40, 0x25, 0xff, 0xff, 0xff], 2, 1),
-                Err(Error::BadMacAddrBlock(BadMacAddrReason::MulticastBaseAddr)),
+                MacAddrs::new([0xa8 | 0b1, 0x40, 0x25, 0xff, 0xff, 0xff], 2, 1),
+                Err(Error::BadMacAddrRange {
+                    reason: BadMacAddrReason::MulticastBaseAddr,
+                    ..
+                })
             ),
             "Should not be able to make MAC range with multicast MACs",
         );
         assert!(
             matches!(
-                MacAddrs::is_valid([0xa8, 0x40, 0xff, 0x01, 0x00, 0xff], u16::MAX, u8::MAX),
-                Err(Error::BadMacAddrBlock(BadMacAddrReason::SpansMultipleOuis)),
+                MacAddrs::new([0xa8, 0x40, 0xff, 0x01, 0x00, 0xff], u16::MAX, u8::MAX),
+                Err(Error::BadMacAddrRange {
+                    reason: BadMacAddrReason::SpansMultipleOuis,
+                    ..
+                }),
             ),
             "Should not be able to make MAC range that would overflow",
         );
-        assert!(
-            MacAddrs::is_valid([0xa8, 0x40, 0xff, 0x01, 0x00, 0xfe], u16::MAX, u8::MAX).is_ok(),
-            "Should be able to make MAC range that would not overflow",
-        );
+        MacAddrs::new([0xa8, 0x40, 0xff, 0x01, 0x00, 0xfe], u16::MAX, u8::MAX)
+            .expect("Should be able to make MAC range that would not overflow");
     }
 }
