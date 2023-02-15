@@ -885,14 +885,14 @@ fn print_module_memory_model(modules: ModuleId, models: Vec<MemoryModel>) {
 fn print_mac_address_range(macs: MacAddrs, summary: bool) {
     if summary {
         let base: String = macs
-            .base_mac
+            .base_mac()
             .iter()
             .map(|octet| format!("{octet:02x}"))
             .collect::<Vec<_>>()
             .join(":");
         println!("Base:   {base}");
-        println!("Count:  {}", macs.count);
-        println!("Stride: {}", macs.stride);
+        println!("Count:  {}", macs.count());
+        println!("Stride: {}", macs.stride());
     } else {
         for mac in macs.iter() {
             let mac_s: String = mac
