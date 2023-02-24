@@ -6,7 +6,6 @@
 
 //! Decode various transceiver module memory maps and data.
 
-use chrono::NaiveDate;
 use std::fmt;
 use std::ops::Range;
 use thiserror::Error;
@@ -28,6 +27,9 @@ pub enum Error {
 
     #[error("Memory map parsing failed")]
     ParseFailed,
+
+    #[error("Invalid OUI")]
+    InvalidOui,
 }
 
 /// The SFF-8024 identifier for a transceiver module.
@@ -37,6 +39,11 @@ pub enum Error {
 /// interpret the remainder of the memory map.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
 #[repr(u8)]
+#[cfg_attr(
+    any(feature = "api-traits", test),
+    derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)
+)]
+#[cfg_attr(any(feature = "api-traits", test), serde(rename_all = "snake_case"))]
 pub enum Identifier {
     Unknown,
     Gbic,
@@ -213,8 +220,72 @@ impl core::fmt::Display for Identifier {
     }
 }
 
+/// An Organization Unique Identifier.
+#[derive(Clone, Copy, Debug)]
+#[cfg_attr(
+    any(feature = "api-traits", test),
+    derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema, PartialEq)
+)]
+#[cfg_attr(
+    any(feature = "api-traits", test),
+    serde(try_from = "String", into = "String")
+)]
+pub struct Oui(pub [u8; 3]);
+
+#[cfg(any(feature = "api-traits", test))]
+impl std::str::FromStr for Oui {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let mut out = [0u8; 3];
+
+        // 3 octets, formatted as hex, with `-` separating them.
+        if s.len() > (3 * 2 + 2) {
+            return Err(Error::InvalidOui);
+        }
+        let mut i = 0;
+        for part in s.splitn(out.len(), '-') {
+            let Ok(octet) = u8::from_str_radix(part, 16) else {
+                return Err(Error::InvalidOui);
+            };
+            out[i] = octet;
+            i += 1;
+        }
+        if i != out.len() {
+            return Err(Error::InvalidOui);
+        }
+        Ok(Oui(out))
+    }
+}
+
+#[cfg(any(feature = "api-traits", test))]
+impl std::convert::TryFrom<String> for Oui {
+    type Error = <Self as std::str::FromStr>::Err;
+
+    fn try_from(s: String) -> Result<Self, Self::Error> {
+        s.as_str().parse()
+    }
+}
+
+#[cfg(any(feature = "api-traits", test))]
+impl From<Oui> for String {
+    fn from(o: Oui) -> String {
+        format!("{o}")
+    }
+}
+
+impl fmt::Display for Oui {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{:02x}-{:02x}-{:02x}", self.0[0], self.0[1], self.0[2])
+    }
+}
+
 /// The vendor information for a transceiver module.
 #[derive(Clone, Debug)]
+#[cfg_attr(
+    any(feature = "api-traits", test),
+    derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema, PartialEq)
+)]
 pub struct VendorInfo {
     /// The SFF-8024 identifier.
     pub identifier: Identifier,
@@ -224,23 +295,17 @@ pub struct VendorInfo {
 
 /// Vendor-specific information about a transceiver module.
 #[derive(Clone)]
+#[cfg_attr(
+    any(feature = "api-traits", test),
+    derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema, PartialEq)
+)]
 pub struct Vendor {
     pub name: String,
-    pub oui: [u8; 3],
+    pub oui: Oui,
     pub part: String,
     pub revision: String,
     pub serial: String,
-    pub date: DateCode,
-}
-
-impl Vendor {
-    /// Return a formatted version of the Organizational Unique Identifier.
-    pub fn format_oui(&self) -> String {
-        format!(
-            "{0:02x}-{1:02x}-{2:02x}",
-            self.oui[0], self.oui[1], self.oui[2]
-        )
-    }
+    pub date: Option<String>,
 }
 
 impl fmt::Display for Vendor {
@@ -253,7 +318,7 @@ impl fmt::Debug for Vendor {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         f.debug_struct("Vendor")
             .field("name", &self.name)
-            .field("oui", &self.format_oui())
+            .field("oui", &format!("{}", self.oui))
             .field("part", &self.part)
             .field("revision", &self.revision)
             .field("serial", &self.serial)
@@ -340,11 +405,11 @@ impl ParseFromModule for Vendor {
                 };
 
                 let name = ascii_to_string(&data[NAME]);
-                let oui = data[OUI].try_into().unwrap();
+                let oui = Oui(data[OUI].try_into().unwrap());
                 let part = ascii_to_string(&data[PART]);
                 let revision = ascii_to_string(&data[REVISION]);
                 let serial = ascii_to_string(&data[SERIAL]);
-                let date = DateCode::from(&data[DATE]);
+                let date = std::str::from_utf8(&data[DATE]).ok().map(String::from);
 
                 Ok(Self {
                     name,
@@ -372,11 +437,11 @@ impl ParseFromModule for Vendor {
                 // work.
                 let buf: Vec<_> = reads.flat_map(|b| b.iter().copied()).collect();
                 let name = ascii_to_string(&buf[NAME]);
-                let oui = buf[OUI].try_into().unwrap();
+                let oui = Oui(buf[OUI].try_into().unwrap());
                 let part = ascii_to_string(&buf[PART]);
                 let revision = ascii_to_string(&buf[REVISION]);
                 let serial = ascii_to_string(&buf[SERIAL]);
-                let date = DateCode::from(&buf[DATE]);
+                let date = std::str::from_utf8(&buf[DATE]).ok().map(String::from);
                 Ok(Self {
                     name,
                     oui,
@@ -400,85 +465,6 @@ fn ascii_to_string(buf: &[u8]) -> String {
                 .expect("utf8 checked right above")
                 .trim_end()
                 .to_string()
-        }
-    }
-}
-
-/// An SFF-8636 or CMIS date code.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DateCode {
-    pub date: NaiveDate,
-    pub lot: Option<String>,
-}
-
-impl DateCode {
-    /// Serialize self into the SFF-8636 date code format.
-    pub fn to_bytes(&self) -> Vec<u8> {
-        let mut buf = vec![0; 8];
-
-        let date = self.date.format("%y%m%d").to_string();
-        buf[..date.len()].copy_from_slice(date.as_bytes());
-        if let Some(lot) = &self.lot {
-            buf[6..].copy_from_slice(&lot.as_bytes()[..2]);
-        }
-        buf
-    }
-}
-
-impl<T> From<T> for DateCode
-where
-    T: AsRef<[u8]>,
-{
-    fn from(buf: T) -> Self {
-        let buf = buf.as_ref();
-        assert!(buf.len() >= 8);
-
-        // The date code is specified in SFF-8636 section 6.2.36 or CMIS
-        // 8.3.2.6. It is 8-octets, including:
-        //
-        // - Two digits for the year, relative to 2000.
-        // - Two digits for the month number.
-        // - Two digits for the day number.
-        // - An optional 2-digit lot code.
-        const BAD: &str = "01";
-        let year = std::str::from_utf8(&buf[..2])
-            .unwrap_or(BAD)
-            .parse::<i32>()
-            .unwrap()
-            + 2000;
-        let month: u32 = std::str::from_utf8(&buf[2..4])
-            .unwrap_or(BAD)
-            .parse()
-            .unwrap();
-        let day: u32 = std::str::from_utf8(&buf[4..6])
-            .unwrap_or(BAD)
-            .parse()
-            .unwrap();
-        let lot = std::str::from_utf8(&buf[6..])
-            .map(|x| {
-                let x = x.trim_end();
-                if x.is_empty() {
-                    None
-                } else {
-                    Some(x.to_string())
-                }
-            })
-            .unwrap_or(None);
-
-        DateCode {
-            date: NaiveDate::from_ymd_opt(year, month, day).expect("bad date code"),
-            lot,
-        }
-    }
-}
-
-impl fmt::Display for DateCode {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        const FMT: &str = "%d %b %Y";
-        if let Some(lot) = &self.lot {
-            write!(f, "{} (Lot {})", self.date.format(FMT), lot,)
-        } else {
-            write!(f, "{}", self.date.format(FMT))
         }
     }
 }
@@ -752,13 +738,13 @@ impl ParseFromModule for PowerControl {
 
 #[cfg(test)]
 mod tests {
-    use super::DateCode;
     use super::Identifier;
     use super::MemoryModel;
-    use super::NaiveDate;
+    use super::Oui;
     use super::ParseFromModule;
     use super::PowerControl;
     use super::Vendor;
+    use super::VendorInfo;
 
     #[test]
     fn test_parse_memory_model_from_module_sff8636() {
@@ -859,17 +845,11 @@ mod tests {
         let parsed = Vendor::parse(id, std::iter::once(data.as_slice())).unwrap();
 
         assert_prefix(VENDOR_NAME, &parsed.name);
-        assert_eq!(OUI, parsed.oui);
+        assert_eq!(OUI, parsed.oui.0);
         assert_prefix(PART, &parsed.part);
         assert_prefix(REVISION, &parsed.revision);
         assert_prefix(SERIAL, &parsed.serial);
-        assert_eq!(
-            parsed.date,
-            DateCode {
-                date: NaiveDate::from_ymd_opt(2020, 01, 01).unwrap(),
-                lot: None,
-            }
-        );
+        assert_eq!(parsed.date.as_deref(), std::str::from_utf8(DATE).ok());
     }
 
     #[test]
@@ -899,28 +879,11 @@ mod tests {
 
         let parsed = Vendor::parse(id, reads).unwrap();
         assert_prefix(VENDOR_NAME, &parsed.name);
-        assert_eq!(OUI, parsed.oui);
+        assert_eq!(OUI, parsed.oui.0);
         assert_prefix(PART, &parsed.part);
         assert_prefix(REVISION, &parsed.revision);
         assert_prefix(SERIAL, &parsed.serial);
-        assert_eq!(
-            parsed.date,
-            DateCode {
-                date: NaiveDate::from_ymd_opt(2020, 01, 01).unwrap(),
-                lot: Some(String::from("00")),
-            }
-        );
-    }
-
-    #[test]
-    fn test_date_code_to_bytes() {
-        let expected = DateCode {
-            date: NaiveDate::from_ymd_opt(2022, 02, 02).unwrap(),
-            lot: Some(String::from("ab")),
-        };
-        let bytes = expected.to_bytes();
-        let deser = DateCode::from(bytes);
-        assert_eq!(expected, deser);
+        assert_eq!(parsed.date.as_deref(), std::str::from_utf8(DATE).ok());
     }
 
     #[test]
@@ -967,5 +930,33 @@ mod tests {
             control,
             PowerControl::OverrideLpModePin { low_power: true }
         ));
+    }
+
+    #[test]
+    fn test_oui_from_str() {
+        let oui = Oui([0xa8, 0x40, 0x25]);
+        let s = "a8-40-25";
+        assert_eq!(format!("{oui}"), s);
+        assert_eq!(oui, s.parse().unwrap());
+    }
+
+    #[test]
+    fn test_vendor_info_serdes() {
+        let v = VendorInfo {
+            identifier: Identifier::QsfpPlusSff8636,
+            vendor: Vendor {
+                name: String::from("foo"),
+                oui: Oui([0xa8, 0x40, 0x25]),
+                part: String::from("bar"),
+                revision: String::from("ab"),
+                serial: String::from("some sn"),
+                date: Some(String::from("220202ab")),
+            },
+        };
+        let expected = "{\"identifier\":\"qsfp_plus_sff8636\",\"vendor\":\
+            {\"name\":\"foo\",\"oui\":\"a8-40-25\",\"part\":\"bar\",\
+            \"revision\":\"ab\",\"serial\":\"some sn\",\"date\":\"220202ab\"}}";
+        assert_eq!(serde_json::to_string(&v).unwrap(), expected);
+        assert_eq!(v, serde_json::from_str(expected).unwrap());
     }
 }

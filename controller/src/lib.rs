@@ -112,6 +112,11 @@ pub enum Error {
 
 /// An allowed power mode for the module.
 #[derive(Clone, Copy, Debug, PartialEq, clap::ValueEnum)]
+#[cfg_attr(
+    any(feature = "api-traits", test),
+    derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema)
+)]
+#[cfg_attr(any(feature = "api-traits", test), serde(rename_all = "snake_case"))]
 pub enum PowerMode {
     /// A module is entirely powered off, using the EFuse.
     Off,
@@ -1831,6 +1836,7 @@ mod tests {
     use super::ConfigBuilder;
     use super::Identifier;
     use super::Page;
+    use super::PowerMode;
     use std::net::Ipv6Addr;
 
     #[test]
@@ -1872,5 +1878,19 @@ mod tests {
                 .build()
                 .is_err());
         }
+    }
+
+    #[test]
+    fn test_deserialize_power_mode() {
+        assert_eq!(PowerMode::Off, serde_json::from_str("\"off\"").unwrap());
+        assert_eq!(PowerMode::Low, serde_json::from_str("\"low\"").unwrap());
+        assert_eq!(PowerMode::High, serde_json::from_str("\"high\"").unwrap());
+    }
+
+    #[test]
+    fn test_serialize_power_mode() {
+        assert_eq!(serde_json::to_string(&PowerMode::Off).unwrap(), "\"off\"");
+        assert_eq!(serde_json::to_string(&PowerMode::Low).unwrap(), "\"low\"");
+        assert_eq!(serde_json::to_string(&PowerMode::High).unwrap(), "\"high\"");
     }
 }

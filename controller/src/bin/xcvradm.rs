@@ -865,15 +865,11 @@ fn print_single_module_vendor_info(fpga_id: u8, port: u8, info: VendorInfo) {
         info.identifier,
         u8::from(info.identifier)
     );
+    let date = info.vendor.date.as_deref().unwrap_or_else(|| "Unknown");
     println!(
         "{fpga_id:>WIDTH$} {port:>WIDTH$} {:ID_DEBUG_WIDTH$} {:VENDOR_WIDTH$} \
         {:PART_WIDTH$} {:REV_WIDTH$} {:SERIAL_WIDTH$} {:DATE_WIDTH$}",
-        ident,
-        info.vendor.name,
-        info.vendor.part,
-        info.vendor.revision,
-        info.vendor.serial,
-        info.vendor.date,
+        ident, info.vendor.name, info.vendor.part, info.vendor.revision, info.vendor.serial, date,
     );
 }
 

@@ -4,6 +4,9 @@ version = "0.1.0"
 edition = "2021"
 default-run = "xcvradm"
 
+[features]
+api-traits = [ "dep:schemars", "transceiver-decode/api-traits" ]
+
 [dependencies]
 anyhow = "1"
 hubpack = "0.1.0"
@@ -11,7 +14,7 @@ serde = "1"
 slog-async = "2"
 slog-term = "2"
 thiserror = "1"
-transceiver-decode = { path = "../decode" }
+transceiver-decode = { path = "../decode", default-features = false }
 transceiver-messages = { path = "../messages" }
 usdt = "0.3.5"
 
@@ -22,6 +25,10 @@ features = [ "derive" ]
 [dependencies.nix]
 version = "0.25"
 features = [ "net" ]
+
+[dependencies.schemars]
+version = "0.8"
+optional = true
 
 [dependencies.slog]
 version = "2"
@@ -36,3 +43,5 @@ version_check = "0.9"
 
 [dev-dependencies]
 tempfile = "3"
+serde_json = "1"
+schemars = "0.8"
