@@ -34,6 +34,7 @@ use tokio::time::sleep;
 use transceiver_decode::Error as DecodeError;
 use transceiver_decode::Identifier;
 use transceiver_decode::MemoryModel;
+use transceiver_decode::Monitors;
 use transceiver_decode::ParseFromModule;
 use transceiver_decode::PowerControl;
 use transceiver_decode::VendorInfo;
@@ -1035,15 +1036,16 @@ impl Controller {
     // Implementation of the read function, which does not check that the memory
     // pages addressed by `read` are valid for the addressed modules.
     async fn read_impl(&self, modules: ModuleId, read: MemoryRead) -> Result<ReadResult, Error> {
+        if modules.selected_transceiver_count() == 0 || read.len() == 0 {
+            return Ok(ReadResult::success(modules, vec![]).unwrap());
+        }
         // It's possible for consumers to request more data than will fit in a
         // single protocol message. We'll split that up here, rather than
         // requiring the consumer to worry about it.
         let mut split_modules = split_large_reads(&modules, &read).into_iter();
-        // Self::read() must guarantee that we have at least one module and so
-        // at least one read.
-        let Some(first_modules) = split_modules.next() else {
-            panic!("Split into zero modules? modules {modules:?}, read {read:?}");
-        };
+        let first_modules = split_modules
+            .next()
+            .expect("Checked we have at least one module just above");
         let mut response = self.read_impl_one_message(first_modules, read).await?;
         for next_modules in split_modules {
             let next_response = self.read_impl_one_message(next_modules, read).await?;
@@ -1107,6 +1109,11 @@ impl Controller {
     pub async fn memory_model(&self, modules: ModuleId) -> Result<MemoryModelResult, Error> {
         self.parse_modules_by_identifier::<MemoryModel>(modules)
             .await
+    }
+
+    /// Return the monitoring information of a set of modules.
+    pub async fn monitors(&self, modules: ModuleId) -> Result<MonitorResult, Error> {
+        self.parse_modules_by_identifier::<Monitors>(modules).await
     }
 
     // Parse a decodable piece of data from each module.

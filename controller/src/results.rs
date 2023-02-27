@@ -27,6 +27,7 @@ use crate::PowerMode;
 use crate::TransceiverError;
 use transceiver_decode::Identifier;
 use transceiver_decode::MemoryModel;
+use transceiver_decode::Monitors;
 use transceiver_decode::PowerControl;
 use transceiver_decode::VendorInfo;
 use transceiver_messages::merge_module_data;
@@ -186,6 +187,9 @@ impl PowerModeResult {
 
 /// The result of reading the LED state of a set of transceivers.
 pub type LedStateResult = ModuleResult<LedState>;
+
+/// The result of reading the monitoring data of a set of transceivers.
+pub type MonitorResult = ModuleResult<Monitors>;
 
 /// A generic type for accessing module-specific data and failures.
 ///
