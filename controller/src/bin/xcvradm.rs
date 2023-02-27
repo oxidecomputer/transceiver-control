@@ -25,8 +25,13 @@ use transceiver_controller::Config;
 use transceiver_controller::Controller;
 use transceiver_controller::PowerMode;
 use transceiver_controller::SpRequest;
+use transceiver_decode::Aux1Monitor;
+use transceiver_decode::Aux2Monitor;
+use transceiver_decode::Aux3Monitor;
 use transceiver_decode::Identifier;
 use transceiver_decode::MemoryModel;
+use transceiver_decode::Monitors;
+use transceiver_decode::ReceiverPower;
 use transceiver_decode::VendorInfo;
 use transceiver_messages::message::Status;
 use transceiver_messages::mgmt::cmis;
@@ -397,6 +402,12 @@ enum Cmd {
         #[arg(short, long, default_value_t = false)]
         summary: bool,
     },
+
+    /// Return the core transceiver monitoring data for the addressed modules.
+    ///
+    /// This prints the folling set of values, or "Unsupported" if the module
+    /// does not support the monitoring data.
+    Monitors,
 }
 
 fn load_write_data(file: Option<PathBuf>, kind: InputKind) -> anyhow::Result<Vec<u8>> {
@@ -710,6 +721,13 @@ async fn main() -> anyhow::Result<()> {
                 .context("Failed to get MAC addresses")?;
             print_mac_address_range(macs, summary);
         }
+        Cmd::Monitors => {
+            let monitors = controller
+                .monitors(modules)
+                .await
+                .context("Failed to get monitoring data")?;
+            print_monitors(modules, monitors);
+        }
     }
     Ok(())
 }
@@ -901,6 +919,129 @@ fn print_mac_address_range(macs: MacAddrs, summary: bool) {
                 .join(":");
             println!("{mac_s}");
         }
+    }
+}
+
+fn display_list<T: std::fmt::Display>(items: &[T]) -> String {
+    items
+        .iter()
+        .map(|i| format!("{i}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn print_monitors(modules: ModuleId, monitors: Vec<Monitors>) {
+    const NAME_WIDTH: usize = 22;
+    let unsupported = String::from("--");
+    let fpga_id = modules.fpga_id;
+    let mut need_newline = false;
+    for (port, monitor) in modules.ports.to_indices().zip(monitors.into_iter()) {
+        if need_newline {
+            println!("");
+        }
+
+        // Start by printing the module address.
+        println!("FPGA {fpga_id}, Port {port}");
+
+        // Print module temperature, if supported.
+        print!("  {}: ", format!("{:>NAME_WIDTH$}", "Temperature (C)"));
+        if let Some(temp) = monitor.temperature {
+            println!("{temp}");
+        } else {
+            println!("{unsupported}");
+        }
+
+        // Print supply voltage, if supported.
+        print!("  {}: ", format!("{:>NAME_WIDTH$}", "Supply voltage (V)"));
+        if let Some(volt) = monitor.supply_voltage {
+            println!("{volt}");
+        } else {
+            println!("{unsupported}");
+        }
+
+        // Print the receiver power per-lane.
+        //
+        // Rx power is measured in one of two ways, either an average or
+        // peak-to-peak measurement. Print that in the field name, followed by
+        // the per-lane values themselves.
+        if let Some(rx_pow) = monitor.receiver_power {
+            let name = if matches!(rx_pow[0], ReceiverPower::Average(_)) {
+                "Avg Rx power(mW)"
+            } else {
+                "P-P Rx power (mW)"
+            };
+            println!(
+                "  {:>NAME_WIDTH$}: [{}]",
+                name,
+                rx_pow
+                    .iter()
+                    .map(|p| format!("{}", p.value()))
+                    .collect::<Vec<_>>()
+                    .join(",")
+            );
+        } else {
+            print!("  {}: ", format!("{:>NAME_WIDTH$}", "Rx power (mW)"));
+            println!("{unsupported}");
+        }
+
+        // Print the Tx bias current.
+        print!("  {}: ", format!("{:>NAME_WIDTH$}", "Tx bias (mA)"));
+        if let Some(tx_bias) = monitor.transmitter_bias_current {
+            println!("[{}]", display_list(&tx_bias));
+        } else {
+            println!("{unsupported}");
+        }
+
+        // Print the Tx output power.
+        print!("  {}: ", format!("{:>NAME_WIDTH$}", "Tx power (mW)"));
+        if let Some(tx_pow) = monitor.transmitter_power {
+            println!("[{}]", display_list(&tx_pow));
+        } else {
+            println!("{unsupported}");
+        }
+
+        // Print each auxiliary monitor.
+        //
+        // The requires that we print the "observable", the thing being measured
+        // as well. Each line is formatted like:
+        //
+        // Aux N, <observable> (<units>): <value>
+        if let Some(Some(aux1)) = monitor.aux_monitors.map(|aux| aux.aux1) {
+            let (name, value) = match aux1 {
+                Aux1Monitor::TecCurrent(c) => ("Aux 1, TEC current (mA)", format!("{c}")),
+                Aux1Monitor::Custom(c) => {
+                    ("Aux 1, Custom", format!("[0x{:02x},0x{:02x}]", c[0], c[1]))
+                }
+            };
+            println!("  {name:>NAME_WIDTH$}: {value}");
+        } else {
+            println!("  {:>NAME_WIDTH$}: {unsupported}", "Aux 1");
+        }
+
+        if let Some(Some(aux2)) = monitor.aux_monitors.map(|aux| aux.aux2) {
+            let (name, value) = match aux2 {
+                Aux2Monitor::TecCurrent(c) => ("Aux 2, TEC current (mA)", format!("{c}")),
+                Aux2Monitor::LaserTemperature(t) => ("Aux 2, Laser temp (C)", format!("{t}")),
+            };
+            println!("  {name:>NAME_WIDTH$}: {value}");
+        } else {
+            println!("  {:>NAME_WIDTH$}: {unsupported}", "Aux 2");
+        }
+
+        if let Some(Some(aux3)) = monitor.aux_monitors.map(|aux| aux.aux3) {
+            let (name, value) = match aux3 {
+                Aux3Monitor::LaserTemperature(t) => ("Aux 3, Laser temp (C)", format!("{t}")),
+                Aux3Monitor::AdditionalSupplyVoltage(v) => {
+                    ("Aux 3, Supply voltage 2 (V)", format!("{v}"))
+                }
+            };
+            println!("  {name:>NAME_WIDTH$}: {value}");
+        } else {
+            println!("  {:>NAME_WIDTH$}: {unsupported}", "Aux 3");
+        }
+
+        // Print additional newline between each port for clarity.
+        need_newline = true;
     }
 }
 

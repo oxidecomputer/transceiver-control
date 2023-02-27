@@ -37,6 +37,7 @@ use tokio::time::Interval;
 use transceiver_decode::Error as DecodeError;
 use transceiver_decode::Identifier;
 use transceiver_decode::MemoryModel;
+use transceiver_decode::Monitors;
 use transceiver_decode::ParseFromModule;
 use transceiver_decode::PowerControl;
 use transceiver_decode::Vendor;
@@ -553,6 +554,13 @@ impl Controller {
             })
     }
 
+    /// Return the monitoring information of a set of modules.
+    pub async fn monitors(&self, modules: ModuleId) -> Result<Vec<Monitors>, Error> {
+        self.parse_modules_by_identifier::<Monitors>(modules)
+            .await
+            .map(|collection| collection.into_values().map(|(_id, model)| model).collect())
+    }
+
     /// Reset a set of transceiver modules.
     pub async fn reset(&self, modules: ModuleId) -> Result<(), Error> {
         // According to SFF-8679, the host is required to pulse `ResetL` for at
@@ -588,8 +596,15 @@ impl Controller {
             modules
                 .ports
                 .to_indices()
-                .zip(status.into_iter())
-                .filter_map(|(ix, st)| if f(*st) { Some(ix) } else { None }),
+                .enumerate()
+                .filter(|(st_index, _port_index)| {
+                    // The module indices may have gaps. That means we need to
+                    // do an indirect lookup into `status`, based not on the
+                    // _port index_, but the index of that port in the iterator
+                    // returned by `to_indices()`.
+                    f(status[*st_index])
+                })
+                .map(|(_st_index, port_index)| port_index),
         )
         .map(|ports| ModuleId {
             fpga_id: modules.fpga_id,
@@ -622,14 +637,14 @@ impl Controller {
         // Off.
         //
         // Filter down the status of all modules to those that are powered.
+        // Note that we need to zip with `modules`, because the linear indices
+        // into `status` are not the same as the module indices in `modules`. We
+        // need an indirect lookup here.
         let powered_status: Vec<_> = status
             .iter()
-            .enumerate()
-            .filter(|(ix, _st)| {
-                let index = u8::try_from(*ix).expect("Impossible index");
-                powered_modules.contains(index)
-            })
-            .map(|(_ix, st)| st)
+            .zip(modules.ports.to_indices())
+            .filter(|(_status, module_index)| powered_modules.contains(*module_index))
+            .map(|(st, _module_index)| st)
             .copied()
             .collect();
         let in_reset = Self::filter_modules_with(powered_modules, &powered_status, |status| {
@@ -649,18 +664,17 @@ impl Controller {
         // We've whittled this down to the set of modules we can read from,
         // which means we can determine whether software-override of power
         // control is enabled.
+        //
+        // Note, the same point about indirect lookup applies here.
         let readable_modules = ModuleId {
             fpga_id: modules.fpga_id,
             ports: powered_modules.ports.remove(&in_reset.ports),
         };
         let readable_status: Vec<_> = status
             .iter()
-            .enumerate()
-            .filter(|(ix, _st)| {
-                let index = u8::try_from(*ix).expect("Impossible index");
-                readable_modules.contains(index)
-            })
-            .map(|(_ix, st)| st)
+            .zip(modules.ports.to_indices())
+            .filter(|(_st, module_index)| readable_modules.contains(*module_index))
+            .map(|(st, _module_index)| st)
             .copied()
             .collect();
 
@@ -694,8 +708,20 @@ impl Controller {
                             }
                         }
                     });
-            for (i, state) in readable_modules.ports.to_indices().zip(readable_power_mode) {
-                out[usize::from(i)] = state;
+
+            // We have the index within the readable modules, but we need it
+            // within the entire set of modules. So iterate over the readables,
+            // and find the index in the original set.
+            let original_indices = modules.ports.to_indices().collect::<Vec<_>>();
+            for (ix, state) in readable_modules
+                .ports
+                .to_indices()
+                .zip(readable_power_mode.into_iter())
+            {
+                let index = original_indices
+                    .binary_search(&ix)
+                    .expect("Readable modules should be a subset of all modules");
+                out[index] = state;
             }
         }
 
@@ -961,18 +987,26 @@ impl Controller {
             // We also need to avoid changing the software override bit, so
             // we'll further split this set of modules into those _with_ and
             // _without_ software override.
+            //
+            // Note that `current_power_state` is an array, so we need to
+            // enumerate() the module ID indices to find the power state of the
+            // corresponding module.
             let (with_override, without_override): (Vec<_>, Vec<_>) = modules
                 .ports
                 .to_indices()
-                .partition(|ix| matches!(current_power_state[usize::from(*ix)].1, Some(true)));
+                .enumerate()
+                .partition(|(i, _port_index)| matches!(current_power_state[*i].1, Some(true)));
 
+            // The with/without-override iterators contain the linear index into
+            // `current_power_state` and the module index. We only need the
+            // latter.
             let with_override = ModuleId {
                 fpga_id: modules.fpga_id,
-                ports: PortMask::from_index_iter(with_override.into_iter())?,
+                ports: PortMask::from_index_iter(with_override.into_iter().map(|(_i, ix)| ix))?,
             };
             let without_override = ModuleId {
                 fpga_id: modules.fpga_id,
-                ports: PortMask::from_index_iter(without_override.into_iter())?,
+                ports: PortMask::from_index_iter(without_override.into_iter().map(|(_i, ix)| ix))?,
             };
 
             for (with_override, modules) in [(true, with_override), (false, without_override)] {
