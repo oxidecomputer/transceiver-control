@@ -313,11 +313,13 @@ where
 mod tests {
     use crate::mgmt::cmis;
     use crate::mgmt::sff8636;
+    use crate::mgmt::ManagementInterface;
     use crate::mgmt::MemoryPage;
     use crate::mgmt::MemoryRead;
     use crate::mgmt::MemoryWrite;
     use crate::mgmt::Page;
     use crate::Error;
+    use hubpack::SerializedSize;
 
     fn test_page_memory_read<P>(page: P)
     where
@@ -433,5 +435,78 @@ mod tests {
     #[test]
     fn test_cmis_upper_page_memory_write() {
         test_page_memory_write(cmis::Page::Upper(cmis::UpperPage::new_unbanked(0).unwrap()));
+    }
+
+    #[test]
+    fn test_management_interface_encoding_unchanged() {
+        let mut buf = [0u8; ManagementInterface::MAX_SIZE];
+        const TEST_DATA: [ManagementInterface; 3] = [
+            ManagementInterface::Sff8636,
+            ManagementInterface::Cmis,
+            ManagementInterface::Unknown(0),
+        ];
+        for (i, variant) in TEST_DATA.iter().enumerate() {
+            buf[0] = i as _;
+            assert_eq!(
+                variant,
+                &hubpack::deserialize::<ManagementInterface>(&buf).unwrap().0,
+                "Encoding of ManagementInterface type changed, \
+                breaking backwards compatibility"
+            );
+        }
+    }
+
+    #[test]
+    fn test_page_encoding_unchanged() {
+        let mut buf = [0u8; Page::MAX_SIZE];
+        const TEST_DATA: [Page; 2] = [
+            Page::Sff8636(sff8636::Page::Lower),
+            Page::Cmis(cmis::Page::Lower),
+        ];
+        for (i, variant) in TEST_DATA.iter().enumerate() {
+            buf[0] = i as _;
+            assert_eq!(
+                variant,
+                &hubpack::deserialize::<Page>(&buf).unwrap().0,
+                "Encoding of Page type changed, \
+                breaking backwards compatibility"
+            );
+        }
+    }
+
+    #[test]
+    fn test_sff8636_page_encoding_unchanged() {
+        let mut buf = [0u8; sff8636::Page::MAX_SIZE];
+        let test_data: [sff8636::Page; 2] = [
+            sff8636::Page::Lower,
+            sff8636::Page::Upper(sff8636::UpperPage::new(0).unwrap()),
+        ];
+        for (i, variant) in test_data.iter().enumerate() {
+            buf[0] = i as _;
+            assert_eq!(
+                variant,
+                &hubpack::deserialize::<sff8636::Page>(&buf).unwrap().0,
+                "Encoding of sff8636::Page type changed, \
+                breaking backwards compatibility"
+            );
+        }
+    }
+
+    #[test]
+    fn test_cmis_page_encoding_unchanged() {
+        let mut buf = [0u8; cmis::Page::MAX_SIZE];
+        let test_data: [cmis::Page; 2] = [
+            cmis::Page::Lower,
+            cmis::Page::Upper(cmis::UpperPage::new_unbanked(0).unwrap()),
+        ];
+        for (i, variant) in test_data.iter().enumerate() {
+            buf[0] = i as _;
+            assert_eq!(
+                variant,
+                &hubpack::deserialize::<cmis::Page>(&buf).unwrap().0,
+                "Encoding of cmis::Page type changed, \
+                breaking backwards compatibility"
+            );
+        }
     }
 }
