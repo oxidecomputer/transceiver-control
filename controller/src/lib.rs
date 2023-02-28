@@ -1640,9 +1640,11 @@ impl IoLoop {
                     // because the _peer_ may not be able to handle the message.
                     //
                     // If the version is _newer_ than `CURRENT`, we can still
-                    // process it. That's because all of our messages can be
-                    // decoded and processed by the peer, who has also committed
-                    // to this compatibility.
+                    // process it, because we successfully deserialized it
+                    // above. Our peer has committed to the same backwards
+                    // compatibility guarantees, so successful deserialization
+                    // means that we share a common understanding of the message
+                    // semantics with our peer.
                     if message.header.version < message::version::MIN {
                         debug!(
                             self.log,
