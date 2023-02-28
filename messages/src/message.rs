@@ -24,7 +24,34 @@ pub mod version {
     pub const V5: u8 = 5;
     pub const V6: u8 = 6;
 
+    /// The current version of the messaging protocol.
     pub const CURRENT: u8 = V6;
+
+    /// The minimum supported version that is compatible with the current.
+    ///
+    /// "Compatible" means that all messages from this version may be serialized
+    /// and deserialized correctly. That means that all message data in `MIN`
+    /// correspond to the same values in `CURRENT` -- colloquially, `CURRENT` is
+    /// a superset of `MIN`.
+    ///
+    /// Because this crate uses `hubpack` for serialization, this also means
+    /// that no variants of the message enums have been removed or reordered. So
+    /// `CURRENT` may contain _new_ items, but existing ones cannot be moved or
+    /// removed.
+    ///
+    /// This version of the protocol is _committed_. Any changes to the types
+    /// here, or [`Error`], _must_ be compatible with this version. They can
+    /// add new enum variants, but _must not_ change or reorder any of the
+    /// existing variants. Peers should, on a best-effort basis, decode and
+    /// handle any messages that are at least this version. If the message comes
+    /// from a version prior to their `CURRENT`, they _must_ be able to decode
+    /// it, assuming we've not broken compatibility. If the message comes from a
+    /// version _after_ `CURRENT`, they _may_ be able to decode it. If they
+    /// cannot, presumably because the message was added in a later version,
+    /// then they _must_ still send back a protocol error of some kind, such as
+    /// `Error::VersionMismatch`. Those are guaranteed to be compatible and
+    /// decodable by the peer.
+    pub const MIN: u8 = V5;
 }
 
 /// A common header to all messages between host and SP.
@@ -243,5 +270,278 @@ bitflags::bitflags! {
         /// Note that this is not part of the QSFP specification, but provided
         /// by the Sidecar board design itself.
         const FAULT_POWER_LOST      = 0b1000_0000;
+    }
+}
+
+#[cfg(test)]
+mod encoding_tests {
+    use super::Error;
+    use super::HostRequest;
+    use super::HostResponse;
+    use super::MessageBody;
+    use super::SpResponse;
+    use crate::mgmt::sff8636;
+    use crate::mgmt::ManagementInterface;
+    use crate::mgmt::MemoryRead;
+    use crate::mgmt::MemoryWrite;
+    use crate::HwError;
+    use crate::MacAddrs;
+    use crate::PortMask;
+    use core::mem::size_of;
+    use hubpack::SerializedSize;
+
+    // Tests that the current version has not broken serialization.
+    //
+    // This uses the fact that `hubpack` assigns IDs to each variant of an enum
+    // based on the order they appear.  These are used by
+    // `hubpack::{serialize,deserialize}` to determine the enum variant encoded
+    // in a binary message, which are based on the _ordering_ of the enum
+    // variants. I.e, we're really testing if that ordering has changed in a
+    // meaningful way.
+    //
+    // If it _has_, we have two options:
+    //
+    // - Bump `MIN` -> `CURRENT`
+    // - Rework the changes to avoid that change.
+    //
+    // Each test below checks one of the enums in the protocol.
+
+    // Test that the error variant encoding has not changed.
+    #[test]
+    fn test_error_encoding_unchanged() {
+        let mut buf = [0u8; Error::MAX_SIZE];
+        const TEST_DATA: [Error; 16] = [
+            Error::InvalidPort(0),
+            Error::InvalidFpga(0),
+            Error::InvalidPage(0),
+            Error::InvalidBank(0),
+            Error::PageIsUnbanked(0),
+            Error::PageIsBanked(0),
+            Error::InvalidMemoryAccess { offset: 0, len: 0 },
+            Error::ReadFailed(HwError::StatusPortWriteFailed),
+            Error::WriteFailed(HwError::StatusPortWriteFailed),
+            Error::StatusFailed(HwError::StatusPortWriteFailed),
+            Error::RequestTooLarge,
+            Error::ProtocolError,
+            Error::MissingData,
+            Error::WrongDataSize,
+            Error::VersionMismatch {
+                expected: 0,
+                actual: 0,
+            },
+            Error::InvalidOperationSize {
+                size: 0,
+                interface: ManagementInterface::Sff8636,
+            },
+        ];
+
+        for (variant_id, variant) in TEST_DATA.iter().enumerate() {
+            buf[0] = u8::try_from(variant_id).unwrap();
+            let (decoded, _rest) = hubpack::deserialize::<Error>(buf.as_slice()).unwrap();
+            assert_eq!(
+                variant, &decoded,
+                "Serialization encoding changed! Either `version::CURRENT` \
+                or `version::MIN` will need to be updated, \
+                or the changes to `crate::Error` need to be reworked to \
+                avoid reordering or removing variants."
+            );
+        }
+    }
+
+    #[test]
+    fn test_hardware_error_encoding_unchanged() {
+        let mut buf = [0u8; HwError::MAX_SIZE];
+        const TEST_DATA: [HwError; 25] = [
+            HwError::StatusPortWriteFailed,
+            HwError::StatusPortReadFailed,
+            HwError::ControlPortWriteFailed,
+            HwError::ControlPortReadFailed,
+            HwError::PowerEnableReadFailed,
+            HwError::PowerEnableWriteFailed,
+            HwError::ResetLReadFailed,
+            HwError::ResetLWriteFailed,
+            HwError::LpModeReadFailed,
+            HwError::LpModeWriteFailed,
+            HwError::ModPrsLReadFailed,
+            HwError::IntLReadFailed,
+            HwError::PgReadFailed,
+            HwError::PgTimeoutReadFailed,
+            HwError::PgLostReadFailed,
+            HwError::PageSelectWriteBufFailed,
+            HwError::PageSelectWriteFailed,
+            HwError::BankSelectWriteBufFailed,
+            HwError::BankSelectWriteFailed,
+            HwError::WaitFailed,
+            HwError::I2cError(PortMask::empty()),
+            HwError::ReadSetupFailed,
+            HwError::ReadBufFailed,
+            HwError::WriteBufFailed,
+            HwError::WriteSetupFailed,
+        ];
+
+        for (variant_id, variant) in TEST_DATA.iter().enumerate() {
+            buf[0] = u8::try_from(variant_id).unwrap();
+            let (decoded, _rest) = hubpack::deserialize::<HwError>(buf.as_slice()).unwrap();
+            assert_eq!(
+                variant, &decoded,
+                "Serialization encoding changed! Either `version::CURRENT` \
+                or `version::MIN` will need to be updated, \
+                or the changes to `crate::HwError` need to be reworked to \
+                avoid reordering or removing variants."
+            );
+        }
+    }
+
+    #[test]
+    fn test_host_request_encoding_unchanged() {
+        let mut buf = [0u8; HostRequest::MAX_SIZE];
+
+        // This is not const because `Memory{Read,Write}` don't have const
+        // constructors.
+        let test_data: [HostRequest; 11] = [
+            HostRequest::Read(MemoryRead::new(sff8636::Page::Lower, 0, 1).unwrap()),
+            HostRequest::Write(MemoryWrite::new(sff8636::Page::Lower, 0, 1).unwrap()),
+            HostRequest::Status,
+            HostRequest::AssertReset,
+            HostRequest::DeassertReset,
+            HostRequest::AssertLpMode,
+            HostRequest::DeassertLpMode,
+            HostRequest::EnablePower,
+            HostRequest::DisablePower,
+            HostRequest::ManagementInterface(ManagementInterface::Sff8636),
+            HostRequest::MacAddrs,
+        ];
+
+        for (variant_id, variant) in test_data.iter().enumerate() {
+            buf.fill(0);
+            buf[0] = u8::try_from(variant_id).unwrap();
+
+            // Touch up the deserialization test buffer for the
+            // `Memory{Read,Write}` messages.
+            //
+            // This position is computed from:
+            //
+            // - 1 octet for the HostRequest variant ID
+            // - 1 octet for the MemoryRead's Page variant ID
+            // - 1 octet for the inner sff8636::Page variant ID
+            // - 1 octet for the offset
+            const LEN_POS: usize = 4;
+            match variant {
+                HostRequest::Read(read) => {
+                    buf[LEN_POS] = read.len();
+                }
+                HostRequest::Write(write) => {
+                    buf[LEN_POS] = write.len();
+                }
+                _ => {}
+            }
+
+            let (decoded, _rest) = hubpack::deserialize::<HostRequest>(buf.as_slice()).unwrap();
+            assert_eq!(
+                variant, &decoded,
+                "Serialization encoding changed! Either `version::CURRENT` \
+                or `version::MIN` will need to be updated, \
+                or the changes to `crate::HostRequest` need to be \
+                reworked to avoid reordering or removing variants."
+            );
+        }
+    }
+
+    #[test]
+    fn test_sp_response_encoding_unchanged() {
+        let mut buf = [0u8; SpResponse::MAX_SIZE];
+
+        // This is not const because `Memory{Read,Write}` don't have const
+        // constructors.
+        let test_data: [SpResponse; 6] = [
+            SpResponse::Error(Error::InvalidPort(0)),
+            SpResponse::Read(MemoryRead::new(sff8636::Page::Lower, 0, 1).unwrap()),
+            SpResponse::Write(MemoryWrite::new(sff8636::Page::Lower, 0, 1).unwrap()),
+            SpResponse::Status,
+            SpResponse::Ack,
+            SpResponse::MacAddrs(MacAddrs::new([0; 6], 1, 1).unwrap()),
+        ];
+
+        for (variant_id, variant) in test_data.iter().enumerate() {
+            buf.fill(0);
+            buf[0] = u8::try_from(variant_id).unwrap();
+
+            // Touch up the `Memory{Read,Write}` and `MacAddrs` deserialization
+            // buffers, since those can't be constructed from all zeros.
+            const LEN_POS: usize = 4;
+            const COUNT_POS: usize = 7;
+            const STRIDE_POS: usize = COUNT_POS + size_of::<u16>();
+            match variant {
+                SpResponse::Read(read) => {
+                    buf[LEN_POS] = read.len();
+                }
+                SpResponse::Write(write) => {
+                    buf[LEN_POS] = write.len();
+                }
+                SpResponse::MacAddrs(macs) => {
+                    buf[COUNT_POS..COUNT_POS + size_of::<u16>()]
+                        .copy_from_slice(&macs.count().to_le_bytes());
+                    buf[STRIDE_POS] = macs.stride();
+                }
+                _ => {}
+            }
+
+            let (decoded, _rest) = hubpack::deserialize::<SpResponse>(buf.as_slice()).unwrap();
+            assert_eq!(
+                variant, &decoded,
+                "Serialization encoding changed! Either `version::CURRENT` \
+                or `version::MIN` will need to be updated, \
+                or the changes to `crate::SpResponse` need to be \
+                reworked to avoid reordering or removing variants."
+            );
+        }
+    }
+
+    #[test]
+    fn test_message_body_encoding_unchanged() {
+        let mut buf = [0u8; MessageBody::MAX_SIZE];
+
+        const TEST_DATA: [(u8, MessageBody); 3] = [
+            (0, MessageBody::HostRequest(HostRequest::Status)),
+            (
+                1,
+                MessageBody::SpResponse(SpResponse::Error(Error::InvalidPort(0))),
+            ),
+            // SpRequest cannot be tested, since the enum has no variants.
+            (
+                3,
+                MessageBody::HostResponse(HostResponse::Error(Error::InvalidPort(0))),
+            ),
+        ];
+
+        for (variant_id, variant) in TEST_DATA.iter() {
+            buf.fill(0);
+            buf[0] = *variant_id;
+
+            // NOTE: We're artificially making sure we test the
+            // `HostRequest::Status` variants. That's just because it's easier
+            // to test. 0 maps to `HostRequest::Read`. While we can successfully
+            // _deserialize_ that, we can't create one to assert the equality
+            // against, since all zeros isn't actually valid. That's because a
+            // `len` of 0 isn't valid.
+            //
+            // The `MessageBody` enum consists only of a u8 for the variant
+            // ID, followed by the inner data. So the ID for that inner
+            // enum starts at index 1.
+            if matches!(variant, MessageBody::HostRequest(_)) {
+                const STATUS_VARIANT_START: usize = 1;
+                const STATUS_VARIANT_ID: u8 = 2;
+                buf[STATUS_VARIANT_START] = STATUS_VARIANT_ID;
+            }
+
+            let (decoded, _rest) = hubpack::deserialize::<MessageBody>(buf.as_slice()).unwrap();
+            assert_eq!(
+                variant, &decoded,
+                "Serialization encoding changed! Either `version::CURRENT` \
+                or `version::MIN` will need to be updated, \
+                or the changes to `crate::MessageBody` need to be \
+                reworked to avoid reordering or removing variants."
+            );
+        }
     }
 }
