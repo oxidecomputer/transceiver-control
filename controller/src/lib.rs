@@ -1595,6 +1595,19 @@ impl IoLoop {
                             probes::bad__message!(|| {
                                 (peer.ip(), format!("deserialization failure: {e:?}"))
                             });
+
+                            // We _also_ need to inject an error back on the
+                            // channel for our outstanding request. The message
+                            // will never be processed by the peer, so retrying
+                            // is useless.
+                            if let Some(request) = self.outstanding_request.take() {
+                                request.response_tx.send(
+                                    Err(Error::Protocol(MessageError::VersionMismatch {
+                                        expected: message::version::CURRENT,
+                                        actual: header.version
+                                    }))
+                                ).unwrap();
+                            }
                             continue;
                         }
                         Ok((msg, remainder)) => (msg, remainder),
@@ -1996,21 +2009,12 @@ mod tests {
         // (which is part of the committed protocol), and send us a decodable
         // response.
         let the_future = message::version::CURRENT + 1;
-        let response = test_version_mismatch_impl(the_future).await;
-        assert!(matches!(
-            response,
-            Ok(SpRpcResponse {
-                message: Message {
-                    header: Header {
-                        version: _the_future,
-                        ..
-                    },
-                    body: MessageBody::SpResponse(SpResponse::Ack),
-                    ..
-                },
-                ..
-            })
-        ));
+        let response = test_version_mismatch_impl(the_future).await.unwrap();
+        assert_eq!(
+            response.message.body,
+            MessageBody::SpResponse(SpResponse::Ack)
+        );
+        assert_eq!(response.message.header.version, the_future);
     }
 
     async fn test_version_mismatch_impl(sp_version: u8) -> Result<SpRpcResponse, Error> {
