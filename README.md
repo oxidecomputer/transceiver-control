@@ -11,3 +11,5 @@ interface that QSFP modules implement to control and monitor the transceivers.
   communicating between host and SP.
 - `transceiver-controller`: A crate used on the host side, operating as the
   controller of a set of transceivers via the SP.
+-  `transceiver-decode`: Decoding module data, such as vendor or power
+   information.

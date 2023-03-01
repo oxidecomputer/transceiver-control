@@ -23,20 +23,25 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use transceiver_controller::Config;
 use transceiver_controller::Controller;
-use transceiver_controller::PowerMode;
+use transceiver_controller::FailedModules;
+use transceiver_controller::IdentifierResult;
+use transceiver_controller::MemoryModelResult;
+use transceiver_controller::PowerModeResult;
+use transceiver_controller::PowerState;
+use transceiver_controller::ReadResult;
 use transceiver_controller::SpRequest;
-use transceiver_decode::Identifier;
-use transceiver_decode::MemoryModel;
+use transceiver_controller::StatusResult;
+use transceiver_controller::VendorInfoResult;
 use transceiver_decode::VendorInfo;
+use transceiver_messages::filter_module_data;
+use transceiver_messages::mac::MacAddrs;
 use transceiver_messages::message::Status;
 use transceiver_messages::mgmt::cmis;
 use transceiver_messages::mgmt::sff8636;
 use transceiver_messages::mgmt::ManagementInterface;
 use transceiver_messages::mgmt::MemoryRead;
 use transceiver_messages::mgmt::MemoryWrite;
-use transceiver_messages::MacAddrs;
 use transceiver_messages::ModuleId;
-use transceiver_messages::PortMask;
 
 fn parse_log_level(s: &str) -> Result<Level, String> {
     s.parse().map_err(|_| String::from("invalid log level"))
@@ -45,17 +50,17 @@ fn parse_log_level(s: &str) -> Result<Level, String> {
 // Method for addressing a set of transceivers by index or state.
 #[derive(Clone, Debug, PartialEq)]
 enum Transceivers {
-    // All transceivers on an FPGA, the default.
+    // All transceivers on a Sidecar, the default.
     All,
-    // All present transceivers on an FGPA.
+    // All present transceivers on a Sidecar.
     Present,
-    // All transceivers in a specific power mode.
-    PowerMode(PowerMode),
+    // All transceivers in a specific power state.
+    PowerState(PowerState),
     // All transceivers of a specific kind.
     Kind(ManagementInterface),
     // A comma-separated list of transceiver indices. These can be specified as
     // single integers, e.g., `4,5,6` or an inclusive range, e.g., `4-6`.
-    Ports(PortMask),
+    Index(ModuleId),
 }
 
 fn parse_transceivers(s: &str) -> Result<Transceivers, String> {
@@ -63,9 +68,9 @@ fn parse_transceivers(s: &str) -> Result<Transceivers, String> {
     match s.as_str() {
         "all" => Ok(Transceivers::All),
         "present" => Ok(Transceivers::Present),
-        "off" => Ok(Transceivers::PowerMode(PowerMode::Off)),
-        "low-power" | "lp" => Ok(Transceivers::PowerMode(PowerMode::Low)),
-        "hi-power" | "high-power" | "hp" => Ok(Transceivers::PowerMode(PowerMode::High)),
+        "off" => Ok(Transceivers::PowerState(PowerState::Off)),
+        "low-power" | "lp" => Ok(Transceivers::PowerState(PowerState::Low)),
+        "hi-power" | "high-power" | "hp" => Ok(Transceivers::PowerState(PowerState::High)),
         "sff" => Ok(Transceivers::Kind(ManagementInterface::Sff8636)),
         "cmis" => Ok(Transceivers::Kind(ManagementInterface::Cmis)),
         _maybe_list => {
@@ -104,8 +109,8 @@ fn parse_transceivers(s: &str) -> Result<Transceivers, String> {
                     e.g., '0-3'"
                 ));
             }
-            PortMask::from_indices(&indices)
-                .map(|p| Transceivers::Ports(p))
+            ModuleId::from_indices(&indices)
+                .map(|p| Transceivers::Index(p))
                 .map_err(|e| format!("invalid port indices: {e:?}"))
         }
     }
@@ -121,17 +126,13 @@ struct Args {
     #[command(subcommand)]
     cmd: Cmd,
 
-    /// The FPGA whose transceivers to address.
-    #[arg(short, long, default_value_t = 0)]
-    fpga_id: u8,
-
-    /// The list of transcievers on the FPGA to address.
+    /// The list of transcievers on the Sidecar to address.
     ///
     /// Transceivers may be addressed in a number of ways:
     ///
-    /// - "all" addresses all transceivers on the FPGA. This is the default.
+    /// - "all" addresses all transceivers on the Sidecar. This is the default.
     ///
-    /// - "present" addresses all present transceivers on the FPGA.
+    /// - "present" addresses all present transceivers on the Sidecar.
     ///
     /// - "off", "low-power", "hi-power" address the transceivers in the given
     /// power mode.
@@ -162,6 +163,10 @@ struct Args {
     /// peer may optionally be specified.
     #[arg(short, long)]
     peer: Option<Ipv6Addr>,
+
+    /// The destination UDP port to which to send messages.
+    #[arg(long, default_value_t = transceiver_messages::PORT)]
+    peer_port: u16,
 
     /// The maximum number of retries before failing a request.
     #[arg(short, long)]
@@ -210,9 +215,9 @@ enum Cmd {
 
     /// Set the power module of the addressed modules.
     SetPower {
-        /// The desired power mode.
+        /// The desired power state.
         #[arg(value_enum)]
-        mode: PowerMode,
+        state: PowerState,
     },
 
     /// Return the power mode of the addressed modules.
@@ -444,6 +449,7 @@ async fn main() -> anyhow::Result<()> {
         peer: args
             .peer
             .unwrap_or_else(|| Ipv6Addr::from(transceiver_messages::ADDR)),
+        peer_port: args.peer_port,
         n_retries: args.n_retries,
         retry_interval: Duration::from_millis(args.retry_interval),
     };
@@ -492,95 +498,103 @@ async fn main() -> anyhow::Result<()> {
     // low-power module transceivers" from a failure to do so (e.g., a network
     // error), _without_ having to parse stderr.
     let transceivers = args.transceivers.unwrap_or(Transceivers::All);
-    let modules = address_transceivers(&controller, args.fpga_id, transceivers).await?;
+    let modules = address_transceivers(&controller, transceivers).await?;
 
     match args.cmd {
         Cmd::Status => {
-            let status = controller
+            let status_result = controller
                 .status(modules)
                 .await
                 .context("Failed to retrieve module status")?;
-            print_module_status(modules, status);
+            print_module_status(status_result);
         }
 
         Cmd::Reset => {
-            controller
+            let ack_result = controller
                 .reset(modules)
                 .await
                 .context("Failed to reset modules")?;
+            print_failures(ack_result.failures);
         }
 
-        Cmd::SetPower { mode } => {
-            controller
-                .set_power_mode(modules, mode)
+        Cmd::SetPower { state } => {
+            let ack_result = controller
+                .set_power(modules, state)
                 .await
-                .context("Failed to set power mode")?;
+                .context("Failed to set power state")?;
+            print_failures(ack_result.failures);
         }
 
         Cmd::Power => {
-            let states = controller
-                .power_mode(modules)
+            let mode_result = controller
+                .power(modules)
                 .await
                 .context("Failed to get power mode")?;
-            print_power_mode(modules, states);
+            print_power_mode(mode_result);
         }
 
         Cmd::EnablePower => {
-            controller
+            let ack_result = controller
                 .enable_power(modules)
                 .await
                 .context("Failed to enable power for modules")?;
+            print_failures(ack_result.failures);
         }
 
         Cmd::DisablePower => {
-            controller
+            let ack_result = controller
                 .disable_power(modules)
                 .await
                 .context("Failed to disable power for modules")?;
+            print_failures(ack_result.failures);
         }
 
         Cmd::AssertReset => {
-            controller
+            let ack_result = controller
                 .assert_reset(modules)
                 .await
                 .context("Failed to assert reset for modules")?;
+            print_failures(ack_result.failures);
         }
 
         Cmd::DeassertReset => {
-            controller
+            let ack_result = controller
                 .deassert_reset(modules)
                 .await
                 .context("Failed to deassert reset for modules")?;
+            print_failures(ack_result.failures);
         }
 
         Cmd::AssertLpMode => {
-            controller
+            let ack_result = controller
                 .assert_lpmode(modules)
                 .await
                 .context("Failed to assert lpmode for modules")?;
+            print_failures(ack_result.failures);
         }
 
         Cmd::DeassertLpMode => {
-            controller
+            let ack_result = controller
                 .deassert_lpmode(modules)
                 .await
                 .context("Failed to deassert lpmode for modules")?;
+            print_failures(ack_result.failures);
         }
 
         Cmd::Identify => {
-            let ids = controller
+            let ident_result = controller
                 .identifier(modules)
                 .await
                 .context("Failed to identify transceiver modules")?;
-            print_module_identifier(modules, ids);
+            print_module_identifier(ident_result);
         }
 
         Cmd::VendorInfo => {
-            let info = controller
+            let info_result = controller
                 .vendor_info(modules)
                 .await
                 .context("Failed to fetch vendor information for transceiver modules")?;
-            print_vendor_info(modules, info);
+            print_vendor_info(info_result);
         }
 
         Cmd::ReadLower {
@@ -597,11 +611,11 @@ async fn main() -> anyhow::Result<()> {
                     .context("Failed to setup lower page memory read")?,
                 (_, _) => unreachable!("clap didn't do its job"),
             };
-            let data = controller
+            let read_result = controller
                 .read(modules, read)
                 .await
                 .context("Failed to read transceiver modules")?;
-            print_read_data(modules, data, binary);
+            print_read_data(read_result, binary);
         }
 
         Cmd::WriteLower {
@@ -620,10 +634,11 @@ async fn main() -> anyhow::Result<()> {
                     .context("Failed to setup lower page memory write")?,
                 (_, _) => unreachable!("clap didn't do its job"),
             };
-            controller
+            let write_result = controller
                 .write(modules, write, &data)
                 .await
                 .context("Failed to write transceiver modules")?;
+            print_failures(write_result.failures);
         }
 
         Cmd::ReadUpper {
@@ -654,11 +669,11 @@ async fn main() -> anyhow::Result<()> {
                 }
                 (_, _) => unreachable!("clap didn't do its job"),
             };
-            let data = controller
+            let read_result = controller
                 .read(modules, read)
                 .await
                 .context("Failed to read transceiver modules")?;
-            print_read_data(modules, data, binary);
+            print_read_data(read_result, binary);
         }
 
         Cmd::WriteUpper {
@@ -691,17 +706,18 @@ async fn main() -> anyhow::Result<()> {
                 }
                 (_, _) => unreachable!("clap didn't do its job"),
             };
-            controller
+            let write_result = controller
                 .write(modules, write, &data)
                 .await
                 .context("Failed to write transceiver modules")?;
+            print_failures(write_result.failures);
         }
         Cmd::MemoryModel => {
-            let layout = controller
+            let layout_result = controller
                 .memory_model(modules)
                 .await
                 .context("Failed to get memory model")?;
-            print_module_memory_model(modules, layout);
+            print_module_memory_model(layout_result);
         }
         Cmd::Macs { summary } => {
             let macs = controller
@@ -716,118 +732,140 @@ async fn main() -> anyhow::Result<()> {
 
 async fn address_transceivers(
     controller: &Controller,
-    fpga_id: u8,
     transceivers: Transceivers,
 ) -> anyhow::Result<ModuleId> {
     fn filter_ports<D: IntoIterator>(
-        ports: PortMask,
+        modules: ModuleId,
         data: D,
         predicate: impl Fn(D::Item) -> bool,
-    ) -> PortMask {
-        let ix: Vec<_> = ports
+    ) -> ModuleId {
+        let ix: Vec<_> = modules
             .to_indices()
             .zip(data.into_iter())
             .filter_map(|(ix, datum)| if predicate(datum) { Some(ix) } else { None })
             .collect();
-        PortMask::from_indices(&ix).unwrap()
+        ModuleId::from_indices(&ix).unwrap()
     }
 
-    let ports = match transceivers {
-        Transceivers::All => PortMask::all(),
+    let modules = match transceivers {
+        Transceivers::All => {
+            // "All" here means all bits, but Sidecar only has 32 QSFP ports
+            // right now, and for the forseeable future. Limit this to 32-bits.
+            ModuleId(u64::from(u32::MAX))
+        }
         Transceivers::Present => {
             // Fetch all status bits, and find those which match.
-            let modules = ModuleId::all_transceivers(fpga_id);
-            let status = controller
+            let modules = ModuleId::all();
+            let status_result = controller
                 .status(modules)
                 .await
                 .context("Failed to retrieve module status")?;
-            filter_ports(modules.ports, status, |st| st.contains(Status::PRESENT))
+            filter_module_data(
+                status_result.modules,
+                status_result.status().iter(),
+                |_, st| st.contains(Status::PRESENT),
+            )
+            .0
         }
-        Transceivers::PowerMode(mode) => {
-            // Fetch all power modes, and find those which match.
-            let modules = ModuleId::all_transceivers(fpga_id);
-            let module_modes = controller
-                .power_mode(modules)
+        Transceivers::PowerState(state) => {
+            // Fetch all power states, and find those which match.
+            let modules = ModuleId::all();
+            let mode_result = controller
+                .power(modules)
                 .await
-                .context("Failed to retrieve module power mode")?;
-            filter_ports(modules.ports, module_modes, |m| m.0 == mode)
+                .context("Failed to retrieve module power state")?;
+            filter_module_data(
+                mode_result.modules,
+                mode_result.power_modes().iter(),
+                |_, s| s.state == state,
+            )
+            .0
         }
         Transceivers::Kind(kind) => {
-            // Fetch all modules that are in at least low-power mode, and thus
-            // readable.
-            let modules = ModuleId::all_transceivers(fpga_id);
-            let power_modes = controller
-                .power_mode(modules)
-                .await
-                .context("Failed to retrieve module power mode")?;
-            let readable = filter_ports(modules.ports, power_modes, |m| {
-                matches!(m.0, PowerMode::Low | PowerMode::High)
-            });
-
-            // Then the management interface for those.
-            let modules = ModuleId {
-                fpga_id,
-                ports: readable,
-            };
-            let identifiers = controller
-                .identifier(modules)
+            // Read the identifier for all modules, and return those that we can
+            // read and are of the requested kind.
+            let ident_result = controller
+                .identifier(ModuleId::all())
                 .await
                 .context("Failed to retrieve module identifiers")?;
-            let predicate = |id: Identifier| {
-                if let Ok(iface) = id.management_interface() {
-                    iface == kind
-                } else {
-                    false
-                }
-            };
-            filter_ports(modules.ports, identifiers, predicate)
+            filter_module_data(
+                ident_result.modules,
+                ident_result.identifiers().iter(),
+                |_, id| {
+                    if let Ok(iface) = id.management_interface() {
+                        iface == kind
+                    } else {
+                        false
+                    }
+                },
+            )
+            .0
         }
-        Transceivers::Ports(p) => p,
+        Transceivers::Index(p) => p,
     };
-    Ok(ModuleId { fpga_id, ports })
+    Ok(modules)
 }
 
 // Column width for printing data below.
 const WIDTH: usize = 4;
 const POWER_WIDTH: usize = 5;
 
-fn print_power_mode(modules: ModuleId, modes: Vec<(PowerMode, Option<bool>)>) {
-    println!("FPGA  Port  Power  Software-override");
-    for (port, (mode, override_)) in modules.ports.to_indices().zip(modes.into_iter()) {
-        let over = match override_ {
+fn print_failures(failures: FailedModules) {
+    if failures.modules.selected_transceiver_count() > 0 {
+        eprintln!("Some operations failed, errors below");
+        eprintln!("Port Error");
+        for (port, err) in failures.modules.to_indices().zip(failures.errors) {
+            eprintln!("{port:>WIDTH$} {err}");
+        }
+    }
+}
+
+fn print_power_mode(mode_result: PowerModeResult) {
+    println!("Port  Power  Software-override");
+    for (port, mode) in mode_result
+        .modules
+        .to_indices()
+        .zip(mode_result.power_modes().into_iter())
+    {
+        let over = match mode.software_override {
             None => "-",
             Some(true) => "Yes",
             Some(false) => "No",
         };
-        let mode = format!("{mode:?}");
-        println!(
-            "{:>WIDTH$}  {port:>WIDTH$}  {mode:POWER_WIDTH$}  {over}",
-            modules.fpga_id
-        );
+        let state = format!("{:?}", mode.state);
+        println!("{port:>WIDTH$}  {state:POWER_WIDTH$}  {over}",);
     }
+    print_failures(mode_result.failures);
 }
 
-fn print_module_status(modules: ModuleId, status: Vec<Status>) {
-    println!("FPGA Port Status");
-    for (port, status) in modules.ports.to_indices().zip(status.into_iter()) {
-        println!("{:>WIDTH$} {port:>WIDTH$} {status:?}", modules.fpga_id);
+fn print_module_status(status_result: StatusResult) {
+    println!("Port Status");
+    for (port, status) in status_result
+        .modules
+        .to_indices()
+        .zip(status_result.status().into_iter())
+    {
+        println!("{port:>WIDTH$} {status:?}");
     }
+    print_failures(status_result.failures);
 }
 
-fn print_read_data(modules: ModuleId, data: Vec<Vec<u8>>, binary: bool) {
-    println!("FPGA Port Data");
+fn print_read_data(read_result: ReadResult, binary: bool) {
+    println!("Port Data");
     let fmt_data = if binary {
         |byte| format!("0b{byte:08b}")
     } else {
         |byte| format!("0x{byte:02x}")
     };
-    for (port, each) in modules.ports.to_indices().zip(data.into_iter()) {
+    for (port, each) in read_result
+        .modules
+        .to_indices()
+        .zip(read_result.data().into_iter())
+    {
         let formatted_data = each.into_iter().map(fmt_data).collect::<Vec<_>>().join(",");
-        println!(
-            "{:>WIDTH$} {port:>WIDTH$} [{formatted_data}]",
-            modules.fpga_id
-        );
+        println!("{port:>WIDTH$} [{formatted_data}]",);
     }
+    print_failures(read_result.failures);
 }
 
 const ID_BYTE_WIDTH: usize = 5;
@@ -838,28 +876,36 @@ const REV_WIDTH: usize = 4;
 const SERIAL_WIDTH: usize = 16;
 const DATE_WIDTH: usize = 20;
 
-fn print_module_identifier(modules: ModuleId, ids: Vec<Identifier>) {
-    println!("FPGA Port Ident Description");
-    let fpga_id = modules.fpga_id;
-    for (port, id) in modules.ports.to_indices().zip(ids.into_iter()) {
-        let ident = format!("0x{:02x}", u8::from(id));
-        println!("{fpga_id:>WIDTH$} {port:>WIDTH$} {ident:ID_BYTE_WIDTH$} {id}");
+fn print_module_identifier(ident_result: IdentifierResult) {
+    println!("Port Ident Description");
+    for (port, id) in ident_result
+        .modules
+        .to_indices()
+        .zip(ident_result.identifiers().into_iter())
+    {
+        let ident = format!("0x{:02x}", u8::from(*id));
+        println!("{port:>WIDTH$} {ident:ID_BYTE_WIDTH$} {id}");
     }
+    print_failures(ident_result.failures);
 }
 
-fn print_vendor_info(modules: ModuleId, info: Vec<VendorInfo>) {
+fn print_vendor_info(vendor_result: VendorInfoResult) {
     println!(
-        "FPGA Port {:ID_DEBUG_WIDTH$} {:VENDOR_WIDTH$} {:PART_WIDTH$} \
+        "Port {:ID_DEBUG_WIDTH$} {:VENDOR_WIDTH$} {:PART_WIDTH$} \
         {:REV_WIDTH$} {:SERIAL_WIDTH$} {:DATE_WIDTH$}",
         "Identifier", "Vendor", "Part", "Rev", "Serial", "Mfg date"
     );
-    let fpga_id = modules.fpga_id;
-    for (port, inf) in modules.ports.to_indices().zip(info.into_iter()) {
-        print_single_module_vendor_info(fpga_id, port, inf);
+    for (port, inf) in vendor_result
+        .modules
+        .to_indices()
+        .zip(vendor_result.vendor_info().into_iter())
+    {
+        print_single_module_vendor_info(port, inf);
     }
+    print_failures(vendor_result.failures);
 }
 
-fn print_single_module_vendor_info(fpga_id: u8, port: u8, info: VendorInfo) {
+fn print_single_module_vendor_info(port: u8, info: &VendorInfo) {
     let ident = format!(
         "{:?} (0x{:02x})",
         info.identifier,
@@ -867,18 +913,22 @@ fn print_single_module_vendor_info(fpga_id: u8, port: u8, info: VendorInfo) {
     );
     let date = info.vendor.date.as_deref().unwrap_or_else(|| "Unknown");
     println!(
-        "{fpga_id:>WIDTH$} {port:>WIDTH$} {:ID_DEBUG_WIDTH$} {:VENDOR_WIDTH$} \
+        "{port:>WIDTH$} {:ID_DEBUG_WIDTH$} {:VENDOR_WIDTH$} \
         {:PART_WIDTH$} {:REV_WIDTH$} {:SERIAL_WIDTH$} {:DATE_WIDTH$}",
         ident, info.vendor.name, info.vendor.part, info.vendor.revision, info.vendor.serial, date,
     );
 }
 
-fn print_module_memory_model(modules: ModuleId, models: Vec<MemoryModel>) {
-    println!("FPGA Port Model");
-    let fpga_id = modules.fpga_id;
-    for (port, model) in modules.ports.to_indices().zip(models.into_iter()) {
-        println!("{fpga_id:>WIDTH$} {port:>WIDTH$} {model}");
+fn print_module_memory_model(model_result: MemoryModelResult) {
+    println!("Port Model");
+    for (port, model) in model_result
+        .modules
+        .to_indices()
+        .zip(model_result.memory_models().into_iter())
+    {
+        println!("{port:>WIDTH$} {model}");
     }
+    print_failures(model_result.failures);
 }
 
 fn print_mac_address_range(macs: MacAddrs, summary: bool) {
@@ -910,8 +960,8 @@ mod tests {
     use super::parse_transceivers;
     use super::InputKind;
     use super::ManagementInterface;
-    use super::PortMask;
-    use super::PowerMode;
+    use super::ModuleId;
+    use super::PowerState;
     use super::Transceivers;
     use std::io::Write;
     use tempfile::NamedTempFile;
@@ -955,15 +1005,15 @@ mod tests {
         );
         assert_eq!(
             parse_transceivers("off").unwrap(),
-            Transceivers::PowerMode(PowerMode::Off)
+            Transceivers::PowerState(PowerState::Off)
         );
         assert_eq!(
             parse_transceivers("low-power").unwrap(),
-            Transceivers::PowerMode(PowerMode::Low)
+            Transceivers::PowerState(PowerState::Low)
         );
         assert_eq!(
             parse_transceivers("hi-power").unwrap(),
-            Transceivers::PowerMode(PowerMode::High)
+            Transceivers::PowerState(PowerState::High)
         );
         assert_eq!(
             parse_transceivers("cmis").unwrap(),
@@ -975,15 +1025,15 @@ mod tests {
         );
 
         let test_data = &[
-            ("0", PortMask(0b1)),
-            ("0,1,2", PortMask(0b111)),
-            ("0-2", PortMask(0b111)),
-            ("0,1-2", PortMask(0b111)),
-            ("0,0-2", PortMask(0b111)),
-            ("0,1,2,0-3", PortMask(0b1111)),
+            ("0", ModuleId(0b1)),
+            ("0,1,2", ModuleId(0b111)),
+            ("0-2", ModuleId(0b111)),
+            ("0,1-2", ModuleId(0b111)),
+            ("0,0-2", ModuleId(0b111)),
+            ("0,1,2,0-3", ModuleId(0b1111)),
         ];
         for (s, m) in test_data.iter() {
-            assert_eq!(parse_transceivers(s).unwrap(), Transceivers::Ports(*m));
+            assert_eq!(parse_transceivers(s).unwrap(), Transceivers::Index(*m));
         }
 
         assert!(parse_transceivers(" ").is_err());

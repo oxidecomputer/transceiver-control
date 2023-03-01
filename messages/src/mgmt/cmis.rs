@@ -7,9 +7,9 @@
 //! Types for working with transceivers conforming to the Common Management
 //! Interface Specification (CMIS) version 5.0.
 
+use super::Error;
 use crate::mgmt::ManagementInterface;
 use crate::mgmt::MemoryPage;
-use crate::Error;
 use hubpack::SerializedSize;
 use serde::Deserialize;
 use serde::Serialize;
