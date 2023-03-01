@@ -203,6 +203,81 @@ impl core::fmt::Display for Identifier {
     }
 }
 
+/// An SFF-8024 Extended Specification Compliance Code.
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Hash)]
+#[cfg_attr(
+    any(feature = "api-traits", test),
+    derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)
+)]
+pub struct ComplianceCode(pub u8);
+
+impl core::fmt::Display for ComplianceCode {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self.0 {
+                0x00 => "Unspecified",
+                0x01 => "100G Active Optical (BER < 5e-5)",
+                0x02 => "100GBASE-SR4 or 25GBASE-SR",
+                0x03 => "100GBASE-LR4 or 25GBASE-LR",
+                0x04 => "100GBASE-ER4 or 25GBASE-ER",
+                0x05 => "100GBASE-SR10",
+                0x06 => "100G CWDM4",
+                0x07 => "100G PSM4 Parallel SMF",
+                0x08 => "100G Active Copper (BER 5e-5)",
+                0x09 => "Obsolete",
+                0x0b => "100GBASE-CR4 or 25GBASE-CR CA-25G-L",
+                0x0c => "25GBASE-CR CA-25G-S",
+                0x0d => "25GBASE-CR CA-25G-N",
+                0x10 => "40GBASE-ER4",
+                0x11 => "4x10GBASE-SR",
+                0x12 => "40G PSM4 Parallel SMF",
+                0x13 => "G959.1 profile P1I1-2D1",
+                0x14 => "G959.1 profile P1S1-2D2",
+                0x15 => "G959.1 profile P1L1-2D1",
+                0x16 => "10GBASE-T with SFI electrical interface",
+                0x17 => "100G CLR4",
+                0x18 => "100G Active Optical (BER < 10e-12)",
+                0x19 => "100G Active Copper (BER < 10e-12)",
+                0x1a => "100GE-DWDM2",
+                0x1b => "100G 1550nm WDM",
+                0x1c => "10GBASE-T Short Reach",
+                0x1d => "5GBASE-T",
+                0x1e => "2.5GBASE-T",
+                0x1f => "40G SWDM4",
+                0x20 => "100G SWDM4",
+                0x21 => "100G PAM4 BiDi",
+                0x22 => "4WDM-10 MSA",
+                0x23 => "4WDM-20 MSA",
+                0x24 => "4WDM-40 MSA",
+                0x25 => "100GBASE-DR",
+                0x26 => "100G-FR",
+                0x27 => "100G-LR",
+                0x30 => "Active Copper (BER < 10e-6)",
+                0x31 => "Active Optical (BER < 10e-6)",
+                0x32 => "Active Copper (BER < 2.6e-4)",
+                0x33 => "Active Optical (BER < 2.6e-4)",
+                0x40 => "50GBASE-CR, 100GBASE-CR2, or 200GBASE-CR4",
+                0x41 => "50GBASE-SR, 100GBASE-SR2, or 200GBASE-SR4",
+                0x42 => "50GBASE-FR or 200GBASE-DR4",
+                0x43 => "200GBASE-FR4",
+                0x44 => "200G 1550nm PSM4",
+                0x45 => "50GBASE-LR",
+                0x46 => "200GBASE-LR4",
+                0x50 => "64GFC EA",
+                0x51 => "64GFC SW",
+                0x52 => "64GFC LW",
+                0x53 => "128GFC EA",
+                0x54 => "128GFC SW",
+                0x55 => "128GFC LW",
+                _ => "Reserved",
+            }
+        )
+    }
+}
+
+
 /// An Organization Unique Identifier.
 #[derive(Clone, Copy, Debug)]
 #[cfg_attr(
