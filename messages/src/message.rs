@@ -354,6 +354,13 @@ pub enum HostRequest {
 
     /// Ask the SP to return the available MAC addresses for host system use.
     MacAddrs,
+
+    /// Request that a latched power fault be cleared.
+    ///
+    /// When a power fault has occurred, the transceiver's power supply will not
+    /// re-enable as long as the fault is latched. Clearing the fault allows the
+    /// power supply to be enabled again. 
+    ClearPowerFault(ModuleId),
 }
 
 impl HostRequest {

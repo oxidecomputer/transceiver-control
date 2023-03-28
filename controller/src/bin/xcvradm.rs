@@ -402,6 +402,13 @@ enum Cmd {
         #[arg(short, long, default_value_t = false)]
         summary: bool,
     },
+
+    /// Clears a power fault on a set of modules.
+    ///
+    /// When a power fault has occurred, the transceiver's power supply will not
+    /// re-enable as long as the fault is latched. Clearing the fault allows the
+    /// power supply to be enabled again.
+    ClearPowerFault,
 }
 
 fn load_write_data(file: Option<PathBuf>, kind: InputKind) -> anyhow::Result<Vec<u8>> {
@@ -725,6 +732,13 @@ async fn main() -> anyhow::Result<()> {
                 .await
                 .context("Failed to get MAC addresses")?;
             print_mac_address_range(macs, summary);
+        }
+        Cmd::ClearPowerFault => {
+            let ack_result = controller
+                .clear_power_fault(modules)
+                .await
+                .context("Failed to clear power fault for modules")?;
+            print_failures(ack_result.failures);
         }
     }
     Ok(())

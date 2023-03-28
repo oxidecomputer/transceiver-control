@@ -840,6 +840,14 @@ impl Controller {
             .await
     }
 
+    /// Clear the hot swap controller fault for a set of transceiver modules.
+    /// Note: If the fault was induced by a hardware failure it may be only
+    /// briefly cleared before being asserted again.
+    pub async fn clear_power_fault(&self, modules: ModuleId) -> Result<AckResult, Error> {
+        self.no_payload_request(HostRequest::ClearPowerFault(modules))
+            .await
+    }
+
     // Helper to create a request where the body is configurable and there is
     // no data payload needed in either the request or response.
     async fn no_payload_request(&self, request: HostRequest) -> Result<AckResult, Error> {
@@ -1607,6 +1615,11 @@ mod tests {
         simple_ack_op(HostRequest::DeassertReset).await;
     }
 
+    #[tokio::test]
+    async fn test_clear_power_fault() {
+        simple_ack_op(HostRequest::ClearPowerFault).await;
+    }
+
     // Helper function to run a bunch of tests, which generally just send some
     // simple host request and await an ACK. E.g., assert reset and disable
     // power are fundamentally the same, with a slightly different method and
@@ -1677,6 +1690,9 @@ mod tests {
             HostRequest::DeassertLpMode(_) => {
                 tokio::spawn(async move { ctl.deassert_lpmode(modules).await })
             }
+            HostRequest::ClearPowerFault(_) => {
+                tokio::spawn(async move { ctl.clear_power_fault(modules).await })
+            }
             _ => unimplemented!(),
         };
         let response = tokio::select! {
@@ -1711,6 +1727,9 @@ mod tests {
             }
             HostRequest::DeassertLpMode(_) => {
                 tokio::spawn(async move { controller.deassert_lpmode(modules).await })
+            }
+            HostRequest::ClearPowerFault(_) => {
+                tokio::spawn(async move { controller.clear_power_fault(modules).await })
             }
             _ => unimplemented!(),
         };
