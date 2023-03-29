@@ -189,6 +189,14 @@ struct Args {
         value_parser = parse_log_level
     )]
     log_level: Level,
+
+    /// Do not print error messages.
+    ///
+    /// When any module fails the command, the normal opration is to print the
+    /// module index along with the reason for failure on the standard error
+    /// stream. This suppresses printing these messages.
+    #[arg(short = 'E', long, default_value_t = false)]
+    ignore_errors: bool,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -213,7 +221,7 @@ enum Cmd {
     /// settings and data. This may take up to 2s to complete.
     Reset,
 
-    /// Set the power module of the addressed modules.
+    /// Set the power state of the addressed modules.
     SetPower {
         /// The desired power state.
         #[arg(value_enum)]
@@ -513,7 +521,10 @@ async fn main() -> anyhow::Result<()> {
                 .status(modules)
                 .await
                 .context("Failed to retrieve module status")?;
-            print_module_status(status_result);
+            print_module_status(&status_result);
+            if !args.ignore_errors {
+                print_failures(&status_result.failures);
+            }
         }
 
         Cmd::Reset => {
@@ -521,7 +532,9 @@ async fn main() -> anyhow::Result<()> {
                 .reset(modules)
                 .await
                 .context("Failed to reset modules")?;
-            print_failures(ack_result.failures);
+            if !args.ignore_errors {
+                print_failures(&ack_result.failures);
+            }
         }
 
         Cmd::SetPower { state } => {
@@ -529,7 +542,9 @@ async fn main() -> anyhow::Result<()> {
                 .set_power(modules, state)
                 .await
                 .context("Failed to set power state")?;
-            print_failures(ack_result.failures);
+            if !args.ignore_errors {
+                print_failures(&ack_result.failures);
+            }
         }
 
         Cmd::Power => {
@@ -537,7 +552,10 @@ async fn main() -> anyhow::Result<()> {
                 .power(modules)
                 .await
                 .context("Failed to get power mode")?;
-            print_power_mode(mode_result);
+            print_power_mode(&mode_result);
+            if !args.ignore_errors {
+                print_failures(&mode_result.failures);
+            }
         }
 
         Cmd::EnablePower => {
@@ -545,7 +563,9 @@ async fn main() -> anyhow::Result<()> {
                 .enable_power(modules)
                 .await
                 .context("Failed to enable power for modules")?;
-            print_failures(ack_result.failures);
+            if !args.ignore_errors {
+                print_failures(&ack_result.failures);
+            }
         }
 
         Cmd::DisablePower => {
@@ -553,7 +573,9 @@ async fn main() -> anyhow::Result<()> {
                 .disable_power(modules)
                 .await
                 .context("Failed to disable power for modules")?;
-            print_failures(ack_result.failures);
+            if !args.ignore_errors {
+                print_failures(&ack_result.failures);
+            }
         }
 
         Cmd::AssertReset => {
@@ -561,7 +583,9 @@ async fn main() -> anyhow::Result<()> {
                 .assert_reset(modules)
                 .await
                 .context("Failed to assert reset for modules")?;
-            print_failures(ack_result.failures);
+            if !args.ignore_errors {
+                print_failures(&ack_result.failures);
+            }
         }
 
         Cmd::DeassertReset => {
@@ -569,7 +593,9 @@ async fn main() -> anyhow::Result<()> {
                 .deassert_reset(modules)
                 .await
                 .context("Failed to deassert reset for modules")?;
-            print_failures(ack_result.failures);
+            if !args.ignore_errors {
+                print_failures(&ack_result.failures);
+            }
         }
 
         Cmd::AssertLpMode => {
@@ -577,7 +603,9 @@ async fn main() -> anyhow::Result<()> {
                 .assert_lpmode(modules)
                 .await
                 .context("Failed to assert lpmode for modules")?;
-            print_failures(ack_result.failures);
+            if !args.ignore_errors {
+                print_failures(&ack_result.failures);
+            }
         }
 
         Cmd::DeassertLpMode => {
@@ -585,7 +613,9 @@ async fn main() -> anyhow::Result<()> {
                 .deassert_lpmode(modules)
                 .await
                 .context("Failed to deassert lpmode for modules")?;
-            print_failures(ack_result.failures);
+            if !args.ignore_errors {
+                print_failures(&ack_result.failures);
+            }
         }
 
         Cmd::Identify => {
@@ -593,7 +623,10 @@ async fn main() -> anyhow::Result<()> {
                 .identifier(modules)
                 .await
                 .context("Failed to identify transceiver modules")?;
-            print_module_identifier(ident_result);
+            print_module_identifier(&ident_result);
+            if !args.ignore_errors {
+                print_failures(&ident_result.failures);
+            }
         }
 
         Cmd::VendorInfo => {
@@ -601,7 +634,10 @@ async fn main() -> anyhow::Result<()> {
                 .vendor_info(modules)
                 .await
                 .context("Failed to fetch vendor information for transceiver modules")?;
-            print_vendor_info(info_result);
+            print_vendor_info(&info_result);
+            if !args.ignore_errors {
+                print_failures(&info_result.failures);
+            }
         }
 
         Cmd::ReadLower {
@@ -622,7 +658,10 @@ async fn main() -> anyhow::Result<()> {
                 .read(modules, read)
                 .await
                 .context("Failed to read transceiver modules")?;
-            print_read_data(read_result, binary);
+            print_read_data(&read_result, binary);
+            if !args.ignore_errors {
+                print_failures(&read_result.failures);
+            }
         }
 
         Cmd::WriteLower {
@@ -645,7 +684,9 @@ async fn main() -> anyhow::Result<()> {
                 .write(modules, write, &data)
                 .await
                 .context("Failed to write transceiver modules")?;
-            print_failures(write_result.failures);
+            if !args.ignore_errors {
+                print_failures(&write_result.failures);
+            }
         }
 
         Cmd::ReadUpper {
@@ -680,7 +721,10 @@ async fn main() -> anyhow::Result<()> {
                 .read(modules, read)
                 .await
                 .context("Failed to read transceiver modules")?;
-            print_read_data(read_result, binary);
+            print_read_data(&read_result, binary);
+            if !args.ignore_errors {
+                print_failures(&read_result.failures);
+            }
         }
 
         Cmd::WriteUpper {
@@ -717,14 +761,19 @@ async fn main() -> anyhow::Result<()> {
                 .write(modules, write, &data)
                 .await
                 .context("Failed to write transceiver modules")?;
-            print_failures(write_result.failures);
+            if !args.ignore_errors {
+                print_failures(&write_result.failures);
+            }
         }
         Cmd::MemoryModel => {
             let layout_result = controller
                 .memory_model(modules)
                 .await
                 .context("Failed to get memory model")?;
-            print_module_memory_model(layout_result);
+            print_module_memory_model(&layout_result);
+            if !args.ignore_errors {
+                print_failures(&layout_result.failures);
+            }
         }
         Cmd::Macs { summary } => {
             let macs = controller
@@ -738,7 +787,7 @@ async fn main() -> anyhow::Result<()> {
                 .clear_power_fault(modules)
                 .await
                 .context("Failed to clear power fault for modules")?;
-            print_failures(ack_result.failures);
+            print_failures(&ack_result.failures);
         }
     }
     Ok(())
@@ -824,17 +873,17 @@ async fn address_transceivers(
 const WIDTH: usize = 4;
 const POWER_WIDTH: usize = 5;
 
-fn print_failures(failures: FailedModules) {
+fn print_failures(failures: &FailedModules) {
     if failures.modules.selected_transceiver_count() > 0 {
         eprintln!("Some operations failed, errors below");
         eprintln!("Port Error");
-        for (port, err) in failures.modules.to_indices().zip(failures.errors) {
+        for (port, err) in failures.modules.to_indices().zip(failures.errors.iter()) {
             eprintln!("{port:>WIDTH$} {err}");
         }
     }
 }
 
-fn print_power_mode(mode_result: PowerModeResult) {
+fn print_power_mode(mode_result: &PowerModeResult) {
     println!("Port  Power  Software-override");
     for (port, mode) in mode_result
         .modules
@@ -849,22 +898,37 @@ fn print_power_mode(mode_result: PowerModeResult) {
         let state = format!("{:?}", mode.state);
         println!("{port:>WIDTH$}  {state:POWER_WIDTH$}  {over}",);
     }
-    print_failures(mode_result.failures);
 }
 
-fn print_module_status(status_result: StatusResult) {
-    println!("Port Status");
+fn print_module_status(status_result: &StatusResult) {
+    println!("+----------------------------------------- Port");
+    println!("|    +------------------------------------ Present");
+    println!("|    |    +------------------------------- Power enabled");
+    println!("|    |    |    +-------------------------- Reset");
+    println!("|    |    |    |    +--------------------- Low power");
+    println!("|    |    |    |    |    +---------------- Interrupt");
+    println!("|    |    |    |    |    |    +----------- Power good");
+    println!("|    |    |    |    |    |    |    +------ Fault power timeout");
+    println!("|    |    |    |    |    |    |    |    +- Fault power lost");
+    println!("v    v    v    v    v    v    v    v    v");
     for (port, status) in status_result
         .modules
         .to_indices()
         .zip(status_result.status().into_iter())
     {
-        println!("{port:>WIDTH$} {status:?}");
+        print!("{port:>WIDTH$} ");
+        for bit in Status::all().iter() {
+            let word = if status.contains(bit) {
+                "Yes"
+            } else {
+                "No"
+            };
+            print!("{word:WIDTH$}");
+        }
     }
-    print_failures(status_result.failures);
 }
 
-fn print_read_data(read_result: ReadResult, binary: bool) {
+fn print_read_data(read_result: &ReadResult, binary: bool) {
     println!("Port Data");
     let fmt_data = if binary {
         |byte| format!("0b{byte:08b}")
@@ -879,7 +943,6 @@ fn print_read_data(read_result: ReadResult, binary: bool) {
         let formatted_data = each.into_iter().map(fmt_data).collect::<Vec<_>>().join(",");
         println!("{port:>WIDTH$} [{formatted_data}]",);
     }
-    print_failures(read_result.failures);
 }
 
 const ID_BYTE_WIDTH: usize = 5;
@@ -890,7 +953,7 @@ const REV_WIDTH: usize = 4;
 const SERIAL_WIDTH: usize = 16;
 const DATE_WIDTH: usize = 20;
 
-fn print_module_identifier(ident_result: IdentifierResult) {
+fn print_module_identifier(ident_result: &IdentifierResult) {
     println!("Port Ident Description");
     for (port, id) in ident_result
         .modules
@@ -900,10 +963,9 @@ fn print_module_identifier(ident_result: IdentifierResult) {
         let ident = format!("0x{:02x}", u8::from(*id));
         println!("{port:>WIDTH$} {ident:ID_BYTE_WIDTH$} {id}");
     }
-    print_failures(ident_result.failures);
 }
 
-fn print_vendor_info(vendor_result: VendorInfoResult) {
+fn print_vendor_info(vendor_result: &VendorInfoResult) {
     println!(
         "Port {:ID_DEBUG_WIDTH$} {:VENDOR_WIDTH$} {:PART_WIDTH$} \
         {:REV_WIDTH$} {:SERIAL_WIDTH$} {:DATE_WIDTH$}",
@@ -916,7 +978,6 @@ fn print_vendor_info(vendor_result: VendorInfoResult) {
     {
         print_single_module_vendor_info(port, inf);
     }
-    print_failures(vendor_result.failures);
 }
 
 fn print_single_module_vendor_info(port: u8, info: &VendorInfo) {
@@ -933,7 +994,7 @@ fn print_single_module_vendor_info(port: u8, info: &VendorInfo) {
     );
 }
 
-fn print_module_memory_model(model_result: MemoryModelResult) {
+fn print_module_memory_model(model_result: &MemoryModelResult) {
     println!("Port Model");
     for (port, model) in model_result
         .modules
@@ -942,7 +1003,6 @@ fn print_module_memory_model(model_result: MemoryModelResult) {
     {
         println!("{port:>WIDTH$} {model}");
     }
-    print_failures(model_result.failures);
 }
 
 fn print_mac_address_range(macs: MacAddrs, summary: bool) {

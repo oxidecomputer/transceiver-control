@@ -13,9 +13,15 @@ use crate::mgmt::ManagementInterface;
 use crate::mgmt::MemoryRead;
 use crate::mgmt::MemoryWrite;
 use crate::ModuleId;
+use core::fmt;
 use hubpack::SerializedSize;
+use serde::de::Error as SerdeError;
+use serde::de::Unexpected;
+use serde::de::Visitor;
 use serde::Deserialize;
+use serde::Deserializer;
 use serde::Serialize;
+use serde::Serializer;
 
 /// Definitions of message versions.
 ///
@@ -359,7 +365,7 @@ pub enum HostRequest {
     ///
     /// When a power fault has occurred, the transceiver's power supply will not
     /// re-enable as long as the fault is latched. Clearing the fault allows the
-    /// power supply to be enabled again. 
+    /// power supply to be enabled again.
     ClearPowerFault(ModuleId),
 }
 
@@ -507,7 +513,7 @@ pub enum HostResponse {}
 
 bitflags::bitflags! {
     /// The status of a single transceiver module.
-    #[derive(Deserialize, Serialize, SerializedSize)]
+    #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
     pub struct Status: u8 {
         /// The module is present in the receptacle.
         ///
@@ -560,6 +566,75 @@ bitflags::bitflags! {
         /// by the Sidecar board design itself.
         const FAULT_POWER_LOST      = 0b1000_0000;
     }
+}
+
+impl Serialize for Status {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_u8(self.bits())
+    }
+}
+
+struct StatusVisitor;
+
+impl<'de> Visitor<'de> for StatusVisitor {
+    type Value = Status;
+
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "a single u8")
+    }
+
+    fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+    where
+        E: SerdeError,
+    {
+        u8::try_from(v)
+            .map(Status::from_bits_truncate)
+            .map_err(|_| SerdeError::invalid_value(Unexpected::Unsigned(v), &self))
+    }
+
+    fn visit_u32<E>(self, v: u32) -> Result<Self::Value, E>
+    where
+        E: SerdeError,
+    {
+        u8::try_from(v)
+            .map(Status::from_bits_truncate)
+            .map_err(|_| SerdeError::invalid_value(Unexpected::Unsigned(u64::from(v)), &self))
+    }
+
+    fn visit_u16<E>(self, v: u16) -> Result<Self::Value, E>
+    where
+        E: SerdeError,
+    {
+        u8::try_from(v)
+            .map(Status::from_bits_truncate)
+            .map_err(|_| SerdeError::invalid_value(Unexpected::Unsigned(u64::from(v)), &self))
+    }
+
+    fn visit_u8<E>(self, v: u8) -> Result<Self::Value, E>
+    where
+        E: SerdeError,
+    {
+        Status::from_bits(v).ok_or(SerdeError::invalid_value(
+            Unexpected::Unsigned(u64::from(v)),
+            &self,
+        ))
+    }
+}
+
+impl<'de> Deserialize<'de> for Status {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_u8(StatusVisitor)
+    }
+}
+
+impl SerializedSize for Status {
+    const MAX_SIZE: usize = core::mem::size_of::<Status>();
 }
 
 #[cfg(test)]
@@ -966,5 +1041,22 @@ mod test {
             deserialize_hw_errors(modules, &[0]).unwrap(),
             vec![HwError::I2cError],
         );
+    }
+
+    // Manual tests for serialization of `Status`, since we can't derive `serde`
+    // traits on `bitflags >= 2.0`.
+    #[test]
+    fn test_serialize_status() {
+        let st = Status::PRESENT | Status::ENABLED;
+        let x = serde_json::to_string(&st).unwrap();
+        assert_eq!(x, "3");
+        assert_eq!(st, serde_json::from_str(&x).unwrap());
+
+        let mut bytes = vec![0];
+        let n_bytes = hubpack::serialize(&mut bytes, &st).unwrap();
+        assert_eq!(n_bytes, size_of::<Status>());
+        assert_eq!(n_bytes, size_of::<u8>());
+        assert_eq!(bytes, &[st.bits()]);
+        assert_eq!(st, hubpack::deserialize(&bytes).unwrap().0);
     }
 }
