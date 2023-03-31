@@ -83,6 +83,7 @@ pub use transceiver_messages::message::Status;
 pub use transceiver_messages::mgmt;
 use transceiver_messages::mgmt::ManagementInterface;
 pub use transceiver_messages::InvalidPort;
+pub use transceiver_messages::ModuleId;
 
 #[usdt::provider(provider = "xcvr__ctl")]
 mod probes {

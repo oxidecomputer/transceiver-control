@@ -158,12 +158,12 @@ pub type AckResult = ModuleResult<()>;
 
 impl AckResult {
     /// Return a result with all successes, i.e., no failed modules.
-    pub fn success(modules: ModuleId) -> Self {
-        Self::ack(modules, FailedModules::success())
+    pub fn ack(modules: ModuleId) -> Self {
+        Self::new(modules, FailedModules::success())
     }
 
     /// Return an `AckResult` from the successful and failed modules.
-    pub fn ack(modules: ModuleId, failures: FailedModules) -> Self {
+    pub fn new(modules: ModuleId, failures: FailedModules) -> Self {
         Self {
             modules,
             data: vec![(); modules.selected_transceiver_count()],
@@ -223,6 +223,27 @@ impl<P> ModuleResult<P> {
     /// If not, return `None`.
     pub fn nth_err(&self, index: u8) -> Option<&TransceiverError> {
         self.failures.nth(index)
+    }
+
+    /// Return `true` if this result is successful, i.e., contains no failures.
+    pub const fn is_success(&self) -> bool {
+        self.failures.modules.is_empty()
+    }
+
+    /// Return a successful result.
+    ///
+    /// If the number of modules in `modules` and the length of `data` do not
+    /// match, `None` is returned.
+    pub fn success(modules: ModuleId, data: Vec<P>) -> Option<Self> {
+        if modules.selected_transceiver_count() == data.len() {
+            Some(Self {
+                modules,
+                data,
+                failures: FailedModules::success(),
+            })
+        } else {
+            None
+        }
     }
 }
 

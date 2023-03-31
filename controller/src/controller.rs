@@ -261,7 +261,7 @@ impl Controller {
             ..
         } = self.deassert_reset(modules).await?;
         sleep(T_RESET).await;
-        Ok(AckResult::ack(modules, failures.merge(&new_failures)))
+        Ok(AckResult::new(modules, failures.merge(&new_failures)))
     }
 
     // Fetch the software power control state of a set of modules.
@@ -786,7 +786,7 @@ impl Controller {
                 failures.merge_into(&write_result.failures);
             }
         }
-        Ok(AckResult::ack(success_modules, failures))
+        Ok(AckResult::new(success_modules, failures))
     }
 
     /// Enable the hot swap controller for a set of transceiver modules.
@@ -866,7 +866,7 @@ impl Controller {
             }) => {
                 let data = response.data.expect("Existence ensured above");
                 let failures = Self::deserialize_hw_errors(failed_modules, &data)?;
-                Ok(AckResult::ack(success_modules, failures))
+                Ok(AckResult::new(success_modules, failures))
             }
             other => Err(Error::UnexpectedMessage(other)),
         }
@@ -928,7 +928,7 @@ impl Controller {
         )?;
         let write_result = self.write_impl(ident_result.modules, write, data).await?;
         let merged_failures = ident_result.failures.merge(&write_result.failures);
-        Ok(AckResult::ack(write_result.modules, merged_failures))
+        Ok(AckResult::new(write_result.modules, merged_failures))
     }
 
     // Implementation of the write function, which does not check that the
@@ -961,7 +961,7 @@ impl Controller {
             }) => {
                 let data = response.data.expect("Data ensured above");
                 let failures = Self::deserialize_hw_errors(failed_modules, &data)?;
-                Ok(AckResult::ack(success_modules, failures))
+                Ok(AckResult::new(success_modules, failures))
             }
             other => Err(Error::UnexpectedMessage(other)),
         }

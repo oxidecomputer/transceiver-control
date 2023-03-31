@@ -513,7 +513,7 @@ pub enum HostResponse {}
 
 bitflags::bitflags! {
     /// The status of a single transceiver module.
-    #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
     pub struct Status: u8 {
         /// The module is present in the receptacle.
         ///
