@@ -179,6 +179,21 @@ impl IoLoop {
                     "peer" => ?self.peer_addr,
                     "reason" => ?e,
                 );
+
+                // We also need to fail the request right away.
+                //
+                // Retrying here is almost certainly going to fail again,
+                // without additional intervention by the caller. For example,
+                // if the interface we're sending packets over disappeared,
+                // we'll never be able to recover without rebinding the UDP
+                // socket.
+                self.outstanding_request
+                    .take()
+                    .expect("verified as Some(_) above")
+                    .response_tx
+                    .send(Err(Error::Io(e)))
+                    .expect("failed to send response on channel");
+                return;
             }
             Ok(n_bytes) => {
                 assert_eq!(n_bytes, packet_size);
@@ -575,6 +590,12 @@ impl IoLoop {
                             Err(Error::Protocol(err))
                         } else {
                             let data = Some(remainder[..expected_len].to_vec());
+                            trace!(
+                                self.log,
+                                "received trailing data";
+                                "data" => ?data,
+                                "n_bytes" => expected_len,
+                            );
                             Ok(SpRpcResponse {
                                 header,
                                 message,

@@ -209,11 +209,57 @@ enum InputKind {
     Hex,
 }
 
+// How to print the `Status`.
+#[derive(Clone, Copy, Debug)]
+enum StatusKind {
+    // Print the usual Display representation of each set of status bits.
+    Normal,
+    // Print the truth value of a set of status bits, from all modules.
+    Limited { with: Status, without: Status },
+    // Print all bits from all modules.
+    All,
+}
+
+#[derive(Clone, Copy, Debug, clap::Parser)]
+struct StatusFlags {
+    /// Find modules with the provided flags set.
+    #[arg(short, value_parser = parse_status)]
+    with: Option<Status>,
+    /// Find modules without the provided flags set.
+    #[arg(short, value_parser = parse_status)]
+    without: Option<Status>,
+}
+
+fn parse_status(s: &str) -> Result<Status, String> {
+    s.parse::<Status>().map_err(|e| e.to_string())
+}
+
 #[derive(Subcommand)]
 enum Cmd {
     /// Return the status of the addressed modules, such as presence, power
     /// enable, and power mode.
-    Status,
+    Status {
+        /// Print the truth value of a set of status bits, from all modules.
+        ///
+        /// Any set of valid status bits may be used. For each module, a "1"
+        /// will be printed where the status of that module contains the
+        /// provided bits, otherwise a "0" will be printed. Note that bitflags
+        /// are written in ALL_CAPS, and separated by a pipe "|". To avoid the
+        /// shell interpreting that as a shell-pipeline, the bits should be
+        /// quoted -- for example: "PRESENT | RESET".
+        #[arg(long, value_parser = parse_status, conflicts_with = "all")]
+        with: Option<Status>,
+        #[arg(long, value_parser = parse_status, conflicts_with = "all")]
+        without: Option<Status>,
+
+        /// Print all bits from all modules.
+        ///
+        /// This shows a table, where rows are modules and columns the status
+        /// bit. For each module, if the module contains the relevant status bit
+        /// a "1" is printed. Otherwise a "0" is printed.
+        #[arg(long)]
+        all: bool,
+    },
 
     /// Reset the addressed modules.
     ///
@@ -516,12 +562,28 @@ async fn main() -> anyhow::Result<()> {
     let modules = address_transceivers(&controller, transceivers).await?;
 
     match args.cmd {
-        Cmd::Status => {
+        Cmd::Status { with, without, all } => {
+            let kind = match (with, without, all) {
+                (None, None, false) => StatusKind::Normal,
+                (None, None, true) => StatusKind::All,
+                (maybe_with, maybe_without, false) => {
+                    let with = maybe_with.unwrap_or_else(Status::empty);
+                    let without = maybe_without.unwrap_or_else(Status::empty);
+                    if with.is_empty() && without.is_empty() {
+                        eprintln!(
+                            "If specified, one of `--with` and `--without` \
+                            must be non-empty"
+                        );
+                    }
+                    StatusKind::Limited { with, without }
+                }
+                _ => unreachable!("clap didn't do its job"),
+            };
             let status_result = controller
                 .status(modules)
                 .await
                 .context("Failed to retrieve module status")?;
-            print_module_status(&status_result);
+            print_module_status(&status_result, kind);
             if !args.ignore_errors {
                 print_failures(&status_result.failures);
             }
@@ -900,31 +962,67 @@ fn print_power_mode(mode_result: &PowerModeResult) {
     }
 }
 
-fn print_module_status(status_result: &StatusResult) {
-    println!("+----------------------------------------- Port");
-    println!("|    +------------------------------------ Present");
-    println!("|    |    +------------------------------- Power enabled");
-    println!("|    |    |    +-------------------------- Reset");
-    println!("|    |    |    |    +--------------------- Low power");
-    println!("|    |    |    |    |    +---------------- Interrupt");
-    println!("|    |    |    |    |    |    +----------- Power good");
-    println!("|    |    |    |    |    |    |    +------ Fault power timeout");
-    println!("|    |    |    |    |    |    |    |    +- Fault power lost");
-    println!("v    v    v    v    v    v    v    v    v");
+fn print_module_status(status_result: &StatusResult, kind: StatusKind) {
+    match kind {
+        StatusKind::Normal => {
+            println!("Port Status");
+            for (port, status) in status_result.iter() {
+                println!("{port:>WIDTH$} {}", status);
+            }
+        }
+        StatusKind::Limited { with, without } => {
+            let status_str = match (with.is_empty(), without.is_empty()) {
+                (true, true) => unreachable!("verified in caller"),
+                (false, true) => format!("{with}"),
+                (true, false) => format!("!({without})"),
+                (false, false) => format!("{with} && !({without})"),
+            };
+            println!("Port {status_str}");
+            for (port, status) in status_result.iter() {
+                let yes = match (with.is_empty(), without.is_empty()) {
+                    (true, true) => unreachable!("verified in caller"),
+                    (false, true) => status.contains(with),
+                    (true, false) => !status.contains(without),
+                    (false, false) => status.contains(with) && !status.contains(without),
+                };
+                println!("{port:>WIDTH$} {}", if yes { "1" } else { "0" });
+            }
+        }
+        StatusKind::All => print_all_status(status_result),
+    }
+}
+
+fn print_all_status(status_result: &StatusResult) {
+    println!(" +--------------------------------- Port");
+    println!(" |   +----------------------------- {}", Status::PRESENT);
+    println!(" |   |   +------------------------- {}", Status::ENABLED);
+    println!(" |   |   |   +--------------------- {}", Status::RESET);
+    println!(
+        " |   |   |   |   +----------------- {}",
+        Status::LOW_POWER_MODE
+    );
+    println!(" |   |   |   |   |   +------------- {}", Status::INTERRUPT);
+    println!(" |   |   |   |   |   |   +--------- {}", Status::POWER_GOOD);
+    println!(
+        " |   |   |   |   |   |   |   +----- {}",
+        Status::FAULT_POWER_TIMEOUT
+    );
+    println!(
+        " |   |   |   |   |   |   |   |   +- {}",
+        Status::FAULT_POWER_LOST
+    );
+    println!(" v   v   v   v   v   v   v   v   v");
     for (port, status) in status_result
         .modules
         .to_indices()
         .zip(status_result.status().into_iter())
     {
-        print!("{port:>WIDTH$} ");
+        print!("{port:>2}   ");
         for bit in Status::all().iter() {
-            let word = if status.contains(bit) {
-                "Yes"
-            } else {
-                "No"
-            };
-            print!("{word:WIDTH$}");
+            let word = if status.contains(bit) { "1" } else { "0" };
+            print!("{word:<WIDTH$}");
         }
+        println!("");
     }
 }
 

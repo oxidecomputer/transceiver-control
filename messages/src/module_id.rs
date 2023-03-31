@@ -28,6 +28,12 @@ impl core::fmt::Debug for ModuleId {
     }
 }
 
+impl core::fmt::Binary for ModuleId {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        self.0.fmt(f)
+    }
+}
+
 /// Attempt to address an invalid transceiver port.
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize, SerializedSize)]
 #[cfg_attr(any(test, feature = "std"), derive(thiserror::Error))]
@@ -40,7 +46,7 @@ impl core::fmt::Display for InvalidPort {
 }
 
 impl ModuleId {
-    pub const MAX_INDEX: u8 = (core::mem::size_of::<MaskType>() * 8) as _;
+    pub const MAX_INDEX: u8 = MaskType::BITS as _;
 
     /// Return true if the provided index is set, or false otherwise. If the
     /// index is out of range, and error is returned.

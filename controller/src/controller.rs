@@ -513,6 +513,7 @@ impl Controller {
                 let (need_power_enabled, _) =
                     filter_module_data(modules, status.iter(), |_, st| {
                         !st.contains(Status::POWER_GOOD | Status::ENABLED)
+                            || st.contains(Status::RESET)
                     });
 
                 // Check for any modules which need power applied, but which do
