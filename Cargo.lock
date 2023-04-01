@@ -966,6 +966,7 @@ dependencies = [
  "bitflags 2.2.1",
  "clap",
  "hubpack",
+ "schemars",
  "serde",
  "serde_json",
  "thiserror",

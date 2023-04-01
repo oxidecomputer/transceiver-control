@@ -25,6 +25,7 @@ use transceiver_controller::Config;
 use transceiver_controller::Controller;
 use transceiver_controller::FailedModules;
 use transceiver_controller::IdentifierResult;
+use transceiver_controller::LedStateResult;
 use transceiver_controller::MemoryModelResult;
 use transceiver_controller::PowerModeResult;
 use transceiver_controller::PowerState;
@@ -35,6 +36,7 @@ use transceiver_controller::VendorInfoResult;
 use transceiver_decode::VendorInfo;
 use transceiver_messages::filter_module_data;
 use transceiver_messages::mac::MacAddrs;
+use transceiver_messages::message::LedState;
 use transceiver_messages::message::Status;
 use transceiver_messages::mgmt::cmis;
 use transceiver_messages::mgmt::sff8636;
@@ -463,6 +465,15 @@ enum Cmd {
     /// re-enable as long as the fault is latched. Clearing the fault allows the
     /// power supply to be enabled again.
     ClearPowerFault,
+
+    /// Return the state of the addressed modules' attention LEDs.
+    Leds,
+
+    /// Set the state of the addressed modules' attention LEDs.
+    SetLeds {
+        /// The state to which to set the LEDs.
+        state: LedState,
+    },
 }
 
 fn load_write_data(file: Option<PathBuf>, kind: InputKind) -> anyhow::Result<Vec<u8>> {
@@ -849,7 +860,28 @@ async fn main() -> anyhow::Result<()> {
                 .clear_power_fault(modules)
                 .await
                 .context("Failed to clear power fault for modules")?;
-            print_failures(&ack_result.failures);
+            if !args.ignore_errors {
+                print_failures(&ack_result.failures);
+            }
+        }
+        Cmd::Leds => {
+            let state_result = controller
+                .leds(modules)
+                .await
+                .context("Failed to get LED state")?;
+            print_led_state(&state_result);
+            if !args.ignore_errors {
+                print_failures(&state_result.failures);
+            }
+        }
+        Cmd::SetLeds { state } => {
+            let ack_result = controller
+                .set_leds(modules, state)
+                .await
+                .context("Failed to set LED state")?;
+            if !args.ignore_errors {
+                print_failures(&ack_result.failures);
+            }
         }
     }
     Ok(())
@@ -1108,6 +1140,13 @@ fn print_mac_address_range(macs: MacAddrs, summary: bool) {
                 .join(":");
             println!("{mac_s}");
         }
+    }
+}
+
+fn print_led_state(result: &LedStateResult) {
+    println!("Port LED");
+    for (port, state) in result.iter() {
+        println!("{port:>WIDTH$} {state:?}");
     }
 }
 
