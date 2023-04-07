@@ -36,28 +36,39 @@ Administer optical network transceiver modules
 Usage: xcvradm [OPTIONS] --interface <INTERFACE> <COMMAND>
 
 Commands:
-  status        Return the status of the addressed modules, such as presence, power enable, and power mode
-  reset         Reset the addressed modules
-  set-power     Set the power module of the addressed modules
-  identify      Extract the identity information for a set of modules
-  read-lower    Read the lower page of a set of transceiver modules
-  write-lower   Write the lower page of a set of transceiver modules
-  read-upper    Read data from an upper memory page
-  write-upper   Write the upper page of a set of transceiver modules
-  memory-model  Describe the memory model of a set of modules
-  help          Print this message or the help of the given subcommand(s)
+  status            Return the status of the addressed modules, such as presence, power enable, and power mode
+  reset             Reset the addressed modules
+  set-power         Set the power module of the addressed modules
+  power             Return the power mode of the addressed modules
+  enable-power      Enable the hot swap controller for the addressed modules
+  disable-power     Disable the hot swap controller for the addressed modules
+  assert-reset      Assert ResetL for the addressed modules
+  deassert-reset    Deassert ResetL for the addressed modules
+  assert-lp-mode    Assert LpMode for the addressed modules
+  deassert-lp-mode  Deassert LpMode for the addressed modules
+  identify          Read the SFF-8024 identifier for a set of modules
+  vendor-info       Read the vendor information for a set of modules
+  read-lower        Read the lower page of a set of transceiver modules
+  write-lower       Write the lower page of a set of transceiver modules
+  read-upper        Read data from an upper memory page
+  write-upper       Write the upper page of a set of transceiver modules
+  memory-model      Describe the memory model of a set of modules
+  macs              Return the MAC addresses for the particular system allotted by its FRUID
+  help              Print this message or the help of the given subcommand(s)
 
 Options:
-  -f, --fpga-id <FPGA_ID>
-          The FPGA whose transceivers to address [default: 0]
   -t, --transceivers <TRANSCEIVERS>
-          The comma-separated list of transcievers on the FPGA to address
+          The list of transcievers on the FPGA to address
   -a, --address <ADDRESS>
           The source IP address on which to listen for messages [default: ::]
   -i, --interface <INTERFACE>
           The source interface on which to listen for messages
+  -P, --port <PORT>
+          The source UDP port from which to send messages [default: 0]
   -p, --peer <PEER>
           The unicast peer address to assume
+      --peer-port <PEER_PORT>
+          The destination UDP port to which to send messages [default: 11112]
   -n, --n-retries <N_RETRIES>
           The maximum number of retries before failing a request
   -r, --retry-interval <RETRY_INTERVAL>
@@ -71,33 +82,32 @@ Options:
 ```
 
 The required option `--interface` is used to specify the IP interface through
-which the SP is reachable. The other common options are `--fpga` which specifies
-the FPGA whose transceivers are addressed, and `--transceivers`, which is a list
-of the actual transceivers on that FPGA to operate on.
+which the SP is reachable. The other common option is `--transceivers`, which is
+a list of the actual transceivers on the Sidecar to address.
 
 ### `status`
 
 The first command to run is `xcvradm status`. You should see something like:
 
 ```bash
-$ ./xcvradm -i axf0 -f1 status
-FPGA Port Status
-   1    0 PRESENT | ENABLED | LOW_POWER_MODE | INTERRUPT
-   1    1 PRESENT | ENABLED | LOW_POWER_MODE | INTERRUPT
-   1    2 PRESENT | ENABLED | LOW_POWER_MODE | INTERRUPT
-   1    3 PRESENT | ENABLED | LOW_POWER_MODE | INTERRUPT
-   1    4 PRESENT | ENABLED | LOW_POWER_MODE | INTERRUPT
-   1    5 PRESENT | ENABLED | LOW_POWER_MODE | INTERRUPT
-   1    6 RESET | LOW_POWER_MODE
-   1    7 RESET | LOW_POWER_MODE
-   1    8 PRESENT | ENABLED | LOW_POWER_MODE | INTERRUPT
-   1    9 PRESENT | ENABLED | LOW_POWER_MODE | INTERRUPT
-   1   10 PRESENT | ENABLED | LOW_POWER_MODE | INTERRUPT
-   1   11 PRESENT | ENABLED | LOW_POWER_MODE | INTERRUPT
-   1   12 PRESENT | ENABLED | LOW_POWER_MODE | INTERRUPT
-   1   13 PRESENT | ENABLED | LOW_POWER_MODE | INTERRUPT
-   1   14 RESET | LOW_POWER_MODE
-   1   15 RESET | LOW_POWER_MODE
+$ ./xcvradm -i axf0 status
+Port Status
+   0 PRESENT | ENABLED | LOW_POWER_MODE | INTERRUPT
+   1 PRESENT | ENABLED | LOW_POWER_MODE | INTERRUPT
+   2 PRESENT | ENABLED | LOW_POWER_MODE | INTERRUPT
+   3 PRESENT | ENABLED | LOW_POWER_MODE | INTERRUPT
+   4 PRESENT | ENABLED | LOW_POWER_MODE | INTERRUPT
+   5 PRESENT | ENABLED | LOW_POWER_MODE | INTERRUPT
+   6 RESET | LOW_POWER_MODE
+   7 RESET | LOW_POWER_MODE
+   8 PRESENT | ENABLED | LOW_POWER_MODE | INTERRUPT
+   9 PRESENT | ENABLED | LOW_POWER_MODE | INTERRUPT
+  10 PRESENT | ENABLED | LOW_POWER_MODE | INTERRUPT
+  11 PRESENT | ENABLED | LOW_POWER_MODE | INTERRUPT
+  12 PRESENT | ENABLED | LOW_POWER_MODE | INTERRUPT
+  13 PRESENT | ENABLED | LOW_POWER_MODE | INTERRUPT
+  14 RESET | LOW_POWER_MODE
+  15 RESET | LOW_POWER_MODE
 ```
 
 That shows the bitmask of the state for each transceiver. In this case, a few
@@ -113,10 +123,10 @@ and CMIS respectively. You can see these kinds of details along with the vendor
 information by using `xcvradm identify`:
 
 ```bash
-$ ./xcvradm -i axf0 -f1 -t3,4 identify
-FPGA Port Identifier           Vendor           Part             Rev  Serial           Mfg date
-   1    3 QsfpPlusCmis (0x1e)  FINISAR CORP.    FTCC8612E1PCM    A0   X4MAG53          05 Feb 2021 (Lot )
-   1    4 Qsfp28 (0x11)        Intel Corp       SPTMBP1PACDF010  01   LTAC2007001GS    12 Feb 2020
+$ ./xcvradm -i axf0 -t3,4 identify
+Port Identifier           Vendor           Part             Rev  Serial           Mfg date
+   3 QsfpPlusCmis (0x1e)  FINISAR CORP.    FTCC8612E1PCM    A0   X4MAG53          05 Feb 2021 (Lot )
+   4 Qsfp28 (0x11)        Intel Corp       SPTMBP1PACDF010  01   LTAC2007001GS    12 Feb 2020
 ```
 
 ### Power modes and resetting
@@ -124,17 +134,17 @@ FPGA Port Identifier           Vendor           Part             Rev  Serial    
 You can set modules into various power modes with `xcvradm set-power`:
 
 ```bash
-$ ./xcvradm -i axf0 -f1 -t3 status
-FPGA Port Status
-   1    3 PRESENT | ENABLED | LOW_POWER_MODE | INTERRUPT
-$ ./xcvradm -i axf0 -f1 -t3 set-power off
-$ ./xcvradm -i axf0 -f1 -t3 status
-FPGA Port Status
-   1    3 PRESENT | RESET | LOW_POWER_MODE
-$ ./xcvradm -i axf0 -f1 -t3 set-power low
-$ ./xcvradm -i axf0 -f1 -t3 status
-FPGA Port Status
-   1    3 PRESENT | ENABLED | LOW_POWER_MODE | INTERRUPT
+$ ./xcvradm -i axf0 -t3 status
+Port Status
+   3 PRESENT | ENABLED | LOW_POWER_MODE | INTERRUPT
+$ ./xcvradm -i axf0 -t3 set-power off
+$ ./xcvradm -i axf0 -t3 status
+Port Status
+   3 PRESENT | RESET | LOW_POWER_MODE
+$ ./xcvradm -i axf0 -t3 set-power low
+$ ./xcvradm -i axf0 -t3 status
+Port Status
+   3 PRESENT | ENABLED | LOW_POWER_MODE | INTERRUPT
 ```
 
 Modules can be reset with `xcvradm reset`.
@@ -146,3 +156,17 @@ You can read and write the memory maps for the transceivers using `xcvradm
 good bit of detail about the devices, as the meaning of each byte and the
 upper/lower memory split is entirely module-specific. Read SFF-8636 and CMIS 5.0
 if you need to use these.
+
+### Errors
+
+All of the operations in `xcvradm` are fallible. Modules may be pulled at any
+point or power may fail, or they may fail for any number of other reasons. This
+is compounded by the fact that commands address _multiple_ modules. We'd like to
+receive valid data, or follow through an operation where we can, and also report
+the failures we encounter.
+
+As an example, suppose we want to read the vendor information from two modules,
+and one of those fails. `xcvradm` will print the successfully read information
+from one module on the standard output. After all successes are reported,
+information about the modules which failed and the cause for each, on the
+standard error stream.

@@ -11,19 +11,19 @@ use std::ops::Range;
 use thiserror::Error;
 use transceiver_messages::mgmt::cmis;
 use transceiver_messages::mgmt::sff8636;
+use transceiver_messages::mgmt::Error as MgmtError;
 pub use transceiver_messages::mgmt::ManagementInterface;
 use transceiver_messages::mgmt::MemoryRead;
 use transceiver_messages::mgmt::Page;
-use transceiver_messages::Error as MessageError;
 
 /// An error related to decoding a transceiver memory map.
-#[derive(Clone, Copy, Debug, Error)]
+#[derive(Clone, Copy, Debug, PartialEq, Error)]
 pub enum Error {
     #[error("Unsupported SFF-8024 Identifier: '{0}'")]
     UnsupportedIdentifier(Identifier),
 
-    #[error("Management or messaging error")]
-    Management(#[from] MessageError),
+    #[error("Management error")]
+    Management(#[from] MgmtError),
 
     #[error("Memory map parsing failed")]
     ParseFailed,
@@ -341,7 +341,7 @@ pub trait ParseFromModule: Sized {
     fn parse<'a>(id: Identifier, reads: impl Iterator<Item = &'a [u8]>) -> Result<Self, Error>;
 }
 
-impl ParseFromModule for Vendor {
+impl ParseFromModule for VendorInfo {
     fn reads(id: Identifier) -> Result<Vec<MemoryRead>, Error> {
         match id {
             Identifier::QsfpPlusSff8636 | Identifier::Qsfp28 => {
@@ -411,13 +411,17 @@ impl ParseFromModule for Vendor {
                 let serial = ascii_to_string(&data[SERIAL]);
                 let date = std::str::from_utf8(&data[DATE]).ok().map(String::from);
 
-                Ok(Self {
+                let vendor = Vendor {
                     name,
                     oui,
                     part,
                     revision,
                     serial,
                     date,
+                };
+                Ok(VendorInfo {
+                    identifier: id,
+                    vendor,
                 })
             }
             Identifier::QsfpPlusCmis | Identifier::QsfpDD => {
@@ -442,13 +446,17 @@ impl ParseFromModule for Vendor {
                 let revision = ascii_to_string(&buf[REVISION]);
                 let serial = ascii_to_string(&buf[SERIAL]);
                 let date = std::str::from_utf8(&buf[DATE]).ok().map(String::from);
-                Ok(Self {
+                let vendor = Vendor {
                     name,
                     oui,
                     part,
                     revision,
                     serial,
                     date,
+                };
+                Ok(Self {
+                    identifier: id,
+                    vendor,
                 })
             }
             _ => Err(Error::UnsupportedIdentifier(id)),
@@ -842,14 +850,17 @@ mod tests {
 
         data[start..start + DATE.len()].copy_from_slice(DATE);
 
-        let parsed = Vendor::parse(id, std::iter::once(data.as_slice())).unwrap();
+        let parsed = VendorInfo::parse(id, std::iter::once(data.as_slice())).unwrap();
 
-        assert_prefix(VENDOR_NAME, &parsed.name);
-        assert_eq!(OUI, parsed.oui.0);
-        assert_prefix(PART, &parsed.part);
-        assert_prefix(REVISION, &parsed.revision);
-        assert_prefix(SERIAL, &parsed.serial);
-        assert_eq!(parsed.date.as_deref(), std::str::from_utf8(DATE).ok());
+        assert_prefix(VENDOR_NAME, &parsed.vendor.name);
+        assert_eq!(OUI, parsed.vendor.oui.0);
+        assert_prefix(PART, &parsed.vendor.part);
+        assert_prefix(REVISION, &parsed.vendor.revision);
+        assert_prefix(SERIAL, &parsed.vendor.serial);
+        assert_eq!(
+            parsed.vendor.date.as_deref(),
+            std::str::from_utf8(DATE).ok()
+        );
     }
 
     #[test]
@@ -877,13 +888,16 @@ mod tests {
         all_data.extend_from_slice(DATE);
         let reads = all_data.chunks(8);
 
-        let parsed = Vendor::parse(id, reads).unwrap();
-        assert_prefix(VENDOR_NAME, &parsed.name);
-        assert_eq!(OUI, parsed.oui.0);
-        assert_prefix(PART, &parsed.part);
-        assert_prefix(REVISION, &parsed.revision);
-        assert_prefix(SERIAL, &parsed.serial);
-        assert_eq!(parsed.date.as_deref(), std::str::from_utf8(DATE).ok());
+        let parsed = VendorInfo::parse(id, reads).unwrap();
+        assert_prefix(VENDOR_NAME, &parsed.vendor.name);
+        assert_eq!(OUI, parsed.vendor.oui.0);
+        assert_prefix(PART, &parsed.vendor.part);
+        assert_prefix(REVISION, &parsed.vendor.revision);
+        assert_prefix(SERIAL, &parsed.vendor.serial);
+        assert_eq!(
+            parsed.vendor.date.as_deref(),
+            std::str::from_utf8(DATE).ok()
+        );
     }
 
     #[test]

@@ -18,7 +18,7 @@ banner "fmt"
 ptime -m cargo fmt -- --check
 
 banner "no std chk"
-ptime -m cargo check --no-default-features
+ptime -m cargo check --package transceiver-messages --no-default-features
 
 banner "test"
 ptime -m cargo test --all-targets

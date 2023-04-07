@@ -7,9 +7,9 @@
 //! Types for working with transceivers conforming to the SFF-8636 management
 //! interface specification.
 
+use super::Error;
 use crate::mgmt::ManagementInterface;
 use crate::mgmt::MemoryPage;
-use crate::Error;
 use hubpack::SerializedSize;
 use serde::Deserialize;
 use serde::Serialize;

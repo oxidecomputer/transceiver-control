@@ -2,17 +2,73 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2022 Oxide Computer Company
+// Copyright 2023 Oxide Computer Company
 
 //! Specifications for transceiver management interfaces.
 
 pub mod cmis;
 pub mod sff8636;
 
-use crate::Error;
 use hubpack::SerializedSize;
 use serde::Deserialize;
 use serde::Serialize;
+
+/// An error accessing a transceiver memory map.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, SerializedSize)]
+#[cfg_attr(any(test, feature = "std"), derive(thiserror::Error))]
+pub enum Error {
+    /// Accessed an invalid upper memory page.
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Invalid upper memory page: 0x{0:02x}")
+    )]
+    InvalidPage(u8),
+
+    /// Accessed an invalid upper memory bank.
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Invalid upper memory bank: 0x{0:02x}")
+    )]
+    InvalidBank(u8),
+
+    /// A page does not accept a bank number.
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Page does not accept a bank number: 0x{0:02x}")
+    )]
+    PageIsUnbanked(u8),
+
+    /// A page requires a bank number.
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("Page requires a bank number: 0x{0:02x}")
+    )]
+    PageIsBanked(u8),
+
+    /// An access to memory outside of the 256-byte memory map.
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error(
+            "Invalid memory access: \
+            offset=0x{offset:02x}, len=0x{len:02x}"
+        )
+    )]
+    InvalidMemoryAccess { offset: u8, len: u8 },
+
+    /// A write or read is an invalid size for the provided management
+    /// interface.
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error(
+            "Write or read of {size} bytes too \
+            large for management interface {interface:?}"
+        )
+    )]
+    InvalidOperationSize {
+        size: u8,
+        interface: ManagementInterface,
+    },
+}
 
 /// The specification to which a transciever's management interface conforms.
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize, SerializedSize)]
@@ -311,6 +367,7 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::Error;
     use crate::mgmt::cmis;
     use crate::mgmt::sff8636;
     use crate::mgmt::ManagementInterface;
@@ -318,7 +375,6 @@ mod tests {
     use crate::mgmt::MemoryRead;
     use crate::mgmt::MemoryWrite;
     use crate::mgmt::Page;
-    use crate::Error;
     use hubpack::SerializedSize;
 
     fn test_page_memory_read<P>(page: P)
