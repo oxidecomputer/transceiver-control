@@ -23,7 +23,7 @@ version = "4"
 features = [ "derive" ]
 
 [dependencies.nix]
-version = "0.25"
+version = "0.26"
 features = [ "net" ]
 
 [dependencies.schemars]
