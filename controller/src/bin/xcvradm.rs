@@ -1044,7 +1044,7 @@ fn print_read_data(read_result: &ReadResult, binary: bool) {
 }
 
 const ID_BYTE_WIDTH: usize = 5;
-const ID_DEBUG_WIDTH: usize = 20;
+const ID_DEBUG_WIDTH: usize = 24;
 const VENDOR_WIDTH: usize = 16;
 const PART_WIDTH: usize = 16;
 const REV_WIDTH: usize = 4;

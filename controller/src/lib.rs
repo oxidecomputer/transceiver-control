@@ -96,7 +96,7 @@ mod probes {
 
 /// An error operating on a transceiver, such as a bad index, hardware failure,
 /// or error decoding its memory map.
-#[derive(Clone, Debug, PartialEq, thiserror::Error)]
+#[derive(Clone, Copy, Debug, PartialEq, thiserror::Error)]
 pub enum TransceiverError {
     #[error("Hardware error accessing module {module_index}: {source}")]
     Hardware {
