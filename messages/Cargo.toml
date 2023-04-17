@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 bitflags = "2"
-hubpack = "0.1.0"
+hubpack = "0.1.2"
 
 [dependencies.clap]
 version = "4"
