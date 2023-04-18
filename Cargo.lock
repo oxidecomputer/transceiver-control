@@ -340,9 +340,9 @@ checksum = "fed44880c466736ef9a5c5b5facefb5ed0785676d0c02d612db14e54f0d84286"
 
 [[package]]
 name = "hubpack"
-version = "0.1.1"
+version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bf8f3c0e51b49dd73e277f8d157f7248e91b3597e3487884181b259682b715d3"
+checksum = "61a0b84aeae519f65e0ba3aa998327080993426024edbd5cc38dbaf5ec524303"
 dependencies = [
  "hubpack_derive",
  "serde",

@@ -9,7 +9,7 @@ api-traits = [ "dep:schemars", "transceiver-decode/api-traits" ]
 
 [dependencies]
 anyhow = "1"
-hubpack = "0.1.0"
+hubpack = "0.1.2"
 serde = "1"
 slog-async = "2"
 slog-term = "2"
