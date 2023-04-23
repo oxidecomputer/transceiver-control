@@ -110,7 +110,7 @@ fn parse_transceivers(s: &str) -> Result<Transceivers, String> {
                 ));
             }
             ModuleId::from_indices(&indices)
-                .map(|p| Transceivers::Index(p))
+                .map(Transceivers::Index)
                 .map_err(|e| format!("invalid port indices: {e:?}"))
         }
     }
@@ -859,19 +859,6 @@ async fn address_transceivers(
     controller: &Controller,
     transceivers: Transceivers,
 ) -> anyhow::Result<ModuleId> {
-    fn filter_ports<D: IntoIterator>(
-        modules: ModuleId,
-        data: D,
-        predicate: impl Fn(D::Item) -> bool,
-    ) -> ModuleId {
-        let ix: Vec<_> = modules
-            .to_indices()
-            .zip(data.into_iter())
-            .filter_map(|(ix, datum)| if predicate(datum) { Some(ix) } else { None })
-            .collect();
-        ModuleId::from_indices(&ix).unwrap()
-    }
-
     let modules = match transceivers {
         Transceivers::All => {
             // "All" here means all bits, but Sidecar only has 32 QSFP ports
@@ -950,7 +937,7 @@ fn print_power_mode(mode_result: &PowerModeResult) {
     for (port, mode) in mode_result
         .modules
         .to_indices()
-        .zip(mode_result.power_modes().into_iter())
+        .zip(mode_result.power_modes().iter())
     {
         let over = match mode.software_override {
             None => "-",
@@ -992,37 +979,35 @@ fn print_module_status(status_result: &StatusResult, kind: StatusKind) {
     }
 }
 
-fn print_all_status(status_result: &StatusResult) {
+// NOTE: Skip formatting this function because the exact representation here is
+// useful to see how we print the table header itself.
+#[rustfmt::skip]
+fn print_all_status_header() {
     println!(" +--------------------------------- Port");
     println!(" |   +----------------------------- {}", Status::PRESENT);
     println!(" |   |   +------------------------- {}", Status::ENABLED);
     println!(" |   |   |   +--------------------- {}", Status::RESET);
-    println!(
-        " |   |   |   |   +----------------- {}",
-        Status::LOW_POWER_MODE
-    );
+    println!(" |   |   |   |   +----------------- {}", Status::LOW_POWER_MODE);
     println!(" |   |   |   |   |   +------------- {}", Status::INTERRUPT);
     println!(" |   |   |   |   |   |   +--------- {}", Status::POWER_GOOD);
-    println!(
-        " |   |   |   |   |   |   |   +----- {}",
-        Status::FAULT_POWER_TIMEOUT
-    );
-    println!(
-        " |   |   |   |   |   |   |   |   +- {}",
-        Status::FAULT_POWER_LOST
-    );
+    println!(" |   |   |   |   |   |   |   +----- {}", Status::FAULT_POWER_TIMEOUT);
+    println!(" |   |   |   |   |   |   |   |   +- {}", Status::FAULT_POWER_LOST);
     println!(" v   v   v   v   v   v   v   v   v");
+}
+
+fn print_all_status(status_result: &StatusResult) {
+    print_all_status_header();
     for (port, status) in status_result
         .modules
         .to_indices()
-        .zip(status_result.status().into_iter())
+        .zip(status_result.status().iter())
     {
         print!("{port:>2}   ");
         for bit in Status::all().iter() {
             let word = if status.contains(bit) { "1" } else { "0" };
             print!("{word:<WIDTH$}");
         }
-        println!("");
+        println!();
     }
 }
 
@@ -1036,9 +1021,9 @@ fn print_read_data(read_result: &ReadResult, binary: bool) {
     for (port, each) in read_result
         .modules
         .to_indices()
-        .zip(read_result.data().into_iter())
+        .zip(read_result.data().iter())
     {
-        let formatted_data = each.into_iter().map(fmt_data).collect::<Vec<_>>().join(",");
+        let formatted_data = each.iter().map(fmt_data).collect::<Vec<_>>().join(",");
         println!("{port:>WIDTH$} [{formatted_data}]",);
     }
 }
@@ -1056,7 +1041,7 @@ fn print_module_identifier(ident_result: &IdentifierResult) {
     for (port, id) in ident_result
         .modules
         .to_indices()
-        .zip(ident_result.identifiers().into_iter())
+        .zip(ident_result.identifiers().iter())
     {
         let ident = format!("0x{:02x}", u8::from(*id));
         println!("{port:>WIDTH$} {ident:ID_BYTE_WIDTH$} {id}");
@@ -1072,7 +1057,7 @@ fn print_vendor_info(vendor_result: &VendorInfoResult) {
     for (port, inf) in vendor_result
         .modules
         .to_indices()
-        .zip(vendor_result.vendor_info().into_iter())
+        .zip(vendor_result.vendor_info().iter())
     {
         print_single_module_vendor_info(port, inf);
     }
@@ -1084,7 +1069,7 @@ fn print_single_module_vendor_info(port: u8, info: &VendorInfo) {
         info.identifier,
         u8::from(info.identifier)
     );
-    let date = info.vendor.date.as_deref().unwrap_or_else(|| "Unknown");
+    let date = info.vendor.date.as_deref().unwrap_or("Unknown");
     println!(
         "{port:>WIDTH$} {:ID_DEBUG_WIDTH$} {:VENDOR_WIDTH$} \
         {:PART_WIDTH$} {:REV_WIDTH$} {:SERIAL_WIDTH$} {:DATE_WIDTH$}",
@@ -1097,7 +1082,7 @@ fn print_module_memory_model(model_result: &MemoryModelResult) {
     for (port, model) in model_result
         .modules
         .to_indices()
-        .zip(model_result.memory_models().into_iter())
+        .zip(model_result.memory_models().iter())
     {
         println!("{port:>WIDTH$} {model}");
     }
