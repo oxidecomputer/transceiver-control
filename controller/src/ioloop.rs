@@ -795,7 +795,7 @@ impl IoLoop {
                     // from the peer.
                     let msg_buf = &rx_buf[..n_bytes];
 
-                    let (header, remainder) = match hubpack::deserialize::<Header>(&msg_buf) {
+                    let (header, remainder) = match hubpack::deserialize::<Header>(msg_buf) {
                         Err(e) => {
                             // Failed to deserialize the header. This is most
                             // unexpected.

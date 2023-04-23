@@ -280,7 +280,7 @@ impl Controller {
         failed_modules: ModuleId,
         data: &[u8],
     ) -> Result<FailedModules, Error> {
-        message::deserialize_hw_errors(failed_modules, &data)
+        message::deserialize_hw_errors(failed_modules, data)
             .map_err(Error::from)
             .map(|hw_errors| {
                 let errors = hw_errors
@@ -334,7 +334,7 @@ impl Controller {
         // filter the set of `powered_modules` to those which we expect to be
         // readable, which are those that are _not_ in reset.
         //
-        // In the case that the module's don't use software override, we need to
+        // In the case that the modules don't use software override, we need to
         // report the status bits themselves as the power state. So filter down
         // the full set of status bits to those that are readable (powered and
         // not in reset).
@@ -362,7 +362,7 @@ impl Controller {
                 // on software-control and possibly the status bits.
                 let mode = control
                     .power_control()
-                    .into_iter()
+                    .iter()
                     .zip(readable_status.into_iter())
                     .map(|(control, status)| {
                         match control {
@@ -1017,7 +1017,7 @@ impl Controller {
                     .map(Vec::from)
                     .collect::<Vec<_>>();
                 assert_eq!(data.len(), modules.selected_transceiver_count());
-                let failures = Self::deserialize_hw_errors(failed_modules, &error_data)?;
+                let failures = Self::deserialize_hw_errors(failed_modules, error_data)?;
                 Ok(ReadResult {
                     modules,
                     data,
@@ -1053,7 +1053,7 @@ impl Controller {
         // we successfully read from and parse will have the result appended to
         // `data`.
         //
-        // Each module that we faile to _read_ from will have its error
+        // Each module that we fail to _read_ from will have its error
         // appended to `failures`; the corresponding module will be removed from
         // `modules` and added to `failures`.
         //
@@ -1061,6 +1061,7 @@ impl Controller {
         // this method entirely. That's not great, since we could succeed to
         // parse some module's data and fail another.
         let ident_result = self.identifier(modules).await?;
+        let mut data_by_index = BTreeMap::new();
         let mut result = ModuleResult {
             modules: ident_result.modules,
             data: Vec::with_capacity(ident_result.modules.selected_transceiver_count()),
@@ -1119,7 +1120,7 @@ impl Controller {
                             .modules
                             .set(module)
                             .expect("Module indices previously verified");
-                        result.failures.errors.push(err.clone());
+                        result.failures.errors.push(*err);
                         // Skip to the next module entirely.
                         continue 'module;
                     }
@@ -1137,10 +1138,12 @@ impl Controller {
                 // Parse all the data from the module.
                 //
                 // This may also fail, in which case we'll add the module into
-                // the failed set as well.
+                // the failed set as well. Note that we store all data in a map
+                // by index, so that we can be sure to keep it sorted
+                // appropriately at the end of the entire operation.
                 match P::parse(id, parse_data) {
                     Ok(parsed) => {
-                        result.data.push(parsed);
+                        data_by_index.insert(module, parsed);
                     }
                     Err(e) => {
                         result
@@ -1157,6 +1160,9 @@ impl Controller {
                 }
             }
         }
+        // Collect the data into the output array, which maintains the sort
+        // order by module index.
+        result.data.extend(data_by_index.into_values());
         Ok(result)
     }
 
@@ -1891,7 +1897,7 @@ mod tests {
         // - bit 0 set -> use bit 1
         // - bit 1 set -> force low-power mode
         //
-        // For the CMIS mdoules, that is one octet with:
+        // For the CMIS modules, that is one octet with:
         // - bit 6 set -> evaluate LPMode signal (hardware control)
         // - bit 6 clear -> use bit 4
         // - bit 4 set -> force low-power mode.
@@ -2499,6 +2505,188 @@ mod tests {
                     modules: failed_modules,
                     errors: received_errors,
                 }
+            }
+        );
+    }
+
+    // Regression test for
+    // https://github.com/oxidecomputer/transceiver-control/issues/79, ensuring
+    // that we collect everything into the right order, even if we read out of
+    // order.
+    //
+    // In this test, we'll just read the power_control information for 2
+    // modules, but a CMIS _and then an SFF-8636_ module. That is the opposite
+    // order in which we actually issue the reads, and so we can check that the
+    // ordering by index is preserved, despite the reads occurring in a
+    // different order.
+    #[tokio::test]
+    async fn test_parse_modules_by_identifier_out_of_order() {
+        let (controller, socket) = peer_setup().await;
+
+        // We'll read two modules, and here test without any failures.
+        let modules = ModuleId(0b11);
+
+        // The _lower index_ is a CMIS module, the higher an SFF-8636.
+        let cmis_module = ModuleId(0b01);
+        let sff_module = ModuleId(0b10);
+
+        // The expected status for _all_ modules. The CMIS module will be
+        // considered in low power mode, with software override. The SFF will be
+        // in high-power, using the LPMode pin.
+        let expected_status = vec![
+            Status::POWER_GOOD | Status::ENABLED | Status::LOW_POWER_MODE,
+            Status::POWER_GOOD | Status::ENABLED,
+        ];
+
+        // The expected power modes, i.e., the final output of the actual
+        // `Controller::power` call.
+        let expected_power_mode = vec![
+            PowerMode {
+                state: PowerState::Low,
+                software_override: Some(true),
+            },
+            PowerMode {
+                state: PowerState::High,
+                software_override: Some(false),
+            },
+        ];
+
+        // The reads first access the identifiers, so that the maps can be read
+        // correctly.
+        let expected_identifiers = vec![Identifier::QsfpPlusCmis, Identifier::QsfpPlusSff8636];
+
+        // The method first accesses the status, then reads the memory map for
+        // the last four modules. Each of those accesses a single byte in the
+        // memory map, defined by the `PowerModel::reads()` method for the
+        // corresponding identifier.
+        //
+        // We know there's just one read required to access the power control
+        // data. Also note that we issue only _two_ read requests for the last 4
+        // modules -- that's because `parse_modules_by_identifier()` splits the
+        // modules by ID, and there are two kinds of IDs (SFF and CMIS).
+        //
+        // > IMPORTANT: The expected reads are actually _out of order_ compared
+        // to the modules themselves. That is, the lower-indexed module is CMIS,
+        // but we read from the SFF module first. That's just because we split
+        // the reads by ID, and the sort order of the `Identifier` enum has
+        // SFF-8636 prior to CMIS. So the expected reads are SFF first, then
+        // CMIS, even though we expect the data at the end to be for CMIS first
+        // then SFF, which is the order of `expected_power_mode`.
+        let power_control_reads = [Identifier::QsfpPlusSff8636, Identifier::QsfpPlusCmis]
+            .into_iter()
+            .map(|id| PowerControl::reads(id).unwrap()[0])
+            .collect::<Vec<_>>();
+        let read_modules = vec![sff_module, cmis_module];
+
+        // Create the expected host -> SP requests.
+        //
+        // This will first read the identifier, and then issue two additional
+        // reads, one for each kind of module.
+        let identifier_read = MemoryRead::new(sff8636::Page::Lower, 0, 1).unwrap();
+        let mut expected_requests = vec![
+            Message::new(MessageBody::HostRequest(HostRequest::Status(modules))),
+            Message::new(MessageBody::HostRequest(HostRequest::Read {
+                modules,
+                read: identifier_read,
+            })),
+        ];
+        expected_requests.extend(power_control_reads.iter().zip(read_modules.iter()).map(
+            |(read, modules)| {
+                Message::new(MessageBody::HostRequest(HostRequest::Read {
+                    modules: *modules,
+                    read: *read,
+                }))
+            },
+        ));
+
+        // The successful data for each request will consist of:
+        //
+        // - The status bits for all modules
+        // - The identifiers for all modules
+        // - The PowerControl for all modules.
+        //
+        // For the SFF module, that is one octet with:
+        // - bit 0 clear -> use LPMode signal (hardware control)
+        // - bit 1 clear -> High-power mode (Note that this would be ignored by
+        // the module, but is how our software is expected to operate.
+        //
+        // For the CMIS modules, that is one octet with:
+        // - bit 6 clear -> ignore LPMode signal (software control)
+        // - bit 6 clear -> use bit 4
+        // - bit 4 set -> force low-power mode.
+        let status_data = serialize_vec(&expected_status);
+        let identifier_data = expected_identifiers
+            .iter()
+            .map(|id| u8::from(*id))
+            .collect::<Vec<_>>();
+        let read_data = vec![
+            // SFF-8636, high-power, hardware control
+            vec![0b00],
+            // CMIS, low-power, software control
+            vec![0b0001_0000],
+        ];
+
+        // Construct the expected responses to each host request.
+        //
+        // - Status
+        // - Identifier read on all modules
+        // - PowerControl read on 2 CMIS module
+        // - PowerControl read on 1 SFF-8636 module
+        //
+        // None of these fail.
+        let responses = vec![
+            (
+                Message::new(MessageBody::SpResponse(SpResponse::Status {
+                    modules,
+                    failed_modules: ModuleId::empty(),
+                })),
+                Some(status_data),
+            ),
+            (
+                Message::new(MessageBody::SpResponse(SpResponse::Read {
+                    modules,
+                    failed_modules: ModuleId::empty(),
+                    read: identifier_read,
+                })),
+                Some(identifier_data),
+            ),
+            (
+                Message::new(MessageBody::SpResponse(SpResponse::Read {
+                    modules: sff_module,
+                    failed_modules: ModuleId::empty(),
+                    read: power_control_reads[0],
+                })),
+                Some(read_data[..1].concat()),
+            ),
+            (
+                Message::new(MessageBody::SpResponse(SpResponse::Read {
+                    modules: cmis_module,
+                    failed_modules: ModuleId::empty(),
+                    read: power_control_reads[1],
+                })),
+                Some(read_data[1..].concat()),
+            ),
+        ];
+
+        let (ded, ded_rx) = oneshot::channel();
+        let sp = MockSp {
+            socket,
+            expected_requests,
+            responses,
+            ded: Some(ded),
+        };
+        let _sp_task = tokio::spawn(sp.run());
+
+        // Spawn a task to run the actual controller request.
+        let task = tokio::spawn(async move { controller.power(modules).await });
+        ded_rx.await.unwrap().expect("MockSp panicked");
+        let response = task.await.unwrap().unwrap();
+        assert_eq!(
+            response,
+            PowerModeResult {
+                modules: modules,
+                data: expected_power_mode,
+                failures: FailedModules::success(),
             }
         );
     }
