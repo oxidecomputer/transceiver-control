@@ -75,6 +75,7 @@ pub use transceiver_decode::Error as DecodeError;
 pub use transceiver_decode::Identifier;
 pub use transceiver_messages::mac::BadMacAddrRange;
 pub use transceiver_messages::mac::MacAddrs;
+use transceiver_messages::message::Header;
 pub use transceiver_messages::message::HwError;
 use transceiver_messages::message::Message;
 use transceiver_messages::message::MessageBody;
@@ -89,8 +90,8 @@ pub use transceiver_messages::ModuleId;
 mod probes {
     fn packet__received(peer: IpAddr, n_bytes: u64, data: *const u8) {}
     fn packet__sent(peer: IpAddr, n_bytes: u64, data: *const u8) {}
-    fn message__received(peer: IpAddr, message: &Message) {}
-    fn message__sent(peer: IpAddr, message: &Message) {}
+    fn message__received(peer: IpAddr, header: &Header, message: &Message) {}
+    fn message__sent(peer: IpAddr, header: &Header, message: &Message) {}
     fn bad__message(peer: IpAddr, reason: &str) {}
 }
 
