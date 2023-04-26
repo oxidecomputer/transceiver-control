@@ -127,7 +127,7 @@ impl IoLoop {
                 });
                 probes::message__sent!(|| {
                     let peer = IpAddr::V6(*self.peer_addr.ip());
-                    (peer, &response.message)
+                    (peer, &response.header, &response.message)
                 });
             }
         }
@@ -209,7 +209,7 @@ impl IoLoop {
                 });
                 probes::message__sent!(|| {
                     let peer = IpAddr::V6(*self.peer_addr.ip());
-                    (peer, &request.request.message)
+                    (peer, &request.request.header, &request.request.message)
                 });
                 self.resend.reset();
             }
@@ -256,7 +256,7 @@ impl IoLoop {
                 });
                 probes::message__sent!(|| {
                     let peer = IpAddr::V6(*self.peer_addr.ip());
-                    (peer, &message)
+                    (peer, &header, &message)
                 });
                 assert_eq!(n_bytes, serialized_len);
             }
@@ -273,7 +273,7 @@ impl IoLoop {
     ) {
         match hubpack::deserialize(rx_buf) {
             Ok((message, _remainder)) => {
-                probes::message__received!(|| (peer.ip(), &message));
+                probes::message__received!(|| (peer.ip(), &header, &message));
                 debug!(
                     self.log,
                     "SP request message received";
@@ -346,7 +346,7 @@ impl IoLoop {
                     return;
                 };
 
-                probes::message__received!(|| (peer.ip(), &message));
+                probes::message__received!(|| (peer.ip(), &header, &message));
                 debug!(
                     self.log,
                     "SP error message received";
@@ -452,7 +452,7 @@ impl IoLoop {
         // error on the outstanding request's response channel.
         let (message, remainder) = match hubpack::deserialize::<Message>(rx_buf) {
             Ok((message, remainder)) => {
-                probes::message__received!(|| (peer.ip(), &message));
+                probes::message__received!(|| (peer.ip(), &header, &message));
                 debug!(
                     self.log,
                     "SP response message received";
