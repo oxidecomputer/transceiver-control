@@ -227,8 +227,26 @@ pub enum PowerState {
     High,
 }
 
+impl core::fmt::Display for PowerState {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        write!(
+            f,
+            "{}",
+            match self {
+                PowerState::Off => "off",
+                PowerState::Low => "low",
+                PowerState::High => "high",
+            }
+        )
+    }
+}
+
 /// The power mode of a module.
 #[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(
+    any(feature = "api-traits", test),
+    derive(serde::Serialize, serde::Deserialize, schemars::JsonSchema)
+)]
 pub struct PowerMode {
     /// The actual power state.
     pub state: PowerState,

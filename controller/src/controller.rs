@@ -15,6 +15,7 @@ use crate::PowerMode;
 use crate::PowerState;
 use crate::TransceiverError;
 use crate::NUM_OUTSTANDING_REQUESTS;
+use itertools::Itertools;
 use nix::net::if_::if_nametoindex;
 use slog::debug;
 use slog::warn;
@@ -59,6 +60,7 @@ use transceiver_messages::mgmt::Page;
 use transceiver_messages::remove_module_data;
 pub use transceiver_messages::InvalidPort;
 pub use transceiver_messages::ModuleId;
+use transceiver_messages::MAX_PAYLOAD_SIZE;
 
 // Durations related to reset, as mandated by SFF-8679, table 8-1.
 const T_RESET: Duration = Duration::from_secs(2);
@@ -976,6 +978,9 @@ impl Controller {
     /// the read are valid, such as that the modules conform to the specified
     /// management interface, and that the page is supported.
     pub async fn read(&self, modules: ModuleId, read: MemoryRead) -> Result<ReadResult, Error> {
+        if modules.selected_transceiver_count() == 0 || read.len() == 0 {
+            return Ok(ReadResult::success(modules, vec![]).unwrap());
+        }
         let result = self.identifier(modules).await?;
         verify_ids_for_page(read.page(), &result.modules, result.identifiers())?;
         let read_result = self.read_impl(result.modules, read).await?;
@@ -989,6 +994,35 @@ impl Controller {
     // Implementation of the read function, which does not check that the memory
     // pages addressed by `read` are valid for the addressed modules.
     async fn read_impl(&self, modules: ModuleId, read: MemoryRead) -> Result<ReadResult, Error> {
+        // It's possible for consumers to request more data than will fit in a
+        // single protocol message. We'll split that up here, rather than
+        // requiring the consumer to worry about it.
+        let mut split_modules = split_large_reads(&modules, &read).into_iter();
+        // Self::read() must guarantee that we have at least one module and so
+        // at least one read.
+        let Some(first_modules) = split_modules.next() else {
+            panic!("Split into zero modules? modules {modules:?}, read {read:?}");
+        };
+        let mut response = self.read_impl_one_message(first_modules, read).await?;
+        for next_modules in split_modules {
+            let next_response = self.read_impl_one_message(next_modules, read).await?;
+            response = response.merge(&next_response).unwrap();
+        }
+        Ok(response)
+    }
+
+    // The core implementation of the read method, which requires that all data
+    // fits within a single protocol message.
+    //
+    // # Panics
+    //
+    // This will panic if the read does not fit in one message.
+    async fn read_impl_one_message(
+        &self,
+        modules: ModuleId,
+        read: MemoryRead,
+    ) -> Result<ReadResult, Error> {
+        assert!(fits_in_one_message(&modules, &read));
         let request = HostRpcRequest {
             header: self.next_header(MessageKind::HostRequest),
             message: Message::from(HostRequest::Read { modules, read }),
@@ -1185,6 +1219,30 @@ impl Controller {
     }
 }
 
+// Split a read which may be too large to fit in one protocol message into an
+// iterator over modules. Each item contains at least one module, and few enough
+// the the issued read is guaranteed to fit in a single response message.
+//
+// Note that this just splits the _modules_ into groups, it never modifies the
+// `read` argument. The `MemoryRead` type ensures that the read is always able
+// to fit in a single message by construction.
+fn split_large_reads<'a>(modules: &'a ModuleId, read: &'a MemoryRead) -> Vec<ModuleId> {
+    let n_modules_per_request = MAX_PAYLOAD_SIZE / usize::from(read.len());
+    modules
+        .to_indices()
+        .chunks(n_modules_per_request)
+        .into_iter()
+        .map(|chunk| ModuleId::from_index_iter(chunk).unwrap())
+        .collect()
+}
+
+// Return `true` if the provided read information will fit in one protocol
+// message.
+fn fits_in_one_message(modules: &ModuleId, read: &MemoryRead) -> bool {
+    let n_bytes = modules.selected_transceiver_count() * usize::from(read.len());
+    n_bytes <= MAX_PAYLOAD_SIZE
+}
+
 fn verify_ids_for_page(
     page: &Page,
     modules: &ModuleId,
@@ -1225,6 +1283,8 @@ fn verify_ids_for_page(
 
 #[cfg(test)]
 mod tests {
+    use super::fits_in_one_message;
+    use super::split_large_reads;
     use super::verify_ids_for_page;
     use super::Identifier;
     use super::ModuleId;
@@ -1269,6 +1329,7 @@ mod tests {
     use transceiver_messages::mgmt::sff8636;
     use transceiver_messages::mgmt::MemoryRead;
     use transceiver_messages::MAX_PACKET_SIZE;
+    use transceiver_messages::MAX_PAYLOAD_SIZE;
 
     #[test]
     fn test_verify_ids_for_page() {
@@ -2689,5 +2750,57 @@ mod tests {
                 failures: FailedModules::success(),
             }
         );
+    }
+
+    #[test]
+    fn test_fits_in_one_message() {
+        let modules = ModuleId::single(0).unwrap();
+        let read = MemoryRead::new(sff8636::Page::Lower, 0, 128).unwrap();
+        assert!(fits_in_one_message(&modules, &read));
+        let modules = ModuleId::all();
+        assert!(!fits_in_one_message(&modules, &read));
+    }
+
+    #[test]
+    fn test_split_large_reads() {
+        let modules = ModuleId::single(0).unwrap();
+        let read = MemoryRead::new(sff8636::Page::Lower, 0, 128).unwrap();
+        let new_modules = split_large_reads(&modules, &read);
+        assert_eq!(new_modules, vec![modules]);
+
+        let one_too_many = u8::try_from(MAX_PAYLOAD_SIZE / 128 + 1).unwrap();
+        let modules = ModuleId::from_index_iter(0..one_too_many).unwrap();
+        let new_modules = split_large_reads(&modules, &read);
+        assert_eq!(new_modules.len(), 2);
+        assert_eq!(new_modules[0].merge(&new_modules[1]), modules);
+        assert_eq!(new_modules[0], modules.remove(&new_modules[1]));
+        assert_eq!(new_modules[1], modules.remove(&new_modules[0]));
+        assert_eq!(
+            modules.selected_transceiver_count(),
+            new_modules
+                .iter()
+                .map(ModuleId::selected_transceiver_count)
+                .sum::<usize>(),
+        );
+
+        let exactly_two = u8::try_from(2 * MAX_PAYLOAD_SIZE / 128).unwrap();
+        let modules = ModuleId::from_index_iter(0..exactly_two).unwrap();
+        let new_modules = split_large_reads(&modules, &read);
+        assert_eq!(new_modules.len(), 2);
+        assert_eq!(
+            new_modules[0].selected_transceiver_count(),
+            new_modules[1].selected_transceiver_count()
+        );
+        assert_eq!(new_modules[0].merge(&new_modules[1]), modules);
+        assert_eq!(new_modules[0], modules.remove(&new_modules[1]));
+        assert_eq!(new_modules[1], modules.remove(&new_modules[0]));
+        assert_eq!(
+            modules.selected_transceiver_count(),
+            new_modules
+                .iter()
+                .map(ModuleId::selected_transceiver_count)
+                .sum::<usize>(),
+        );
+        assert_eq!(new_modules.len(), 2);
     }
 }
