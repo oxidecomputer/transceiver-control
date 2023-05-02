@@ -279,13 +279,11 @@ impl<P: Clone> ModuleResult<P> {
         }
 
         // Remove any successes we currently have that are in the new failures.
-        let (remaining_successes, remaining_data) =
-            remove_module_data(self.modules, self.data.iter(), other.failures.modules);
+        let (remaining_successes, remaining_data) = self.without_failures_from(other);
 
         // Remove any new successes that are currently in our set of failures.
         // This is to make sure any failures in `self` are sticky.
-        let (new_modules, new_data) =
-            remove_module_data(other.modules, other.data.iter(), self.failures.modules);
+        let (new_modules, new_data) = other.without_failures_from(self);
 
         // Merge the new successes and failures in with our own.
         let (modules, data) = merge_module_data(
@@ -301,6 +299,12 @@ impl<P: Clone> ModuleResult<P> {
             data,
             failures,
         })
+    }
+
+    // Return the data from self with the failures from `other` removed.
+    #[must_use]
+    fn without_failures_from(&self, other: &Self) -> (ModuleId, Vec<P>) {
+        remove_module_data(self.modules, self.data.iter(), other.failures.modules)
     }
 }
 
