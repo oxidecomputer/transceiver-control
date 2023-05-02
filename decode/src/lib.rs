@@ -226,13 +226,8 @@ impl core::fmt::Display for Identifier {
     any(feature = "api-traits", test),
     derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema, PartialEq)
 )]
-#[cfg_attr(
-    any(feature = "api-traits", test),
-    serde(try_from = "String", into = "String")
-)]
 pub struct Oui(pub [u8; 3]);
 
-#[cfg(any(feature = "api-traits", test))]
 impl std::str::FromStr for Oui {
     type Err = Error;
 
@@ -258,7 +253,6 @@ impl std::str::FromStr for Oui {
     }
 }
 
-#[cfg(any(feature = "api-traits", test))]
 impl std::convert::TryFrom<String> for Oui {
     type Error = <Self as std::str::FromStr>::Err;
 
@@ -267,7 +261,6 @@ impl std::convert::TryFrom<String> for Oui {
     }
 }
 
-#[cfg(any(feature = "api-traits", test))]
 impl From<Oui> for String {
     fn from(o: Oui) -> String {
         format!("{o}")
@@ -968,7 +961,7 @@ mod tests {
             },
         };
         let expected = "{\"identifier\":\"qsfp_plus_sff8636\",\"vendor\":\
-            {\"name\":\"foo\",\"oui\":\"a8-40-25\",\"part\":\"bar\",\
+            {\"name\":\"foo\",\"oui\":[168,64,37],\"part\":\"bar\",\
             \"revision\":\"ab\",\"serial\":\"some sn\",\"date\":\"220202ab\"}}";
         assert_eq!(serde_json::to_string(&v).unwrap(), expected);
         assert_eq!(v, serde_json::from_str(expected).unwrap());

@@ -31,6 +31,7 @@ use transceiver_decode::PowerControl;
 use transceiver_decode::VendorInfo;
 use transceiver_messages::merge_module_data;
 use transceiver_messages::message::Status;
+use transceiver_messages::remove_module_data;
 use transceiver_messages::ModuleId;
 
 /// Information about modules we failed to access.
@@ -130,11 +131,11 @@ impl VendorInfoResult {
 
 /// The result of reading the power-control information for a set of
 /// transceivers.
-pub type PowerControlResult = ModuleResult<PowerControl>;
+pub(crate) type PowerControlResult = ModuleResult<PowerControl>;
 
 impl PowerControlResult {
     /// Return the power control information read from the modules.
-    pub fn power_control(&self) -> &[PowerControl] {
+    pub(crate) fn power_control(&self) -> &[PowerControl] {
         &self.data
     }
 }
@@ -247,6 +248,66 @@ impl<P> ModuleResult<P> {
     }
 }
 
+impl<P: Clone> ModuleResult<P> {
+    /// Merge the successful and error data from one result into `self`.
+    ///
+    /// This will take all the successful module IDs and data, and merge them
+    /// into `self`'s success. Any failures in `other` will be merged into
+    /// `self.failures`.
+    ///
+    /// This returns `None` if any of the following occur:
+    ///
+    /// - `other.modules` and `self.modules` overlap. In this case, it is not
+    /// possible to build a consistent result, since we have two values for the
+    /// successful data.
+    /// - `other.failures` and `self.failures` overlap, for the same reason.
+    ///
+    /// Note that if a module exists in `other.failures.modules` and
+    /// `self.modules`, then it is _removed_ from `self.modules` and added to
+    /// the failures. The converse is _not_ true: if a module exists in
+    /// `self.failures.modules` and `other.modules` it is _not_ removed. That
+    /// is, failures are "sticky" in `self`.
+    pub fn merge(&self, other: &Self) -> Option<Self> {
+        // The intersection of the successful module IDs should be empty.
+        if !(self.modules & other.modules).is_empty() {
+            return None;
+        }
+
+        // Same for the failed module IDs.
+        if !(self.failures.modules & other.failures.modules).is_empty() {
+            return None;
+        }
+
+        // Remove any successes we currently have that are in the new failures.
+        let (remaining_successes, remaining_data) = self.without_failures_from(other);
+
+        // Remove any new successes that are currently in our set of failures.
+        // This is to make sure any failures in `self` are sticky.
+        let (new_modules, new_data) = other.without_failures_from(self);
+
+        // Merge the new successes and failures in with our own.
+        let (modules, data) = merge_module_data(
+            remaining_successes,
+            remaining_data.iter(),
+            new_modules,
+            new_data.iter(),
+        );
+        let failures = self.failures.merge(&other.failures);
+
+        Some(Self {
+            modules,
+            data,
+            failures,
+        })
+    }
+
+    // Return the data from self with the failures from `other` removed.
+    #[must_use]
+    fn without_failures_from(&self, other: &Self) -> (ModuleId, Vec<P>) {
+        remove_module_data(self.modules, self.data.iter(), other.failures.modules)
+    }
+}
+
 impl<P> PartialEq for ModuleResult<P>
 where
     P: PartialEq,
@@ -259,5 +320,121 @@ where
             return false;
         }
         self.failures == other.failures
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FailedModules;
+    use super::ModuleId;
+    use super::ModuleResult;
+    use super::TransceiverError;
+    use transceiver_messages::InvalidPort;
+
+    // Test when there is overlap between the success / failure module IDs.
+    #[test]
+    fn test_merge_module_result_overlap() {
+        let a = ModuleResult {
+            modules: ModuleId(0b01),
+            data: vec![0u8],
+            failures: FailedModules::success(),
+        };
+        assert!(a.merge(&a).is_none());
+
+        let failures = FailedModules {
+            modules: ModuleId(0b01),
+            errors: vec![TransceiverError::Port(InvalidPort(100))],
+        };
+        let a = ModuleResult {
+            modules: ModuleId(0b01),
+            data: vec![0u8],
+            failures: failures.clone(),
+        };
+        let b = ModuleResult {
+            modules: ModuleId(0b10),
+            data: vec![0u8],
+            failures,
+        };
+        assert!(a.merge(&b).is_none());
+    }
+
+    // The happy path, when there is no overlap at all between success IDs or
+    // failure IDs.
+    #[test]
+    fn test_merge_module_result_no_overlap() {
+        let failures = FailedModules {
+            modules: ModuleId(0b001),
+            errors: vec![TransceiverError::Port(InvalidPort(100))],
+        };
+        let a = ModuleResult {
+            modules: ModuleId(0b010),
+            data: vec![0u8],
+            failures,
+        };
+        let b = ModuleResult {
+            modules: ModuleId(0b100),
+            data: vec![1u8],
+            failures: FailedModules::success(),
+        };
+        let c = a.merge(&b).unwrap();
+        assert_eq!(c.modules, ModuleId(0b110));
+        assert_eq!(c.failures.modules, ModuleId(0b001));
+        assert_eq!(c.data, vec![0, 1]);
+        assert_eq!(
+            c.failures.errors,
+            vec![TransceiverError::Port(InvalidPort(100))],
+        );
+    }
+
+    // Test that we remove the module ID from the first success if the merged-in
+    // data indicates it's a failure.
+    #[test]
+    fn test_merge_module_result_new_failure() {
+        // Just one success, no failures.
+        let a = ModuleResult {
+            modules: ModuleId(0b010),
+            data: vec![0u8],
+            failures: FailedModules::success(),
+        };
+
+        // Merge in data with one success, and one failure that removes the
+        // above success.
+        let failures = FailedModules {
+            modules: ModuleId(0b010),
+            errors: vec![TransceiverError::Port(InvalidPort(100))],
+        };
+        let b = ModuleResult {
+            modules: ModuleId(0b100),
+            data: vec![1u8],
+            failures,
+        };
+        let c = a.merge(&b).unwrap();
+        assert_eq!(c, b);
+    }
+
+    // Test that a new success does _not_ undo an earlier failure.
+    #[test]
+    fn test_merge_module_result_old_failure_is_sticky() {
+        // Just one success, one failure.
+        let failures = FailedModules {
+            modules: ModuleId(0b01),
+            errors: vec![TransceiverError::Port(InvalidPort(100))],
+        };
+        let a = ModuleResult {
+            modules: ModuleId(0b010),
+            data: vec![0u8],
+            failures: failures.clone(),
+        };
+
+        // Merge in data with one success, at the previously failed module.
+        let b = ModuleResult {
+            modules: failures.modules,
+            data: vec![1u8],
+            failures: FailedModules::success(),
+        };
+
+        // Check that we still have the failure, and don't have the success.
+        let c = a.merge(&b).unwrap();
+        assert_eq!(c, a);
     }
 }

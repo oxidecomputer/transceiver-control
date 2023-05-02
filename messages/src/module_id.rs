@@ -6,6 +6,11 @@
 
 //! Types used to address individual transceivers on a Sidecar.
 
+use core::ops::BitAnd;
+use core::ops::BitAndAssign;
+use core::ops::BitOr;
+use core::ops::BitOrAssign;
+use core::ops::Not;
 use hubpack::SerializedSize;
 use serde::Deserialize;
 use serde::Serialize;
@@ -150,6 +155,70 @@ impl ModuleId {
     /// modules.
     pub const fn contains(&self, ix: u8) -> bool {
         (self.0 & (1 << ix)) != 0
+    }
+}
+
+impl BitAnd for ModuleId {
+    type Output = Self;
+
+    fn bitand(self, rhs: Self) -> Self::Output {
+        Self(self.0 & rhs.0)
+    }
+}
+
+impl BitAnd<MaskType> for ModuleId {
+    type Output = Self;
+
+    fn bitand(self, rhs: MaskType) -> Self::Output {
+        Self(self.0 & rhs)
+    }
+}
+
+impl BitAndAssign for ModuleId {
+    fn bitand_assign(&mut self, rhs: Self) {
+        self.0 &= rhs.0;
+    }
+}
+
+impl BitAndAssign<MaskType> for ModuleId {
+    fn bitand_assign(&mut self, rhs: MaskType) {
+        self.0 &= rhs;
+    }
+}
+
+impl BitOr for ModuleId {
+    type Output = Self;
+
+    fn bitor(self, rhs: Self) -> Self::Output {
+        Self(self.0 | rhs.0)
+    }
+}
+
+impl BitOr<MaskType> for ModuleId {
+    type Output = Self;
+
+    fn bitor(self, rhs: MaskType) -> Self::Output {
+        Self(self.0 | rhs)
+    }
+}
+
+impl BitOrAssign for ModuleId {
+    fn bitor_assign(&mut self, rhs: Self) {
+        self.0 |= rhs.0;
+    }
+}
+
+impl BitOrAssign<MaskType> for ModuleId {
+    fn bitor_assign(&mut self, rhs: MaskType) {
+        self.0 |= rhs;
+    }
+}
+
+impl Not for ModuleId {
+    type Output = Self;
+
+    fn not(self) -> Self::Output {
+        Self(!self.0)
     }
 }
 
@@ -393,5 +462,26 @@ mod tests {
         let (new_modules, new_data) = filter_module_data(modules, data.iter(), f);
         assert_eq!(new_modules, ModuleId(0b010));
         assert_eq!(new_data, vec![1]);
+    }
+
+    #[test]
+    fn test_bit_ops() {
+        let a = ModuleId(0b101);
+        let b = ModuleId(0b010);
+
+        assert_eq!(a | b, ModuleId(0b111));
+        assert_eq!(a & b, ModuleId(0b000));
+        assert_eq!(!a, ModuleId(!a.0));
+
+        let mut c = a;
+        c &= b;
+        assert!(c.is_empty());
+
+        let mut c = a;
+        c |= b;
+        assert_eq!(c, ModuleId(0b111));
+
+        assert_eq!(a & 0b010_u64, ModuleId::empty());
+        assert_eq!(a | 0b010_u64, ModuleId(0b111));
     }
 }
