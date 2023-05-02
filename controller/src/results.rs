@@ -269,12 +269,12 @@ impl<P: Clone> ModuleResult<P> {
     /// is, failures are "sticky" in `self`.
     pub fn merge(&self, other: &Self) -> Option<Self> {
         // The intersection of the successful module IDs should be empty.
-        if (self.modules.0 & other.modules.0) != 0 {
+        if !(self.modules & other.modules).is_empty() {
             return None;
         }
 
         // Same for the failed module IDs.
-        if (self.failures.modules.0 & other.failures.modules.0) != 0 {
+        if !(self.failures.modules & other.failures.modules).is_empty() {
             return None;
         }
 
