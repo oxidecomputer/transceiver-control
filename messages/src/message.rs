@@ -52,7 +52,8 @@ use serde::Serializer;
 pub mod version {
     pub mod inner {
         pub const V1: u8 = 1;
-        pub const CURRENT: u8 = V1;
+        pub const V2: u8 = 2;
+        pub const CURRENT: u8 = V2;
         pub const MIN: u8 = V1;
     }
     pub mod outer {
@@ -367,6 +368,17 @@ pub enum HostRequest {
     /// re-enable as long as the fault is latched. Clearing the fault allows the
     /// power supply to be enabled again.
     ClearPowerFault(ModuleId),
+
+    /// Get the current state of the modules' attention LEDs.
+    LedState(ModuleId),
+
+    /// Set the state of the modules' attention LEDs.
+    SetLedState {
+        /// The modules whose state should be set.
+        modules: ModuleId,
+        /// The state to set each module's LED to.
+        state: LedState,
+    },
 }
 
 impl HostRequest {
@@ -453,6 +465,18 @@ pub enum SpResponse {
 
     /// The requested MAC address information for the host.
     MacAddrs(MacAddrResponse),
+
+    /// The response contains the LED state for the addressed modules.
+    ///
+    /// The trailing data of the message contains a list of [`LedState`]s,
+    /// ordered by the indices in the requested modules. Any errors are
+    /// serialized following the successful states.
+    LedState {
+        /// The module whose led state was successfully read.
+        modules: ModuleId,
+        /// The modules on which fetching the LED state failed.
+        failed_modules: ModuleId,
+    },
 }
 
 impl SpResponse {
@@ -470,6 +494,9 @@ impl SpResponse {
                 // So using `size_of` is appropriate here.
                 Some(modules.selected_transceiver_count() * core::mem::size_of::<Status>())
             }
+            SpResponse::LedState { modules, .. } => {
+                Some(modules.selected_transceiver_count() * LedState::MAX_SIZE)
+            }
             _ => None,
         }
     }
@@ -482,7 +509,8 @@ impl SpResponse {
             SpResponse::Read { failed_modules, .. }
             | SpResponse::Write { failed_modules, .. }
             | SpResponse::Status { failed_modules, .. }
-            | SpResponse::Ack { failed_modules, .. } => {
+            | SpResponse::Ack { failed_modules, .. }
+            | SpResponse::LedState { failed_modules, .. } => {
                 Some(failed_modules.selected_transceiver_count() * HwError::MAX_SIZE)
             }
             _ => None,
@@ -651,6 +679,40 @@ impl SerializedSize for Status {
     const MAX_SIZE: usize = core::mem::size_of::<Status>();
 }
 
+/// The state of a module's attention LED, on the Sidecar front IO panel.
+#[derive(
+    Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, SerializedSize,
+)]
+#[cfg_attr(any(test, feature = "api-traits"), derive(schemars::JsonSchema))]
+#[cfg_attr(any(test, feature = "api-traits"), serde(rename_all = "snake_case"))]
+#[cfg_attr(any(test, feature = "std"), derive(clap::ValueEnum))]
+pub enum LedState {
+    /// The LED is off.
+    ///
+    /// This indicates that the port is disabled or not working at all.
+    Off,
+    /// The LED is solid on.
+    ///
+    /// This indicates that the port is working as expected and enabled.
+    On,
+    /// The LED is blinking.
+    ///
+    /// This is used to draw attention to the port, such as to indicate a fault
+    /// or to locate a port for servicing.
+    Blink,
+}
+
+impl fmt::Display for LedState {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let s = match self {
+            LedState::Off => "off",
+            LedState::On => "on",
+            LedState::Blink => "blink",
+        };
+        s.fmt(f)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use crate::check_invalid_variants;
@@ -661,6 +723,7 @@ mod test {
     use crate::message::Header;
     use crate::message::HostRequest;
     use crate::message::HwError;
+    use crate::message::LedState;
     use crate::message::MacAddrResponse;
     use crate::message::Message;
     use crate::message::MessageBody;
@@ -669,11 +732,29 @@ mod test {
     use crate::message::SpResponse;
     use crate::message::Status;
     use crate::mgmt::sff8636;
+    use crate::mgmt::ManagementInterface;
     use crate::mgmt::MemoryRead;
     use crate::mgmt::MemoryWrite;
     use crate::ModuleId;
     use core::mem::size_of;
     use hubpack::SerializedSize;
+
+    #[test]
+    fn test_deserialize_led_state() {
+        assert_eq!(LedState::Off, serde_json::from_str("\"off\"").unwrap());
+        assert_eq!(LedState::On, serde_json::from_str("\"on\"").unwrap());
+        assert_eq!(LedState::Blink, serde_json::from_str("\"blink\"").unwrap());
+    }
+
+    #[test]
+    fn test_serialize_led_state() {
+        assert_eq!(serde_json::to_string(&LedState::Off).unwrap(), "\"off\"");
+        assert_eq!(serde_json::to_string(&LedState::On).unwrap(), "\"on\"");
+        assert_eq!(
+            serde_json::to_string(&LedState::Blink).unwrap(),
+            "\"blink\""
+        );
+    }
 
     // Tests that the current version has not broken serialization.
     //
@@ -861,7 +942,7 @@ mod test {
         // constructors.
         let modules = ModuleId::empty();
         let failed_modules = ModuleId::empty();
-        let test_data: [SpResponse; 5] = [
+        let test_data: [SpResponse; 6] = [
             SpResponse::Read {
                 modules,
                 failed_modules,
@@ -881,6 +962,10 @@ mod test {
                 failed_modules,
             },
             SpResponse::MacAddrs(MacAddrResponse::Ok(MacAddrs::new([0; 6], 1, 1).unwrap())),
+            SpResponse::LedState {
+                modules,
+                failed_modules,
+            },
         ];
 
         for (variant_id, variant) in test_data.iter().enumerate() {
@@ -931,6 +1016,8 @@ mod test {
                 reworked to avoid reordering or removing variants."
             );
         }
+
+        check_invalid_variants::<SpResponse>(u8::try_from(test_data.len()).unwrap());
     }
 
     #[test]
@@ -1072,5 +1159,79 @@ mod test {
         assert_eq!(n_bytes, size_of::<u8>());
         assert_eq!(bytes, &[st.bits()]);
         assert_eq!(st, hubpack::deserialize(&bytes).unwrap().0);
+    }
+
+    #[test]
+    fn test_host_request_encoding_unchanged() {
+        let mut buf = [0u8; HostRequest::MAX_SIZE];
+
+        // This is not const because `Memory{Read,Write}` don't have const
+        // constructors.
+        let modules = ModuleId::empty();
+        let test_data: [HostRequest; 14] = [
+            HostRequest::Read {
+                modules,
+                read: MemoryRead::new(sff8636::Page::Lower, 0, 1).unwrap(),
+            },
+            HostRequest::Write {
+                modules,
+                write: MemoryWrite::new(sff8636::Page::Lower, 0, 1).unwrap(),
+            },
+            HostRequest::Status(modules),
+            HostRequest::AssertReset(modules),
+            HostRequest::DeassertReset(modules),
+            HostRequest::AssertLpMode(modules),
+            HostRequest::DeassertLpMode(modules),
+            HostRequest::EnablePower(modules),
+            HostRequest::DisablePower(modules),
+            HostRequest::ManagementInterface {
+                modules,
+                interface: ManagementInterface::Sff8636,
+            },
+            HostRequest::MacAddrs,
+            HostRequest::ClearPowerFault(modules),
+            HostRequest::LedState(modules),
+            HostRequest::SetLedState {
+                modules,
+                state: LedState::Off,
+            },
+        ];
+
+        for (variant_id, variant) in test_data.iter().enumerate() {
+            buf.fill(0);
+            buf[0] = u8::try_from(variant_id).unwrap();
+
+            // Touch up the deserialization test buffer for the
+            // `Memory{Read,Write}` messages.
+            //
+            // This position is computed from:
+            //
+            // - 1 octet for the HostRequest variant ID
+            // - 8 octets for the module ID
+            // - 1 octet for the MemoryRead's Page variant ID
+            // - 1 octet for the inner sff8636::Page variant ID
+            // - 1 octet for the offset
+            const LEN_POS: usize = 12;
+            match variant {
+                HostRequest::Read { read, .. } => {
+                    buf[LEN_POS] = read.len();
+                }
+                HostRequest::Write { write, .. } => {
+                    buf[LEN_POS] = write.len();
+                }
+                _ => {}
+            }
+
+            let (decoded, _rest) = hubpack::deserialize::<HostRequest>(buf.as_slice()).unwrap();
+            assert_eq!(
+                variant, &decoded,
+                "Serialization encoding changed! Either `version::CURRENT` \
+                or `version::MIN` will need to be updated, \
+                or the changes to `crate::HostRequest` need to be \
+                reworked to avoid reordering or removing variants."
+            );
+        }
+
+        check_invalid_variants::<HostRequest>(u8::try_from(test_data.len()).unwrap());
     }
 }

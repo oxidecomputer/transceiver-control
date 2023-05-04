@@ -30,6 +30,7 @@ use transceiver_decode::MemoryModel;
 use transceiver_decode::PowerControl;
 use transceiver_decode::VendorInfo;
 use transceiver_messages::merge_module_data;
+use transceiver_messages::message::LedState;
 use transceiver_messages::message::Status;
 use transceiver_messages::remove_module_data;
 use transceiver_messages::ModuleId;
@@ -182,6 +183,9 @@ impl PowerModeResult {
         &self.data
     }
 }
+
+/// The result of reading the LED state of a set of transceivers.
+pub type LedStateResult = ModuleResult<LedState>;
 
 /// A generic type for accessing module-specific data and failures.
 ///

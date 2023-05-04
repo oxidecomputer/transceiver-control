@@ -15,6 +15,7 @@ use crate::PowerMode;
 use crate::PowerState;
 use crate::TransceiverError;
 use crate::NUM_OUTSTANDING_REQUESTS;
+use hubpack::SerializedSize;
 use itertools::Itertools;
 use nix::net::if_::if_nametoindex;
 use slog::debug;
@@ -44,6 +45,7 @@ use transceiver_messages::message;
 use transceiver_messages::message::Header;
 use transceiver_messages::message::HostRequest;
 pub use transceiver_messages::message::HwError;
+pub use transceiver_messages::message::LedState;
 use transceiver_messages::message::MacAddrResponse;
 use transceiver_messages::message::Message;
 use transceiver_messages::message::MessageBody;
@@ -204,6 +206,45 @@ impl Controller {
                 .unwrap();
         }
         out
+    }
+
+    /// Return the LED state of a set of modules.
+    pub async fn leds(&self, modules: ModuleId) -> Result<LedStateResult, Error> {
+        let message = Message::from(HostRequest::LedState(modules));
+        let request = HostRpcRequest {
+            header: self.next_header(MessageKind::HostRequest),
+            message,
+            data: None,
+        };
+        let response = self.rpc(request).await?;
+        match response.message.body {
+            MessageBody::SpResponse(
+                st @ SpResponse::LedState {
+                    modules,
+                    failed_modules,
+                },
+            ) => {
+                let data = response.data.expect("Existence of data checked earlier");
+                let (data, error_data) = data.split_at(st.expected_data_len().unwrap());
+                let state = data
+                    .chunks(LedState::MAX_SIZE)
+                    .map(|chunk| hubpack::deserialize(chunk).unwrap().0)
+                    .collect();
+                let failures = Self::deserialize_hw_errors(failed_modules, error_data)?;
+                Ok(LedStateResult {
+                    modules,
+                    data: state,
+                    failures,
+                })
+            }
+            other => Err(Error::UnexpectedMessage(other)),
+        }
+    }
+
+    /// Set the LED state of a set of modules.
+    pub async fn set_leds(&self, modules: ModuleId, state: LedState) -> Result<AckResult, Error> {
+        self.no_payload_request(HostRequest::SetLedState { modules, state })
+            .await
     }
 
     /// Return the MAC addresses allotted to a system by its FRUID data.
