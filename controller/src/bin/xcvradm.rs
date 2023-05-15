@@ -27,12 +27,17 @@ use transceiver_controller::FailedModules;
 use transceiver_controller::IdentifierResult;
 use transceiver_controller::LedStateResult;
 use transceiver_controller::MemoryModelResult;
+use transceiver_controller::MonitorResult;
 use transceiver_controller::PowerModeResult;
 use transceiver_controller::PowerState;
 use transceiver_controller::ReadResult;
 use transceiver_controller::SpRequest;
 use transceiver_controller::StatusResult;
 use transceiver_controller::VendorInfoResult;
+use transceiver_decode::Aux1Monitor;
+use transceiver_decode::Aux2Monitor;
+use transceiver_decode::Aux3Monitor;
+use transceiver_decode::ReceiverPower;
 use transceiver_decode::VendorInfo;
 use transceiver_messages::filter_module_data;
 use transceiver_messages::mac::MacAddrs;
@@ -474,6 +479,23 @@ enum Cmd {
         /// The state to which to set the LEDs.
         state: LedState,
     },
+
+    /// Return the core transceiver monitoring data a set of modules.
+    ///
+    /// For each module this prints:
+    ///
+    /// - Temperature (C)
+    /// - Supply voltage
+    /// - Average receiver power (mW)
+    /// - Transmitter bias (mA) and power (mW)
+    /// - One of several auxiliary monitors.
+    ///
+    /// Note that if the data is not supported by the module, `--` is printed.
+    /// Unfortunately, modules are not required to advertise whether they
+    /// support receiver power measurements, so that is always printed. Values
+    /// near zero should be treated with caution, and the datasheet should be
+    /// consulted for details.
+    Monitors,
 }
 
 fn load_write_data(file: Option<PathBuf>, kind: InputKind) -> anyhow::Result<Vec<u8>> {
@@ -883,6 +905,16 @@ async fn main() -> anyhow::Result<()> {
                 print_failures(&ack_result.failures);
             }
         }
+        Cmd::Monitors => {
+            let monitor_result = controller
+                .monitors(modules)
+                .await
+                .context("Failed to get monitoring data")?;
+            print_monitors(&monitor_result);
+            if !args.ignore_errors {
+                print_failures(&monitor_result.failures);
+            }
+        }
     }
     Ok(())
 }
@@ -1147,6 +1179,120 @@ fn print_led_state(result: &LedStateResult) {
     println!("Port LED");
     for (port, state) in result.iter() {
         println!("{port:>WIDTH$} {state:?}");
+    }
+}
+
+// Helper to join a list of Display items with `,`.
+fn display_list<T: std::fmt::Display>(items: impl Iterator<Item = T>) -> String {
+    items
+        .map(|i| format!("{i:0.4}"))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn print_monitors(monitor_result: &MonitorResult) {
+    const NAME_WIDTH: usize = 22;
+    let unsupported = String::from("--");
+    let mut need_newline = false;
+    for (port, monitor) in monitor_result.iter() {
+        if need_newline {
+            println!("");
+        }
+
+        // Start by printing the module address.
+        println!("Port {port}");
+
+        // Print module temperature, if supported.
+        print!("  {}: ", format!("{:>NAME_WIDTH$}", "Temperature (C)"));
+        if let Some(temp) = monitor.temperature {
+            println!("{temp}");
+        } else {
+            println!("{unsupported}");
+        }
+
+        // Print supply voltage, if supported.
+        print!("  {}: ", format!("{:>NAME_WIDTH$}", "Supply voltage (V)"));
+        if let Some(volt) = monitor.supply_voltage {
+            println!("{volt}");
+        } else {
+            println!("{unsupported}");
+        }
+
+        // Print the receiver power per-lane.
+        //
+        // Rx power is measured in one of two ways, either an average or
+        // peak-to-peak measurement. Print that in the field name, followed by
+        // the per-lane values themselves.
+        if let Some(rx_pow) = &monitor.receiver_power {
+            let name = if matches!(rx_pow[0], ReceiverPower::Average(_)) {
+                "Avg Rx power (mW)"
+            } else {
+                "P-P Rx power (mW)"
+            };
+            let values = rx_pow.iter().map(|x| x.value());
+            println!("  {:>NAME_WIDTH$}: [{}]", name, display_list(values),);
+        } else {
+            print!("  {}: ", format!("{:>NAME_WIDTH$}", "Rx power (mW)"));
+            println!("{unsupported}");
+        }
+
+        // Print the Tx bias current.
+        print!("  {}: ", format!("{:>NAME_WIDTH$}", "Tx bias (mA)"));
+        if let Some(tx_bias) = &monitor.transmitter_bias_current {
+            println!("[{}]", display_list(tx_bias.iter()));
+        } else {
+            println!("{unsupported}");
+        }
+
+        // Print the Tx output power.
+        print!("  {}: ", format!("{:>NAME_WIDTH$}", "Tx power (mW)"));
+        if let Some(tx_pow) = &monitor.transmitter_power {
+            println!("[{}]", display_list(tx_pow.iter()));
+        } else {
+            println!("{unsupported}");
+        }
+
+        // Print each auxiliary monitor.
+        //
+        // The requires that we print the "observable", the thing being measured
+        // as well. Each line is formatted like:
+        //
+        // Aux N, <observable> (<units>): <value>
+        if let Some(Some(aux1)) = monitor.aux_monitors.map(|aux| aux.aux1) {
+            let (name, value) = match aux1 {
+                Aux1Monitor::TecCurrent(c) => ("Aux 1, TEC current (mA)", format!("{c}")),
+                Aux1Monitor::Custom(c) => {
+                    ("Aux 1, Custom", format!("[0x{:02x},0x{:02x}]", c[0], c[1]))
+                }
+            };
+            println!("  {name:>NAME_WIDTH$}: {value}");
+        } else {
+            println!("  {:>NAME_WIDTH$}: {unsupported}", "Aux 1");
+        }
+
+        if let Some(Some(aux2)) = monitor.aux_monitors.map(|aux| aux.aux2) {
+            let (name, value) = match aux2 {
+                Aux2Monitor::TecCurrent(c) => ("Aux 2, TEC current (mA)", format!("{c}")),
+                Aux2Monitor::LaserTemperature(t) => ("Aux 2, Laser temp (C)", format!("{t}")),
+            };
+            println!("  {name:>NAME_WIDTH$}: {value}");
+        } else {
+            println!("  {:>NAME_WIDTH$}: {unsupported}", "Aux 2");
+        }
+
+        if let Some(Some(aux3)) = monitor.aux_monitors.map(|aux| aux.aux3) {
+            let (name, value) = match aux3 {
+                Aux3Monitor::LaserTemperature(t) => ("Aux 3, Laser temp (C)", format!("{t}")),
+                Aux3Monitor::AdditionalSupplyVoltage(v) => {
+                    ("Aux 3, Supply voltage 2 (V)", format!("{v}"))
+                }
+            };
+            println!("  {name:>NAME_WIDTH$}: {value}");
+        } else {
+            println!("  {:>NAME_WIDTH$}: {unsupported}", "Aux 3");
+        }
+        // Print additional newline between each port for clarity.
+        need_newline = true;
     }
 }
 
