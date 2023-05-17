@@ -931,7 +931,7 @@ async fn address_transceivers(
         }
         Transceivers::Present => {
             // Fetch all status bits, and find those which match.
-            let modules = ModuleId::all();
+            let modules = ModuleId::all_sidecar();
             let status_result = controller
                 .status(modules)
                 .await
@@ -945,7 +945,7 @@ async fn address_transceivers(
         }
         Transceivers::PowerState(state) => {
             // Fetch all power states, and find those which match.
-            let modules = ModuleId::all();
+            let modules = ModuleId::all_sidecar();
             let mode_result = controller
                 .power(modules)
                 .await
@@ -961,7 +961,7 @@ async fn address_transceivers(
             // Read the identifier for all modules, and return those that we can
             // read and are of the requested kind.
             let ident_result = controller
-                .identifier(ModuleId::all())
+                .identifier(ModuleId::all_sidecar())
                 .await
                 .context("Failed to retrieve module identifiers")?;
             filter_module_data(
