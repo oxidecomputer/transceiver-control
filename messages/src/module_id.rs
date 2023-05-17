@@ -136,6 +136,11 @@ impl ModuleId {
         Self(!0)
     }
 
+    /// Convenience function to address all transceivers on the Sidecar switch.
+    pub const fn all_sidecar() -> Self {
+        Self(u32::MAX as _)
+    }
+
     /// Convience function to address zero transceivers.
     pub const fn empty() -> Self {
         Self(0)
