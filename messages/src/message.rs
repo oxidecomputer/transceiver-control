@@ -563,7 +563,7 @@ bitflags::bitflags! {
 
         /// The module is held in low-power mode.
         ///
-        /// This translates to the `ResetL` pin in SFF-8679 rev 1.8 section
+        /// This translates to the `LpMode` pin in SFF-8679 rev 1.8 section
         /// 5.3.3.
         const LOW_POWER_MODE        = 0b0000_1000;
 
