@@ -453,7 +453,7 @@ impl IoLoop {
         let (message, remainder) = match hubpack::deserialize::<Message>(rx_buf) {
             Ok((message, remainder)) => {
                 probes::message__received!(|| (peer.ip(), &header, &message));
-                debug!(
+                trace!(
                     self.log,
                     "SP response message received";
                     "peer" => peer,
