@@ -546,6 +546,9 @@ impl IoLoop {
                 // Collect any trailing data that is supposed to exist, and
                 // return it. Note that we _also_ need to collect any trailing
                 // error data.
+                probes::message__matched!(|| {
+                    (&request.request.header, &request.request.message, &message)
+                });
                 let expected_data_len = response.expected_data_len();
                 let expected_error_len = response.expected_error_data_len();
                 let response = match (expected_data_len, expected_error_len) {
@@ -613,6 +616,7 @@ impl IoLoop {
                     self.log,
                     "received response for message that is not outstanding";
                     "message" => ?message,
+                    "header" => ?header,
                     "outstanding_message_id" => outstanding_message_id,
                     "peer" => peer,
                 );
@@ -699,6 +703,13 @@ impl IoLoop {
                 _ = self.resend.tick(), if self.outstanding_request.is_some() => {
                     let (n_retries, n_error_messages) = {
                         let req = self.outstanding_request.as_ref().unwrap();
+                        probes::message__timeout!(|| {
+                            (
+                                &req.request.header,
+                                &req.request.message,
+                                self.resend.period()
+                            )
+                        });
                         (req.n_retries, req.n_error_messages)
                     };
                     let at_retry_limit = n_retries >= self.n_retries;
@@ -716,20 +727,34 @@ impl IoLoop {
                     // Safety: This branch is only taken if the request is `Some(_)`.
                     let old = self.outstanding_request.take().unwrap();
                     if at_retry_limit {
+                        const REASON: &str = "failed to send message within the retry limit";
                         error!(
-                            self.log,
-                            "failed to send message within retry limit";
+                            self.log, "{}", REASON;
                             "limit" => self.n_retries,
                         );
+                        probes::message__dropped!(|| {
+                            (
+                                &old.request.header,
+                                &old.request.message,
+                                REASON,
+                            )
+                        });
                         old.response_tx.send(Err(Error::MaxRetries(n_retries))).unwrap();
                         continue;
                     }
                     if at_error_limit {
+                        const REASON: &str = "received too many faulty messages";
                         error!(
-                            self.log,
-                            "received too many faulty messages";
+                            self.log, "{}", REASON;
                             "limit" => NUM_ALLOWED_ERROR_MESSAGES,
                         );
+                        probes::message__dropped!(|| {
+                            (
+                                &old.request.header,
+                                &old.request.message,
+                                REASON,
+                            )
+                        });
                         old.response_tx.send(Err(Error::MaxFaultMessages(n_error_messages))).unwrap();
                         continue;
                     }

@@ -88,11 +88,52 @@ pub use transceiver_messages::ModuleId;
 
 #[usdt::provider(provider = "xcvr__ctl")]
 mod probes {
+    /// Fires when a packet of any kind is received on the UDP socket.
+    ///
+    /// Includes the peer address, and length and raw data of the packet.
     fn packet__received(peer: IpAddr, n_bytes: u64, data: *const u8) {}
+
+    /// Fires when a packet is sent on the UDP socket.
+    ///
+    /// Includes the peer address, and length and raw data of the packet.
     fn packet__sent(peer: IpAddr, n_bytes: u64, data: *const u8) {}
+
+    /// Fires when a message of any kind is received.
+    ///
+    /// Includes the peer address, the message header, and the message body.
     fn message__received(peer: IpAddr, header: &Header, message: &Message) {}
+
+    /// Fires when a message of any kind is sent.
+    ///
+    /// Includes the peer address, the message header, and the message body.
     fn message__sent(peer: IpAddr, header: &Header, message: &Message) {}
+
+    /// Fires when we receive a valid response to a request.
+    ///
+    /// This fires whenever we receive a valid response to the request that we
+    /// have previously sent. It is fired immediately before we remove the
+    /// outstanding request and send the recovered response on the response
+    /// channel.
+    fn message__matched(header: &Header, request: &Message, response: &Message) {}
+
+    /// Fires when a "bad" message is received.
+    ///
+    /// Includes the peer address and a string error cause.
+    ///
+    /// "Bad" here means several things, including:
+    ///
+    /// - An invalid response to our request
+    /// - A response to the wrong message
+    /// - An invalid message type, such as a host request delivered from the SP.
     fn bad__message(peer: IpAddr, reason: &str) {}
+
+    /// Fires when we have not received a response to an outstanding message.
+    ///
+    /// Includes the message we sent and the timeout duration.
+    fn message__timeout(header: &Header, message: &Message, duration: &core::time::Duration) {}
+
+    /// Fires when we give up on a message due to a retry limit.
+    fn message__dropped(header: &Header, message: &Message, reason: &str) {}
 }
 
 /// An error operating on a transceiver, such as a bad index, hardware failure,
