@@ -10,7 +10,7 @@ api-traits = [ "dep:schemars", "transceiver-decode/api-traits", "transceiver-mes
 [dependencies]
 anyhow = "1"
 hubpack = "0.1.2"
-itertools = "0.10.5"
+itertools = "0.11.0"
 serde = "1"
 slog-async = "2"
 slog-term = "2"
