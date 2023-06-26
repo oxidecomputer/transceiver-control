@@ -32,7 +32,7 @@ use transceiver_decode::PowerControl;
 use transceiver_decode::VendorInfo;
 use transceiver_messages::merge_module_data;
 use transceiver_messages::message::LedState;
-use transceiver_messages::message::Status;
+use transceiver_messages::message::StatusV2;
 use transceiver_messages::remove_module_data;
 use transceiver_messages::ModuleId;
 
@@ -102,11 +102,11 @@ impl ReadResult {
 }
 
 /// The result of accessing the status of a set of transceivers.
-pub type StatusResult = ModuleResult<Status>;
+pub type StatusResult = ModuleResult<StatusV2>;
 
 impl StatusResult {
     /// Return the status read from the modules.
-    pub fn status(&self) -> &[Status] {
+    pub fn status(&self) -> &[StatusV2] {
         &self.data
     }
 }

@@ -53,7 +53,10 @@ pub mod version {
     pub mod inner {
         pub const V1: u8 = 1;
         pub const V2: u8 = 2;
-        pub const CURRENT: u8 = V2;
+
+        /// Includes `StatusV2` and `clear_disabled_latch`
+        pub const V3: u8 = 3;
+        pub const CURRENT: u8 = V3;
         pub const MIN: u8 = V1;
     }
     pub mod outer {
@@ -126,6 +129,10 @@ pub enum HwError {
     /// An error interacting with a board FPGA to operate on the transceivers.
     #[cfg_attr(any(test, feature = "std"), error("Error interacting with FPGA"))]
     FpgaError,
+
+    /// The module has been disabled by the SP due to a policy violation
+    #[cfg_attr(any(test, feature = "std"), error("Port is disabled by the SP"))]
+    DisabledBySp,
 }
 
 /// Deserialize the [`HwError`]s from a packet buffer that are expected, given
@@ -379,6 +386,12 @@ pub enum HostRequest {
         /// The state to set each module's LED to.
         state: LedState,
     },
+
+    /// Request to return the extended status of the transceiver modules.
+    StatusV2(ModuleId),
+
+    /// Clears the disabled latch for the given modules
+    ClearDisableLatch(ModuleId),
 }
 
 impl HostRequest {
@@ -455,7 +468,8 @@ pub enum SpResponse {
     },
 
     /// A generic acknowledgement of a specific message, where no further data
-    /// is required from the SP.
+    /// is required from the SP.  Errors are included in the trailing packet
+    /// space.
     Ack {
         /// The modules which successfully performed the requested operation.
         modules: ModuleId,
@@ -477,6 +491,23 @@ pub enum SpResponse {
         /// The modules on which fetching the LED state failed.
         failed_modules: ModuleId,
     },
+
+    /// The extended status of a set of transceiver modules.
+    ///
+    /// Each module may have a different set of status flags set. The
+    /// [`Message`] type contains the mask identifying all the modules, and the
+    /// remaining bytes of the UDP packet are a list of [`StatusV2`] objects for
+    /// each module specified.
+    ///
+    /// The ordering of the status objects is from lowest index to highest --
+    /// that is, taking the output of the returned `ModuleId::to_indices()`
+    /// method.
+    StatusV2 {
+        /// The modules whose status was successfully read.
+        modules: ModuleId,
+        /// The modules on which fetching the status failed.
+        failed_modules: ModuleId,
+    },
 }
 
 impl SpResponse {
@@ -494,6 +525,12 @@ impl SpResponse {
                 // So using `size_of` is appropriate here.
                 Some(modules.selected_transceiver_count() * core::mem::size_of::<Status>())
             }
+            SpResponse::StatusV2 { modules, .. } => {
+                // NOTE: We don't `hubpack::deserialize` the `Status` objects,
+                // those are directly constructed using `Status::from_bits()`.
+                // So using `size_of` is appropriate here.
+                Some(modules.selected_transceiver_count() * core::mem::size_of::<StatusV2>())
+            }
             SpResponse::LedState { modules, .. } => {
                 Some(modules.selected_transceiver_count() * LedState::MAX_SIZE)
             }
@@ -509,6 +546,7 @@ impl SpResponse {
             SpResponse::Read { failed_modules, .. }
             | SpResponse::Write { failed_modules, .. }
             | SpResponse::Status { failed_modules, .. }
+            | SpResponse::StatusV2 { failed_modules, .. }
             | SpResponse::Ack { failed_modules, .. }
             | SpResponse::LedState { failed_modules, .. } => {
                 Some(failed_modules.selected_transceiver_count() * HwError::MAX_SIZE)
@@ -679,6 +717,132 @@ impl SerializedSize for Status {
     const MAX_SIZE: usize = core::mem::size_of::<Status>();
 }
 
+bitflags::bitflags! {
+    #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+    pub struct StatusV2: u32 {
+        /// The module is present in the receptacle.
+        ///
+        /// This translates to the `ModPrsL` pin in SFF-8679 rev 1.8 section
+        /// 5.3.4.
+        const PRESENT               = 0b0000_0000_0001;
+
+        /// The module's power is enabled.
+        ///
+        /// Note that this is not part of the QSFP specification, but provided
+        /// by the Sidecar board design itself.
+        const ENABLED               = 0b0000_0000_0010;
+
+        /// The module is held in reset.
+        ///
+        /// This translates to the `ResetL` pin in SFF-8679 rev 1.8 section
+        /// 5.3.2.
+        const RESET                 = 0b0000_0000_0100;
+
+        /// The module is held in low-power mode.
+        ///
+        /// This translates to the `ResetL` pin in SFF-8679 rev 1.8 section
+        /// 5.3.3.
+        const LOW_POWER_MODE        = 0b0000_0000_1000;
+
+        /// At least one interrupt is signaled on the module. The details of the
+        /// interrupt cause can be queried by reading various bytes of the QSFP
+        /// memory map, such as bytes 3-21 in the lower memory page. See
+        /// SFF-8636 rev 2.10a section 6.2.3 for details.
+        ///
+        /// This translates to the `IntL` pin in SFF-8679 rev 1.8 section
+        /// 5.3.5.
+        const INTERRUPT             = 0b0000_0001_0000;
+
+        /// This module's power supply has come up successfully.
+        ///
+        /// Note that this is not part of the QSFP specification, but provided
+        /// by the Sidecar board design itself.
+        const POWER_GOOD            = 0b0000_0010_0000;
+
+        /// This module's power supply has not come up after being enabled.
+        ///
+        /// Note that this is not part of the QSFP specification, but provided
+        /// by the Sidecar board design itself.
+        const FAULT_POWER_TIMEOUT   = 0b0000_0100_0000;
+
+        /// This module unexpectedly lost power.
+        ///
+        /// Note that this is not part of the QSFP specification, but provided
+        /// by the Sidecar board design itself.
+        const FAULT_POWER_LOST      = 0b0000_1000_0000;
+
+        /// The SP has disabled the port associated with this module
+        ///
+        /// This occurs if the module was initialized but is now NACKing I2C
+        /// requests for its temperature.
+        const DISABLED_BY_SP      = 0b1_0000_0000;
+    }
+}
+impl fmt::Display for StatusV2 {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl core::str::FromStr for StatusV2 {
+    type Err = bitflags::parser::ParseError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.parse().map(Self)
+    }
+}
+
+impl Serialize for StatusV2 {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_u32(self.bits())
+    }
+}
+
+struct StatusV2Visitor;
+
+impl<'de> Visitor<'de> for StatusV2Visitor {
+    type Value = StatusV2;
+
+    fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "a single u32")
+    }
+
+    fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
+    where
+        E: SerdeError,
+    {
+        u32::try_from(v)
+            .map(StatusV2::from_bits_truncate)
+            .map_err(|_| SerdeError::invalid_value(Unexpected::Unsigned(v), &self))
+    }
+
+    fn visit_u32<E>(self, v: u32) -> Result<Self::Value, E>
+    where
+        E: SerdeError,
+    {
+        StatusV2::from_bits(v).ok_or(SerdeError::invalid_value(
+            Unexpected::Unsigned(u64::from(v)),
+            &self,
+        ))
+    }
+}
+
+impl<'de> Deserialize<'de> for StatusV2 {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_u32(StatusV2Visitor)
+    }
+}
+
+impl SerializedSize for StatusV2 {
+    const MAX_SIZE: usize = core::mem::size_of::<StatusV2>();
+}
+
 /// The state of a module's attention LED, on the Sidecar front IO panel.
 #[derive(
     Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, SerializedSize,
@@ -731,6 +895,7 @@ mod test {
     use crate::message::ProtocolError;
     use crate::message::SpResponse;
     use crate::message::Status;
+    use crate::message::StatusV2;
     use crate::mgmt::sff8636;
     use crate::mgmt::ManagementInterface;
     use crate::mgmt::MemoryRead;
@@ -806,10 +971,11 @@ mod test {
     #[test]
     fn test_hardware_error_encoding_unchanged() {
         let mut buf = [0u8; HwError::MAX_SIZE];
-        const TEST_DATA: [HwError; 3] = [
+        const TEST_DATA: [HwError; 4] = [
             HwError::I2cError,
             HwError::InvalidModuleIndex,
             HwError::FpgaError,
+            HwError::DisabledBySp,
         ];
 
         for (variant_id, variant) in TEST_DATA.iter().enumerate() {
@@ -942,7 +1108,7 @@ mod test {
         // constructors.
         let modules = ModuleId::empty();
         let failed_modules = ModuleId::empty();
-        let test_data: [SpResponse; 6] = [
+        let test_data: [SpResponse; 7] = [
             SpResponse::Read {
                 modules,
                 failed_modules,
@@ -963,6 +1129,10 @@ mod test {
             },
             SpResponse::MacAddrs(MacAddrResponse::Ok(MacAddrs::new([0; 6], 1, 1).unwrap())),
             SpResponse::LedState {
+                modules,
+                failed_modules,
+            },
+            SpResponse::StatusV2 {
                 modules,
                 failed_modules,
             },
@@ -1044,6 +1214,9 @@ mod test {
 
         let request = HostRequest::Status(ModuleId(1));
         assert_eq!(request.expected_data_len(), None);
+
+        let request = HostRequest::StatusV2(ModuleId(1));
+        assert_eq!(request.expected_data_len(), None);
     }
 
     #[test]
@@ -1085,6 +1258,15 @@ mod test {
             failed_modules: ModuleId::empty(),
         };
         assert_eq!(request.expected_data_len(), None);
+
+        let request = SpResponse::StatusV2 {
+            modules: ModuleId(1),
+            failed_modules: ModuleId::empty(),
+        };
+        assert_eq!(
+            request.expected_data_len(),
+            Some(core::mem::size_of::<StatusV2>())
+        );
     }
 
     #[test]
@@ -1168,7 +1350,7 @@ mod test {
         // This is not const because `Memory{Read,Write}` don't have const
         // constructors.
         let modules = ModuleId::empty();
-        let test_data: [HostRequest; 14] = [
+        let test_data: [HostRequest; 16] = [
             HostRequest::Read {
                 modules,
                 read: MemoryRead::new(sff8636::Page::Lower, 0, 1).unwrap(),
@@ -1195,6 +1377,8 @@ mod test {
                 modules,
                 state: LedState::Off,
             },
+            HostRequest::StatusV2(modules),
+            HostRequest::ClearDisableLatch(modules),
         ];
 
         for (variant_id, variant) in test_data.iter().enumerate() {

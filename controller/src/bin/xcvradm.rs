@@ -42,7 +42,7 @@ use transceiver_decode::VendorInfo;
 use transceiver_messages::filter_module_data;
 use transceiver_messages::mac::MacAddrs;
 use transceiver_messages::message::LedState;
-use transceiver_messages::message::Status;
+use transceiver_messages::message::StatusV2;
 use transceiver_messages::mgmt::cmis;
 use transceiver_messages::mgmt::sff8636;
 use transceiver_messages::mgmt::ManagementInterface;
@@ -222,7 +222,7 @@ enum StatusKind {
     // Print the usual Display representation of each set of status bits.
     Normal,
     // Print the truth value of a set of status bits, from all modules.
-    Limited { with: Status, without: Status },
+    Limited { with: StatusV2, without: StatusV2 },
     // Print all bits from all modules.
     All,
 }
@@ -231,14 +231,14 @@ enum StatusKind {
 struct StatusFlags {
     /// Find modules with the provided flags set.
     #[arg(short, value_parser = parse_status)]
-    with: Option<Status>,
+    with: Option<StatusV2>,
     /// Find modules without the provided flags set.
     #[arg(short, value_parser = parse_status)]
-    without: Option<Status>,
+    without: Option<StatusV2>,
 }
 
-fn parse_status(s: &str) -> Result<Status, String> {
-    s.parse::<Status>().map_err(|e| e.to_string())
+fn parse_status(s: &str) -> Result<StatusV2, String> {
+    s.parse::<StatusV2>().map_err(|e| e.to_string())
 }
 
 #[derive(Subcommand)]
@@ -255,9 +255,9 @@ enum Cmd {
         /// shell interpreting that as a shell-pipeline, the bits should be
         /// quoted -- for example: "PRESENT | RESET".
         #[arg(long, value_parser = parse_status, conflicts_with = "all")]
-        with: Option<Status>,
+        with: Option<StatusV2>,
         #[arg(long, value_parser = parse_status, conflicts_with = "all")]
-        without: Option<Status>,
+        without: Option<StatusV2>,
 
         /// Print all bits from all modules.
         ///
@@ -600,8 +600,8 @@ async fn main() -> anyhow::Result<()> {
                 (None, None, false) => StatusKind::Normal,
                 (None, None, true) => StatusKind::All,
                 (maybe_with, maybe_without, false) => {
-                    let with = maybe_with.unwrap_or_else(Status::empty);
-                    let without = maybe_without.unwrap_or_else(Status::empty);
+                    let with = maybe_with.unwrap_or_else(StatusV2::empty);
+                    let without = maybe_without.unwrap_or_else(StatusV2::empty);
                     if with.is_empty() && without.is_empty() {
                         eprintln!(
                             "If specified, one of `--with` and `--without` \
@@ -939,7 +939,7 @@ async fn address_transceivers(
             filter_module_data(
                 status_result.modules,
                 status_result.status().iter(),
-                |_, st| st.contains(Status::PRESENT),
+                |_, st| st.contains(StatusV2::PRESENT),
             )
             .0
         }
@@ -1047,16 +1047,17 @@ fn print_module_status(status_result: &StatusResult, kind: StatusKind) {
 // useful to see how we print the table header itself.
 #[rustfmt::skip]
 fn print_all_status_header() {
-    println!(" +--------------------------------- Port");
-    println!(" |   +----------------------------- {}", Status::PRESENT);
-    println!(" |   |   +------------------------- {}", Status::ENABLED);
-    println!(" |   |   |   +--------------------- {}", Status::RESET);
-    println!(" |   |   |   |   +----------------- {}", Status::LOW_POWER_MODE);
-    println!(" |   |   |   |   |   +------------- {}", Status::INTERRUPT);
-    println!(" |   |   |   |   |   |   +--------- {}", Status::POWER_GOOD);
-    println!(" |   |   |   |   |   |   |   +----- {}", Status::FAULT_POWER_TIMEOUT);
-    println!(" |   |   |   |   |   |   |   |   +- {}", Status::FAULT_POWER_LOST);
-    println!(" v   v   v   v   v   v   v   v   v");
+    println!(" +------------------------------------ Port");
+    println!(" |   +-------------------------------- {}", StatusV2::PRESENT);
+    println!(" |   |   +---------------------------- {}", StatusV2::ENABLED);
+    println!(" |   |   |   +------------------------ {}", StatusV2::RESET);
+    println!(" |   |   |   |   +-------------------- {}", StatusV2::LOW_POWER_MODE);
+    println!(" |   |   |   |   |   +---------------- {}", StatusV2::INTERRUPT);
+    println!(" |   |   |   |   |   |   +------------ {}", StatusV2::POWER_GOOD);
+    println!(" |   |   |   |   |   |   |   +-------- {}", StatusV2::FAULT_POWER_TIMEOUT);
+    println!(" |   |   |   |   |   |   |   |   +---- {}", StatusV2::FAULT_POWER_LOST);
+    println!(" |   |   |   |   |   |   |   |   |  +- {}", StatusV2::DISABLED_BY_SP);
+    println!(" v   v   v   v   v   v   v   v   v  v");
 }
 
 fn print_all_status(status_result: &StatusResult) {
@@ -1067,7 +1068,7 @@ fn print_all_status(status_result: &StatusResult) {
         .zip(status_result.status().iter())
     {
         print!("{port:>2}   ");
-        for bit in Status::all().iter() {
+        for bit in StatusV2::all().iter() {
             let word = if status.contains(bit) { "1" } else { "0" };
             print!("{word:<WIDTH$}");
         }
