@@ -784,6 +784,12 @@ impl fmt::Display for ExtendedStatus {
     }
 }
 
+impl From<Status> for ExtendedStatus {
+    fn from(s: Status) -> Self {
+        Self::from_bits(s.bits() as u32).expect("Status must be a subset of ExtendedStatus")
+    }
+}
+
 impl core::str::FromStr for ExtendedStatus {
     type Err = bitflags::parser::ParseError;
 
@@ -1417,5 +1423,12 @@ mod test {
         }
 
         check_invalid_variants::<HostRequest>(u8::try_from(test_data.len()).unwrap());
+    }
+
+    #[test]
+    fn test_extended_status() {
+        // Test that ExtendedStatus is a superset of Status by converting
+        // Status::all, which panics if this isn't the case.
+        let _e: ExtendedStatus = Status::all().into();
     }
 }

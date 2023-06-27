@@ -622,10 +622,25 @@ async fn main() -> anyhow::Result<()> {
                 }
                 _ => unreachable!("clap didn't do its job"),
             };
-            let status_result = controller
-                .extended_status(modules)
-                .await
-                .context("Failed to retrieve module status")?;
+            let status_result = match controller.extended_status(modules).await {
+                Ok(v) => v,
+                Err(err) => {
+                    slog::warn!(
+                        &log,
+                        "could not read extended status ({err}); reading status instead",
+                    );
+                    let r = controller
+                        .status(modules)
+                        .await
+                        .context("Failed to retrieve module status")?;
+                    ExtendedStatusResult {
+                        modules: r.modules,
+                        data: r.data.into_iter().map(Into::into).collect(),
+                        failures: r.failures,
+                    }
+                }
+            };
+
             print_module_status(&status_result, kind);
             if !args.ignore_errors {
                 print_failures(&status_result.failures);
