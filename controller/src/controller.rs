@@ -967,11 +967,13 @@ impl Controller {
                 },
             ) => {
                 let data = response.data.expect("Existence of data checked earlier");
-                let (data, error_data) = data.split_at(st.expected_data_len().unwrap());
-                let status = data
-                    .chunks_exact(4)
-                    .map(|x| hubpack::deserialize(x).unwrap().0)
-                    .collect();
+                let (mut data, error_data) = data.split_at(st.expected_data_len().unwrap());
+                let mut status = vec![];
+                for _ in 0..modules.selected_transceiver_count() {
+                    let (d, rest) = hubpack::deserialize(data).expect("data size checked earlier");
+                    status.push(d);
+                    data = rest;
+                }
                 let failures = Self::deserialize_hw_errors(failed_modules, error_data)?;
                 Ok(ExtendedStatusResult {
                     modules,

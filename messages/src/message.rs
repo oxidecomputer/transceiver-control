@@ -526,10 +526,7 @@ impl SpResponse {
                 Some(modules.selected_transceiver_count() * core::mem::size_of::<Status>())
             }
             SpResponse::ExtendedStatus { modules, .. } => {
-                // NOTE: We don't `hubpack::deserialize` the `Status` objects,
-                // those are directly constructed using `Status::from_bits()`.
-                // So using `size_of` is appropriate here.
-                Some(modules.selected_transceiver_count() * core::mem::size_of::<ExtendedStatus>())
+                Some(modules.selected_transceiver_count() * ExtendedStatus::MAX_SIZE)
             }
             SpResponse::LedState { modules, .. } => {
                 Some(modules.selected_transceiver_count() * LedState::MAX_SIZE)
