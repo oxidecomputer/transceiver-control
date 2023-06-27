@@ -474,6 +474,13 @@ enum Cmd {
     /// power supply to be enabled again.
     ClearPowerFault,
 
+    /// Clears the "disabled" latch on a set of modules
+    ///
+    /// The SP may make a policy decision to disable modules (e.g. if they
+    /// aren't reporting temperatures to the thermal loop).  Clearing the latch
+    /// allows them to be powered on again.
+    ClearDisableLatch,
+
     /// Return the state of the addressed modules' attention LEDs.
     Leds,
 
@@ -885,6 +892,15 @@ async fn main() -> anyhow::Result<()> {
                 .clear_power_fault(modules)
                 .await
                 .context("Failed to clear power fault for modules")?;
+            if !args.ignore_errors {
+                print_failures(&ack_result.failures);
+            }
+        }
+        Cmd::ClearDisableLatch => {
+            let ack_result = controller
+                .clear_disable_latch(modules)
+                .await
+                .context("Failed to clear disable latch for modules")?;
             if !args.ignore_errors {
                 print_failures(&ack_result.failures);
             }

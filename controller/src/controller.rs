@@ -863,6 +863,14 @@ impl Controller {
             .await
     }
 
+    /// Clears the `disabled` flag for a set of transceiver modules
+    ///
+    /// This allows them to be powered on again
+    pub async fn clear_disable_latch(&self, modules: ModuleId) -> Result<AckResult, Error> {
+        self.no_payload_request(HostRequest::ClearDisableLatch(modules))
+            .await
+    }
+
     /// Assert physical lpmode pin for a set of transceiver modules. Note: The
     /// effect this pin has on operation can change depending on if the software
     /// override of power control is set.
