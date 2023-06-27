@@ -53,7 +53,7 @@ use transceiver_messages::message::MessageBody;
 use transceiver_messages::message::MessageKind;
 pub use transceiver_messages::message::ProtocolError;
 use transceiver_messages::message::SpResponse;
-pub use transceiver_messages::message::StatusV2;
+pub use transceiver_messages::message::Status;
 pub use transceiver_messages::mgmt;
 use transceiver_messages::mgmt::sff8636;
 use transceiver_messages::mgmt::ManagementInterface;
@@ -360,7 +360,7 @@ impl Controller {
         let (powered_modules, powered_status) = filter_module_data(
             status_result.modules,
             status_result.status().iter(),
-            |_, st| st.contains(StatusV2::POWER_GOOD | StatusV2::ENABLED),
+            |_, st| st.contains(Status::POWER_GOOD | Status::ENABLED),
         );
         let unpowered_modules = status_result.modules.remove(&powered_modules);
 
@@ -368,7 +368,7 @@ impl Controller {
         // Off.
         let (in_reset, _) =
             filter_module_data(powered_modules, powered_status.iter(), |_, status| {
-                status.contains(StatusV2::RESET)
+                status.contains(Status::RESET)
             });
 
         // At this point, we have the set of `unpowered_modules` and `in_reset`.
@@ -425,7 +425,7 @@ impl Controller {
                             // Hardware is in charge, so report the state of the
                             // `LPMode` pin itself.
                             PowerControl::UseLpModePin => {
-                                let state = if status.contains(StatusV2::LOW_POWER_MODE) {
+                                let state = if status.contains(Status::LOW_POWER_MODE) {
                                     PowerState::Low
                                 } else {
                                     PowerState::High
@@ -556,17 +556,15 @@ impl Controller {
                 // module, only which hardware signals it responds to.
                 let (need_power_enabled, _) =
                     filter_module_data(modules, status.iter(), |_, st| {
-                        !st.contains(StatusV2::POWER_GOOD | StatusV2::ENABLED)
-                            || st.contains(StatusV2::RESET)
+                        !st.contains(Status::POWER_GOOD | Status::ENABLED)
+                            || st.contains(Status::RESET)
                     });
 
                 // Check for any modules which need power applied, but which do
                 // _not_ already have reset asserted. We're going to assert
                 // reset on them now, but emit a warning.
                 let (need_reset_deasserted, _) =
-                    filter_module_data(modules, status.iter(), |_, st| {
-                        st.contains(StatusV2::RESET)
-                    });
+                    filter_module_data(modules, status.iter(), |_, st| st.contains(Status::RESET));
                 let need_power_but_not_reset = need_power_enabled.remove(&need_reset_deasserted);
                 let modules = if need_power_but_not_reset.selected_transceiver_count() > 0 {
                     warn!(
@@ -920,7 +918,7 @@ impl Controller {
 
     /// Report the status of a set of transceiver modules.
     pub async fn status(&self, modules: ModuleId) -> Result<StatusResult, Error> {
-        let message = Message::from(HostRequest::StatusV2(modules));
+        let message = Message::from(HostRequest::Status(modules));
         let request = HostRpcRequest {
             header: self.next_header(MessageKind::HostRequest),
             message,
@@ -929,7 +927,41 @@ impl Controller {
         let response = self.rpc(request).await?;
         match response.message.body {
             MessageBody::SpResponse(
-                st @ SpResponse::StatusV2 {
+                st @ SpResponse::Status {
+                    modules,
+                    failed_modules,
+                },
+            ) => {
+                let data = response.data.expect("Existence of data checked earlier");
+                let (data, error_data) = data.split_at(st.expected_data_len().unwrap());
+                let status = data
+                    .iter()
+                    .copied()
+                    .map(|x| Status::from_bits(x).unwrap())
+                    .collect();
+                let failures = Self::deserialize_hw_errors(failed_modules, error_data)?;
+                Ok(StatusResult {
+                    modules,
+                    data: status,
+                    failures,
+                })
+            }
+            other => Err(Error::UnexpectedMessage(other)),
+        }
+    }
+
+    /// Report the status of a set of transceiver modules.
+    pub async fn extended_status(&self, modules: ModuleId) -> Result<ExtendedStatusResult, Error> {
+        let message = Message::from(HostRequest::ExtendedStatus(modules));
+        let request = HostRpcRequest {
+            header: self.next_header(MessageKind::HostRequest),
+            message,
+            data: None,
+        };
+        let response = self.rpc(request).await?;
+        match response.message.body {
+            MessageBody::SpResponse(
+                st @ SpResponse::ExtendedStatus {
                     modules,
                     failed_modules,
                 },
@@ -941,7 +973,7 @@ impl Controller {
                     .map(|x| hubpack::deserialize(x).unwrap().0)
                     .collect();
                 let failures = Self::deserialize_hw_errors(failed_modules, error_data)?;
-                Ok(StatusResult {
+                Ok(ExtendedStatusResult {
                     modules,
                     data: status,
                     failures,

@@ -23,6 +23,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use transceiver_controller::Config;
 use transceiver_controller::Controller;
+use transceiver_controller::ExtendedStatusResult;
 use transceiver_controller::FailedModules;
 use transceiver_controller::IdentifierResult;
 use transceiver_controller::LedStateResult;
@@ -32,7 +33,6 @@ use transceiver_controller::PowerModeResult;
 use transceiver_controller::PowerState;
 use transceiver_controller::ReadResult;
 use transceiver_controller::SpRequest;
-use transceiver_controller::StatusResult;
 use transceiver_controller::VendorInfoResult;
 use transceiver_decode::Aux1Monitor;
 use transceiver_decode::Aux2Monitor;
@@ -41,8 +41,8 @@ use transceiver_decode::ReceiverPower;
 use transceiver_decode::VendorInfo;
 use transceiver_messages::filter_module_data;
 use transceiver_messages::mac::MacAddrs;
+use transceiver_messages::message::ExtendedStatus;
 use transceiver_messages::message::LedState;
-use transceiver_messages::message::StatusV2;
 use transceiver_messages::mgmt::cmis;
 use transceiver_messages::mgmt::sff8636;
 use transceiver_messages::mgmt::ManagementInterface;
@@ -222,7 +222,10 @@ enum StatusKind {
     // Print the usual Display representation of each set of status bits.
     Normal,
     // Print the truth value of a set of status bits, from all modules.
-    Limited { with: StatusV2, without: StatusV2 },
+    Limited {
+        with: ExtendedStatus,
+        without: ExtendedStatus,
+    },
     // Print all bits from all modules.
     All,
 }
@@ -231,14 +234,14 @@ enum StatusKind {
 struct StatusFlags {
     /// Find modules with the provided flags set.
     #[arg(short, value_parser = parse_status)]
-    with: Option<StatusV2>,
+    with: Option<ExtendedStatus>,
     /// Find modules without the provided flags set.
     #[arg(short, value_parser = parse_status)]
-    without: Option<StatusV2>,
+    without: Option<ExtendedStatus>,
 }
 
-fn parse_status(s: &str) -> Result<StatusV2, String> {
-    s.parse::<StatusV2>().map_err(|e| e.to_string())
+fn parse_status(s: &str) -> Result<ExtendedStatus, String> {
+    s.parse::<ExtendedStatus>().map_err(|e| e.to_string())
 }
 
 #[derive(Subcommand)]
@@ -255,9 +258,9 @@ enum Cmd {
         /// shell interpreting that as a shell-pipeline, the bits should be
         /// quoted -- for example: "PRESENT | RESET".
         #[arg(long, value_parser = parse_status, conflicts_with = "all")]
-        with: Option<StatusV2>,
+        with: Option<ExtendedStatus>,
         #[arg(long, value_parser = parse_status, conflicts_with = "all")]
-        without: Option<StatusV2>,
+        without: Option<ExtendedStatus>,
 
         /// Print all bits from all modules.
         ///
@@ -600,8 +603,8 @@ async fn main() -> anyhow::Result<()> {
                 (None, None, false) => StatusKind::Normal,
                 (None, None, true) => StatusKind::All,
                 (maybe_with, maybe_without, false) => {
-                    let with = maybe_with.unwrap_or_else(StatusV2::empty);
-                    let without = maybe_without.unwrap_or_else(StatusV2::empty);
+                    let with = maybe_with.unwrap_or_else(ExtendedStatus::empty);
+                    let without = maybe_without.unwrap_or_else(ExtendedStatus::empty);
                     if with.is_empty() && without.is_empty() {
                         eprintln!(
                             "If specified, one of `--with` and `--without` \
@@ -613,7 +616,7 @@ async fn main() -> anyhow::Result<()> {
                 _ => unreachable!("clap didn't do its job"),
             };
             let status_result = controller
-                .status(modules)
+                .extended_status(modules)
                 .await
                 .context("Failed to retrieve module status")?;
             print_module_status(&status_result, kind);
@@ -933,13 +936,13 @@ async fn address_transceivers(
             // Fetch all status bits, and find those which match.
             let modules = ModuleId::all();
             let status_result = controller
-                .status(modules)
+                .extended_status(modules)
                 .await
                 .context("Failed to retrieve module status")?;
             filter_module_data(
                 status_result.modules,
                 status_result.status().iter(),
-                |_, st| st.contains(StatusV2::PRESENT),
+                |_, st| st.contains(ExtendedStatus::PRESENT),
             )
             .0
         }
@@ -1013,7 +1016,7 @@ fn print_power_mode(mode_result: &PowerModeResult) {
     }
 }
 
-fn print_module_status(status_result: &StatusResult, kind: StatusKind) {
+fn print_module_status(status_result: &ExtendedStatusResult, kind: StatusKind) {
     match kind {
         StatusKind::Normal => {
             println!("Port Status");
@@ -1048,19 +1051,19 @@ fn print_module_status(status_result: &StatusResult, kind: StatusKind) {
 #[rustfmt::skip]
 fn print_all_status_header() {
     println!(" +------------------------------------ Port");
-    println!(" |   +-------------------------------- {}", StatusV2::PRESENT);
-    println!(" |   |   +---------------------------- {}", StatusV2::ENABLED);
-    println!(" |   |   |   +------------------------ {}", StatusV2::RESET);
-    println!(" |   |   |   |   +-------------------- {}", StatusV2::LOW_POWER_MODE);
-    println!(" |   |   |   |   |   +---------------- {}", StatusV2::INTERRUPT);
-    println!(" |   |   |   |   |   |   +------------ {}", StatusV2::POWER_GOOD);
-    println!(" |   |   |   |   |   |   |   +-------- {}", StatusV2::FAULT_POWER_TIMEOUT);
-    println!(" |   |   |   |   |   |   |   |   +---- {}", StatusV2::FAULT_POWER_LOST);
-    println!(" |   |   |   |   |   |   |   |   |  +- {}", StatusV2::DISABLED_BY_SP);
+    println!(" |   +-------------------------------- {}", ExtendedStatus::PRESENT);
+    println!(" |   |   +---------------------------- {}", ExtendedStatus::ENABLED);
+    println!(" |   |   |   +------------------------ {}", ExtendedStatus::RESET);
+    println!(" |   |   |   |   +-------------------- {}", ExtendedStatus::LOW_POWER_MODE);
+    println!(" |   |   |   |   |   +---------------- {}", ExtendedStatus::INTERRUPT);
+    println!(" |   |   |   |   |   |   +------------ {}", ExtendedStatus::POWER_GOOD);
+    println!(" |   |   |   |   |   |   |   +-------- {}", ExtendedStatus::FAULT_POWER_TIMEOUT);
+    println!(" |   |   |   |   |   |   |   |   +---- {}", ExtendedStatus::FAULT_POWER_LOST);
+    println!(" |   |   |   |   |   |   |   |   |  +- {}", ExtendedStatus::DISABLED_BY_SP);
     println!(" v   v   v   v   v   v   v   v   v  v");
 }
 
-fn print_all_status(status_result: &StatusResult) {
+fn print_all_status(status_result: &ExtendedStatusResult) {
     print_all_status_header();
     for (port, status) in status_result
         .modules
@@ -1068,7 +1071,7 @@ fn print_all_status(status_result: &StatusResult) {
         .zip(status_result.status().iter())
     {
         print!("{port:>2}   ");
-        for bit in StatusV2::all().iter() {
+        for bit in ExtendedStatus::all().iter() {
             let word = if status.contains(bit) { "1" } else { "0" };
             print!("{word:<WIDTH$}");
         }

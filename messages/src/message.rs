@@ -54,7 +54,7 @@ pub mod version {
         pub const V1: u8 = 1;
         pub const V2: u8 = 2;
 
-        /// Includes `StatusV2` and `clear_disabled_latch`
+        /// Includes `ExtendedStatus` and `clear_disabled_latch`
         pub const V3: u8 = 3;
         pub const CURRENT: u8 = V3;
         pub const MIN: u8 = V1;
@@ -388,7 +388,7 @@ pub enum HostRequest {
     },
 
     /// Request to return the extended status of the transceiver modules.
-    StatusV2(ModuleId),
+    ExtendedStatus(ModuleId),
 
     /// Clears the disabled latch for the given modules
     ClearDisableLatch(ModuleId),
@@ -496,13 +496,13 @@ pub enum SpResponse {
     ///
     /// Each module may have a different set of status flags set. The
     /// [`Message`] type contains the mask identifying all the modules, and the
-    /// remaining bytes of the UDP packet are a list of [`StatusV2`] objects for
+    /// remaining bytes of the UDP packet are a list of [`ExtendedStatus`] objects for
     /// each module specified.
     ///
     /// The ordering of the status objects is from lowest index to highest --
     /// that is, taking the output of the returned `ModuleId::to_indices()`
     /// method.
-    StatusV2 {
+    ExtendedStatus {
         /// The modules whose status was successfully read.
         modules: ModuleId,
         /// The modules on which fetching the status failed.
@@ -525,11 +525,11 @@ impl SpResponse {
                 // So using `size_of` is appropriate here.
                 Some(modules.selected_transceiver_count() * core::mem::size_of::<Status>())
             }
-            SpResponse::StatusV2 { modules, .. } => {
+            SpResponse::ExtendedStatus { modules, .. } => {
                 // NOTE: We don't `hubpack::deserialize` the `Status` objects,
                 // those are directly constructed using `Status::from_bits()`.
                 // So using `size_of` is appropriate here.
-                Some(modules.selected_transceiver_count() * core::mem::size_of::<StatusV2>())
+                Some(modules.selected_transceiver_count() * core::mem::size_of::<ExtendedStatus>())
             }
             SpResponse::LedState { modules, .. } => {
                 Some(modules.selected_transceiver_count() * LedState::MAX_SIZE)
@@ -546,7 +546,7 @@ impl SpResponse {
             SpResponse::Read { failed_modules, .. }
             | SpResponse::Write { failed_modules, .. }
             | SpResponse::Status { failed_modules, .. }
-            | SpResponse::StatusV2 { failed_modules, .. }
+            | SpResponse::ExtendedStatus { failed_modules, .. }
             | SpResponse::Ack { failed_modules, .. }
             | SpResponse::LedState { failed_modules, .. } => {
                 Some(failed_modules.selected_transceiver_count() * HwError::MAX_SIZE)
@@ -718,8 +718,11 @@ impl SerializedSize for Status {
 }
 
 bitflags::bitflags! {
+    /// Module status, including bits set by Hubris
+    ///
+    /// This is a superset of [`Status`]
     #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
-    pub struct StatusV2: u32 {
+    pub struct ExtendedStatus: u32 {
         /// The module is present in the receptacle.
         ///
         /// This translates to the `ModPrsL` pin in SFF-8679 rev 1.8 section
@@ -773,18 +776,18 @@ bitflags::bitflags! {
 
         /// The SP has disabled the port associated with this module
         ///
-        /// This occurs if the module was initialized but is now NACKing I2C
-        /// requests for its temperature.
+        /// For example, this could occurs if the module was initialized but is
+        /// now NACKing I2C requests for its temperature.
         const DISABLED_BY_SP      = 0b1_0000_0000;
     }
 }
-impl fmt::Display for StatusV2 {
+impl fmt::Display for ExtendedStatus {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-impl core::str::FromStr for StatusV2 {
+impl core::str::FromStr for ExtendedStatus {
     type Err = bitflags::parser::ParseError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
@@ -792,7 +795,7 @@ impl core::str::FromStr for StatusV2 {
     }
 }
 
-impl Serialize for StatusV2 {
+impl Serialize for ExtendedStatus {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
@@ -801,10 +804,10 @@ impl Serialize for StatusV2 {
     }
 }
 
-struct StatusV2Visitor;
+struct ExtendedStatusVisitor;
 
-impl<'de> Visitor<'de> for StatusV2Visitor {
-    type Value = StatusV2;
+impl<'de> Visitor<'de> for ExtendedStatusVisitor {
+    type Value = ExtendedStatus;
 
     fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "a single u32")
@@ -815,7 +818,7 @@ impl<'de> Visitor<'de> for StatusV2Visitor {
         E: SerdeError,
     {
         u32::try_from(v)
-            .map(StatusV2::from_bits_truncate)
+            .map(ExtendedStatus::from_bits_truncate)
             .map_err(|_| SerdeError::invalid_value(Unexpected::Unsigned(v), &self))
     }
 
@@ -823,24 +826,24 @@ impl<'de> Visitor<'de> for StatusV2Visitor {
     where
         E: SerdeError,
     {
-        StatusV2::from_bits(v).ok_or(SerdeError::invalid_value(
+        ExtendedStatus::from_bits(v).ok_or(SerdeError::invalid_value(
             Unexpected::Unsigned(u64::from(v)),
             &self,
         ))
     }
 }
 
-impl<'de> Deserialize<'de> for StatusV2 {
+impl<'de> Deserialize<'de> for ExtendedStatus {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        deserializer.deserialize_u32(StatusV2Visitor)
+        deserializer.deserialize_u32(ExtendedStatusVisitor)
     }
 }
 
-impl SerializedSize for StatusV2 {
-    const MAX_SIZE: usize = core::mem::size_of::<StatusV2>();
+impl SerializedSize for ExtendedStatus {
+    const MAX_SIZE: usize = core::mem::size_of::<ExtendedStatus>();
 }
 
 /// The state of a module's attention LED, on the Sidecar front IO panel.
@@ -884,6 +887,7 @@ mod test {
     use crate::mac::BadMacAddrReason;
     use crate::mac::MacAddrs;
     use crate::message::deserialize_hw_errors;
+    use crate::message::ExtendedStatus;
     use crate::message::Header;
     use crate::message::HostRequest;
     use crate::message::HwError;
@@ -895,7 +899,6 @@ mod test {
     use crate::message::ProtocolError;
     use crate::message::SpResponse;
     use crate::message::Status;
-    use crate::message::StatusV2;
     use crate::mgmt::sff8636;
     use crate::mgmt::ManagementInterface;
     use crate::mgmt::MemoryRead;
@@ -1132,7 +1135,7 @@ mod test {
                 modules,
                 failed_modules,
             },
-            SpResponse::StatusV2 {
+            SpResponse::ExtendedStatus {
                 modules,
                 failed_modules,
             },
@@ -1215,7 +1218,7 @@ mod test {
         let request = HostRequest::Status(ModuleId(1));
         assert_eq!(request.expected_data_len(), None);
 
-        let request = HostRequest::StatusV2(ModuleId(1));
+        let request = HostRequest::ExtendedStatus(ModuleId(1));
         assert_eq!(request.expected_data_len(), None);
     }
 
@@ -1259,13 +1262,13 @@ mod test {
         };
         assert_eq!(request.expected_data_len(), None);
 
-        let request = SpResponse::StatusV2 {
+        let request = SpResponse::ExtendedStatus {
             modules: ModuleId(1),
             failed_modules: ModuleId::empty(),
         };
         assert_eq!(
             request.expected_data_len(),
-            Some(core::mem::size_of::<StatusV2>())
+            Some(core::mem::size_of::<ExtendedStatus>())
         );
     }
 
@@ -1377,7 +1380,7 @@ mod test {
                 modules,
                 state: LedState::Off,
             },
-            HostRequest::StatusV2(modules),
+            HostRequest::ExtendedStatus(modules),
             HostRequest::ClearDisableLatch(modules),
         ];
 
