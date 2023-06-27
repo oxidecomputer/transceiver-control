@@ -44,6 +44,7 @@
 
 #define MESSAGE_KIND_SP_RESPONSE 2
 #define SP_RESPONSE_STATUS 2
+#define SP_RESPONSE_EXTENDED_STATUS 6
 #define SP_RESPONSE_ACK 3
 
 xcvr-ctl$target:::packet-sent
@@ -85,14 +86,16 @@ xcvr-ctl$target:::packet-received
 		message_body_variant = buf[MESSAGE_BODY_VARIANT_OFFSET];
 		if (message_body_variant == MESSAGE_KIND_SP_RESPONSE) {
 			sp_response_variant = buf[SP_RESPONSE_VARIANT_OFFSET];
-			if ((sp_response_variant == SP_RESPONSE_STATUS) || (sp_response_variant == SP_RESPONSE_ACK))
-            {
+			if ((sp_response_variant == SP_RESPONSE_STATUS) ||
+				(sp_response_variant == SP_RESPONSE_EXTENDED_STATUS) ||
+				(sp_response_variant == SP_RESPONSE_ACK))
+			{
 				printf("  module IDs:\n");
 				tracemem(buf + MODULE_ID_OFFSET, 16);
 				n_octets = n_bytes - STATUS_DATA_OFFSET;
 				data = (buf + STATUS_DATA_OFFSET);
 				printf("  data (up to %d octets): ", n_octets);
-				tracemem(data, 64, n_octets);
+				tracemem(data, 128, n_octets);
 			}
 		}
 	}
