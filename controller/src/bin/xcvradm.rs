@@ -1082,17 +1082,17 @@ fn print_module_status(status_result: &ExtendedStatusResult, kind: StatusKind) {
 // useful to see how we print the table header itself.
 #[rustfmt::skip]
 fn print_all_status_header() {
-    println!(" +------------------------------------ Port");
-    println!(" |   +-------------------------------- {}", ExtendedStatus::PRESENT);
-    println!(" |   |   +---------------------------- {}", ExtendedStatus::ENABLED);
-    println!(" |   |   |   +------------------------ {}", ExtendedStatus::RESET);
-    println!(" |   |   |   |   +-------------------- {}", ExtendedStatus::LOW_POWER_MODE);
-    println!(" |   |   |   |   |   +---------------- {}", ExtendedStatus::INTERRUPT);
-    println!(" |   |   |   |   |   |   +------------ {}", ExtendedStatus::POWER_GOOD);
-    println!(" |   |   |   |   |   |   |   +-------- {}", ExtendedStatus::FAULT_POWER_TIMEOUT);
-    println!(" |   |   |   |   |   |   |   |   +---- {}", ExtendedStatus::FAULT_POWER_LOST);
-    println!(" |   |   |   |   |   |   |   |   |  +- {}", ExtendedStatus::DISABLED_BY_SP);
-    println!(" v   v   v   v   v   v   v   v   v  v");
+    println!(" +------------------------------------- Port");
+    println!(" |   +--------------------------------- {}", ExtendedStatus::PRESENT);
+    println!(" |   |   +----------------------------- {}", ExtendedStatus::ENABLED);
+    println!(" |   |   |   +------------------------- {}", ExtendedStatus::RESET);
+    println!(" |   |   |   |   +--------------------- {}", ExtendedStatus::LOW_POWER_MODE);
+    println!(" |   |   |   |   |   +----------------- {}", ExtendedStatus::INTERRUPT);
+    println!(" |   |   |   |   |   |   +------------- {}", ExtendedStatus::POWER_GOOD);
+    println!(" |   |   |   |   |   |   |   +--------- {}", ExtendedStatus::FAULT_POWER_TIMEOUT);
+    println!(" |   |   |   |   |   |   |   |   +----- {}", ExtendedStatus::FAULT_POWER_LOST);
+    println!(" |   |   |   |   |   |   |   |   |   +- {}", ExtendedStatus::DISABLED_BY_SP);
+    println!(" v   v   v   v   v   v   v   v   v   v");
 }
 
 fn print_all_status(status_result: &ExtendedStatusResult) {
