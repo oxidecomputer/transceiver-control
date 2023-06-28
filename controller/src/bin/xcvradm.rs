@@ -43,6 +43,7 @@ use transceiver_messages::filter_module_data;
 use transceiver_messages::mac::MacAddrs;
 use transceiver_messages::message::ExtendedStatus;
 use transceiver_messages::message::LedState;
+use transceiver_messages::message::Status;
 use transceiver_messages::mgmt::cmis;
 use transceiver_messages::mgmt::sff8636;
 use transceiver_messages::mgmt::ManagementInterface;
@@ -967,13 +968,13 @@ async fn address_transceivers(
             // Fetch all status bits, and find those which match.
             let modules = ModuleId::all();
             let status_result = controller
-                .extended_status(modules)
+                .status(modules)
                 .await
                 .context("Failed to retrieve module status")?;
             filter_module_data(
                 status_result.modules,
                 status_result.status().iter(),
-                |_, st| st.contains(ExtendedStatus::PRESENT),
+                |_, st| st.contains(Status::PRESENT),
             )
             .0
         }
