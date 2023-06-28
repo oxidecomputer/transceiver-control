@@ -863,6 +863,14 @@ impl Controller {
             .await
     }
 
+    /// Clears the `disabled` flag for a set of transceiver modules
+    ///
+    /// This allows them to be powered on again
+    pub async fn clear_disable_latch(&self, modules: ModuleId) -> Result<AckResult, Error> {
+        self.no_payload_request(HostRequest::ClearDisableLatch(modules))
+            .await
+    }
+
     /// Assert physical lpmode pin for a set of transceiver modules. Note: The
     /// effect this pin has on operation can change depending on if the software
     /// override of power control is set.
@@ -941,6 +949,41 @@ impl Controller {
                     .collect();
                 let failures = Self::deserialize_hw_errors(failed_modules, error_data)?;
                 Ok(StatusResult {
+                    modules,
+                    data: status,
+                    failures,
+                })
+            }
+            other => Err(Error::UnexpectedMessage(other)),
+        }
+    }
+
+    /// Report the status of a set of transceiver modules.
+    pub async fn extended_status(&self, modules: ModuleId) -> Result<ExtendedStatusResult, Error> {
+        let message = Message::from(HostRequest::ExtendedStatus(modules));
+        let request = HostRpcRequest {
+            header: self.next_header(MessageKind::HostRequest),
+            message,
+            data: None,
+        };
+        let response = self.rpc(request).await?;
+        match response.message.body {
+            MessageBody::SpResponse(
+                st @ SpResponse::ExtendedStatus {
+                    modules,
+                    failed_modules,
+                },
+            ) => {
+                let data = response.data.expect("Existence of data checked earlier");
+                let (mut data, error_data) = data.split_at(st.expected_data_len().unwrap());
+                let mut status = vec![];
+                for _ in 0..modules.selected_transceiver_count() {
+                    let (d, rest) = hubpack::deserialize(data).expect("data size checked earlier");
+                    status.push(d);
+                    data = rest;
+                }
+                let failures = Self::deserialize_hw_errors(failed_modules, error_data)?;
+                Ok(ExtendedStatusResult {
                     modules,
                     data: status,
                     failures,

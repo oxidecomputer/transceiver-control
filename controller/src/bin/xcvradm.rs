@@ -23,6 +23,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use transceiver_controller::Config;
 use transceiver_controller::Controller;
+use transceiver_controller::ExtendedStatusResult;
 use transceiver_controller::FailedModules;
 use transceiver_controller::IdentifierResult;
 use transceiver_controller::LedStateResult;
@@ -32,7 +33,6 @@ use transceiver_controller::PowerModeResult;
 use transceiver_controller::PowerState;
 use transceiver_controller::ReadResult;
 use transceiver_controller::SpRequest;
-use transceiver_controller::StatusResult;
 use transceiver_controller::VendorInfoResult;
 use transceiver_decode::Aux1Monitor;
 use transceiver_decode::Aux2Monitor;
@@ -41,6 +41,7 @@ use transceiver_decode::ReceiverPower;
 use transceiver_decode::VendorInfo;
 use transceiver_messages::filter_module_data;
 use transceiver_messages::mac::MacAddrs;
+use transceiver_messages::message::ExtendedStatus;
 use transceiver_messages::message::LedState;
 use transceiver_messages::message::Status;
 use transceiver_messages::mgmt::cmis;
@@ -222,7 +223,10 @@ enum StatusKind {
     // Print the usual Display representation of each set of status bits.
     Normal,
     // Print the truth value of a set of status bits, from all modules.
-    Limited { with: Status, without: Status },
+    Limited {
+        with: ExtendedStatus,
+        without: ExtendedStatus,
+    },
     // Print all bits from all modules.
     All,
 }
@@ -231,14 +235,14 @@ enum StatusKind {
 struct StatusFlags {
     /// Find modules with the provided flags set.
     #[arg(short, value_parser = parse_status)]
-    with: Option<Status>,
+    with: Option<ExtendedStatus>,
     /// Find modules without the provided flags set.
     #[arg(short, value_parser = parse_status)]
-    without: Option<Status>,
+    without: Option<ExtendedStatus>,
 }
 
-fn parse_status(s: &str) -> Result<Status, String> {
-    s.parse::<Status>().map_err(|e| e.to_string())
+fn parse_status(s: &str) -> Result<ExtendedStatus, String> {
+    s.parse::<ExtendedStatus>().map_err(|e| e.to_string())
 }
 
 #[derive(Subcommand)]
@@ -255,9 +259,9 @@ enum Cmd {
         /// shell interpreting that as a shell-pipeline, the bits should be
         /// quoted -- for example: "PRESENT | RESET".
         #[arg(long, value_parser = parse_status, conflicts_with = "all")]
-        with: Option<Status>,
+        with: Option<ExtendedStatus>,
         #[arg(long, value_parser = parse_status, conflicts_with = "all")]
-        without: Option<Status>,
+        without: Option<ExtendedStatus>,
 
         /// Print all bits from all modules.
         ///
@@ -471,6 +475,13 @@ enum Cmd {
     /// power supply to be enabled again.
     ClearPowerFault,
 
+    /// Clears the "disabled" latch on a set of modules
+    ///
+    /// The SP may make a policy decision to disable modules (e.g. if they
+    /// aren't reporting temperatures to the thermal loop).  Clearing the latch
+    /// allows them to be powered on again.
+    ClearDisableLatch,
+
     /// Return the state of the addressed modules' attention LEDs.
     Leds,
 
@@ -600,8 +611,8 @@ async fn main() -> anyhow::Result<()> {
                 (None, None, false) => StatusKind::Normal,
                 (None, None, true) => StatusKind::All,
                 (maybe_with, maybe_without, false) => {
-                    let with = maybe_with.unwrap_or_else(Status::empty);
-                    let without = maybe_without.unwrap_or_else(Status::empty);
+                    let with = maybe_with.unwrap_or_else(ExtendedStatus::empty);
+                    let without = maybe_without.unwrap_or_else(ExtendedStatus::empty);
                     if with.is_empty() && without.is_empty() {
                         eprintln!(
                             "If specified, one of `--with` and `--without` \
@@ -612,10 +623,25 @@ async fn main() -> anyhow::Result<()> {
                 }
                 _ => unreachable!("clap didn't do its job"),
             };
-            let status_result = controller
-                .status(modules)
-                .await
-                .context("Failed to retrieve module status")?;
+            let status_result = match controller.extended_status(modules).await {
+                Ok(v) => v,
+                Err(err) => {
+                    slog::warn!(
+                        &log,
+                        "could not read extended status ({err}); reading status instead",
+                    );
+                    let r = controller
+                        .status(modules)
+                        .await
+                        .context("Failed to retrieve module status")?;
+                    ExtendedStatusResult {
+                        modules: r.modules,
+                        data: r.data.into_iter().map(Into::into).collect(),
+                        failures: r.failures,
+                    }
+                }
+            };
+
             print_module_status(&status_result, kind);
             if !args.ignore_errors {
                 print_failures(&status_result.failures);
@@ -886,6 +912,15 @@ async fn main() -> anyhow::Result<()> {
                 print_failures(&ack_result.failures);
             }
         }
+        Cmd::ClearDisableLatch => {
+            let ack_result = controller
+                .clear_disable_latch(modules)
+                .await
+                .context("Failed to clear disable latch for modules")?;
+            if !args.ignore_errors {
+                print_failures(&ack_result.failures);
+            }
+        }
         Cmd::Leds => {
             let state_result = controller
                 .leds(modules)
@@ -1013,7 +1048,7 @@ fn print_power_mode(mode_result: &PowerModeResult) {
     }
 }
 
-fn print_module_status(status_result: &StatusResult, kind: StatusKind) {
+fn print_module_status(status_result: &ExtendedStatusResult, kind: StatusKind) {
     match kind {
         StatusKind::Normal => {
             println!("Port Status");
@@ -1047,19 +1082,20 @@ fn print_module_status(status_result: &StatusResult, kind: StatusKind) {
 // useful to see how we print the table header itself.
 #[rustfmt::skip]
 fn print_all_status_header() {
-    println!(" +--------------------------------- Port");
-    println!(" |   +----------------------------- {}", Status::PRESENT);
-    println!(" |   |   +------------------------- {}", Status::ENABLED);
-    println!(" |   |   |   +--------------------- {}", Status::RESET);
-    println!(" |   |   |   |   +----------------- {}", Status::LOW_POWER_MODE);
-    println!(" |   |   |   |   |   +------------- {}", Status::INTERRUPT);
-    println!(" |   |   |   |   |   |   +--------- {}", Status::POWER_GOOD);
-    println!(" |   |   |   |   |   |   |   +----- {}", Status::FAULT_POWER_TIMEOUT);
-    println!(" |   |   |   |   |   |   |   |   +- {}", Status::FAULT_POWER_LOST);
-    println!(" v   v   v   v   v   v   v   v   v");
+    println!(" +------------------------------------- Port");
+    println!(" |   +--------------------------------- {}", ExtendedStatus::PRESENT);
+    println!(" |   |   +----------------------------- {}", ExtendedStatus::ENABLED);
+    println!(" |   |   |   +------------------------- {}", ExtendedStatus::RESET);
+    println!(" |   |   |   |   +--------------------- {}", ExtendedStatus::LOW_POWER_MODE);
+    println!(" |   |   |   |   |   +----------------- {}", ExtendedStatus::INTERRUPT);
+    println!(" |   |   |   |   |   |   +------------- {}", ExtendedStatus::POWER_GOOD);
+    println!(" |   |   |   |   |   |   |   +--------- {}", ExtendedStatus::FAULT_POWER_TIMEOUT);
+    println!(" |   |   |   |   |   |   |   |   +----- {}", ExtendedStatus::FAULT_POWER_LOST);
+    println!(" |   |   |   |   |   |   |   |   |   +- {}", ExtendedStatus::DISABLED_BY_SP);
+    println!(" v   v   v   v   v   v   v   v   v   v");
 }
 
-fn print_all_status(status_result: &StatusResult) {
+fn print_all_status(status_result: &ExtendedStatusResult) {
     print_all_status_header();
     for (port, status) in status_result
         .modules
@@ -1067,7 +1103,7 @@ fn print_all_status(status_result: &StatusResult) {
         .zip(status_result.status().iter())
     {
         print!("{port:>2}   ");
-        for bit in Status::all().iter() {
+        for bit in ExtendedStatus::all().iter() {
             let word = if status.contains(bit) { "1" } else { "0" };
             print!("{word:<WIDTH$}");
         }
