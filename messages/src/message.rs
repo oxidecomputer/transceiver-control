@@ -773,7 +773,7 @@ bitflags::bitflags! {
 
         /// The SP has disabled the port associated with this module
         ///
-        /// For example, this could occurs if the module was initialized but is
+        /// For example, this could occur if the module was initialized but is
         /// now NACKing I2C requests for its temperature.
         const DISABLED_BY_SP      = 0b1_0000_0000;
     }
