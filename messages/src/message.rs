@@ -786,6 +786,8 @@ impl fmt::Display for ExtendedStatus {
 
 impl From<Status> for ExtendedStatus {
     fn from(s: Status) -> Self {
+        // The requirement that Status is a subset of ExtendedStatus is checked
+        // in a unit test below (`test_extended_status`)
         Self::from_bits(s.bits() as u32).expect("Status must be a subset of ExtendedStatus")
     }
 }
