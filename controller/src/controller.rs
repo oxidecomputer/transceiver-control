@@ -36,6 +36,7 @@ use transceiver_decode::Identifier;
 use transceiver_decode::MemoryModel;
 use transceiver_decode::Monitors;
 use transceiver_decode::ParseFromModule;
+use transceiver_decode::Performance;
 use transceiver_decode::PowerControl;
 use transceiver_decode::VendorInfo;
 use transceiver_messages::filter_module_data;
@@ -1157,6 +1158,12 @@ impl Controller {
     /// Return the monitoring information of a set of modules.
     pub async fn monitors(&self, modules: ModuleId) -> Result<MonitorResult, Error> {
         self.parse_modules_by_identifier::<Monitors>(modules).await
+    }
+
+    /// Return the performance information for a set of modules
+    pub async fn performance(&self, modules: ModuleId) -> Result<PerformanceResult, Error> {
+        self.parse_modules_by_identifier::<Performance>(modules)
+            .await
     }
 
     // Parse a decodable piece of data from each module.

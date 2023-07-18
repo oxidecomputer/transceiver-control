@@ -9,11 +9,13 @@
 mod ident;
 mod memory_model;
 mod monitors;
+mod performance;
 mod power;
 
 pub use ident::*;
 pub use memory_model::*;
 pub use monitors::*;
+pub use performance::*;
 pub use power::*;
 
 pub use transceiver_messages::mgmt::Error as MgmtError;
