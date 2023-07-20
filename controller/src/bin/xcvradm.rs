@@ -1440,7 +1440,7 @@ fn print_performance(performance_result: &PerformanceResult) {
                 print_array_of_option_property(
                     NAME_WIDTH,
                     "Rx amplitudes supported",
-                    sff.rx_output_ampl_support,
+                    sff.rx_output_ampl_support.as_slice(),
                 );
                 print_property(
                     NAME_WIDTH,
@@ -1462,7 +1462,7 @@ fn print_performance(performance_result: &PerformanceResult) {
                     let time = byte * 100;
                     print_property(NAME_WIDTH, "Max CTLE settling time (ms)", time);
                 } else {
-                    print_property(NAME_WIDTH, "Max CTLE settling time (ms)", unsupported);
+                    print_property(NAME_WIDTH, "Max CTLE settling time (ms)", &unsupported);
                 }
                 print_optional_property(NAME_WIDTH, "Host-side FEC enabled", sff.host_fec_enabled);
                 print_optional_property(
@@ -1473,43 +1473,47 @@ fn print_performance(performance_result: &PerformanceResult) {
                 print_optional_array_property(
                     NAME_WIDTH,
                     "Tx force squelched (lanes 0-3)",
-                    sff.tx_force_squelches,
+                    sff.tx_force_squelches.as_ref().map(|x| x.as_slice()),
                 );
                 print_optional_array_property(
                     NAME_WIDTH,
                     "Tx adaptive EQ frozen (lanes 0-3)",
-                    sff.tx_ae_freezes,
+                    sff.tx_ae_freezes.as_ref().map(|x| x.as_slice()),
                 );
-                print_array_property(NAME_WIDTH, "Tx EQ control (lanes 0-3)", sff.tx_input_eqs);
+                print_array_property(
+                    NAME_WIDTH,
+                    "Tx EQ control (lanes 0-3)",
+                    sff.tx_input_eqs.as_slice(),
+                );
                 print_array_property(
                     NAME_WIDTH,
                     "Rx emphasis control (lanes 0-3)",
-                    sff.rx_output_emphases,
+                    sff.rx_output_emphases.as_slice(),
                 );
                 print_array_property(
                     NAME_WIDTH,
                     "Rx amplitude control (lanes 0-3)",
-                    sff.rx_output_ampls,
+                    sff.rx_output_ampls.as_slice(),
                 );
                 print_array_property(
                     NAME_WIDTH,
                     "Rx squelch disabled (lanes 0-3)",
-                    sff.rx_squelch_disables,
+                    sff.rx_squelch_disables.as_slice(),
                 );
                 print_array_property(
                     NAME_WIDTH,
                     "Tx squelch disabled (lanes 0-3)",
-                    sff.tx_squelch_disables,
+                    sff.tx_squelch_disables.as_slice(),
                 );
                 print_array_property(
                     NAME_WIDTH,
                     "Rx output disabled (lanes 0-3)",
-                    sff.rx_output_disables,
+                    sff.rx_output_disables.as_slice(),
                 );
                 print_optional_array_property(
                     NAME_WIDTH,
                     "Tx adaptive EQ enabled (lanes 0-3)",
-                    sff.tx_adaptive_eq_enables,
+                    sff.tx_adaptive_eq_enables.as_ref().map(|x| x.as_slice()),
                 );
             }
             None => (),
@@ -1533,8 +1537,8 @@ fn print_optional_property<T: Display>(name_width: usize, name: &str, value: Opt
     }
 }
 
-fn print_array_property<T: Display>(name_width: usize, name: &str, values: [T]) {
-    print!("  {}: [", format!("{:>name_width$}", name));
+fn print_array_property<T: Display + Sized>(name_width: usize, name: &str, values: &[T]) {
+    print!("  {}: [ ", format!("{:>name_width$}", name));
     for (i, val) in values.into_iter().enumerate() {
         print!("{}", val);
         if i < values.len() - 1 {
@@ -1544,15 +1548,23 @@ fn print_array_property<T: Display>(name_width: usize, name: &str, values: [T]) 
     println!(" ]");
 }
 
-fn print_optional_array_property<T: Display>(name_width: usize, name: &str, values: Option<&[T]>) {
+fn print_optional_array_property<T: Display + Sized>(
+    name_width: usize,
+    name: &str,
+    values: Option<&[T]>,
+) {
     match values {
         Some(array) => print_array_property(name_width, name, array),
-        None => println!("--"),
+        None => print_property(name_width, name, "--"),
     }
 }
 
-fn print_array_of_option_property<T: Display>(name_width: usize, name: &str, values: [Option<T>]) {
-    print!("  {}: [", format!("{:>name_width$}", name));
+fn print_array_of_option_property<T: Display + Sized>(
+    name_width: usize,
+    name: &str,
+    values: &[Option<T>],
+) {
+    print!("  {}: [ ", format!("{:>name_width$}", name));
     for (i, val) in values.into_iter().enumerate() {
         match val {
             Some(v) => {
