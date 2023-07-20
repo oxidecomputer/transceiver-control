@@ -23,7 +23,7 @@ pub struct Performance {
 // SFF-8636
 
 #[derive(Clone, Debug, Default)]
-pub struct SffPerformance<'a> {
+pub struct SffPerformance {
     pub max_tx_input_eq: TxInputEqualization,
     pub max_rx_output_emphasis: RxOutputEmphasis,
     pub rx_output_emphasis_type: RxOutputEmphasisType,
@@ -34,15 +34,15 @@ pub struct SffPerformance<'a> {
     pub max_ctle_settle_time: Option<u8>,
     pub host_fec_enabled: Option<bool>,
     pub media_fec_enabled: Option<bool>,
-    pub tx_force_squelches: Option<&'a[bool; 4]>,
-    pub tx_ae_freezes: Option<&'a[bool; 4]>,
+    pub tx_force_squelches: Option<[bool; 4]>,
+    pub tx_ae_freezes: Option<[bool; 4]>,
     pub tx_input_eqs: [TxInputEqualization; 4],
     pub rx_output_emphases: [RxOutputEmphasis; 4],
     pub rx_output_ampls: [RxOutputAmplitudeSupport; 4],
     pub rx_squelch_disables: [bool; 4],
     pub tx_squelch_disables: [bool; 4],
     pub rx_output_disables: [bool; 4],
-    pub tx_adaptive_eq_enables: Option<&'a[bool; 4]>,
+    pub tx_adaptive_eq_enables: Option<[bool; 4]>,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -417,6 +417,8 @@ impl ParseFromModule for Performance {
                 let mut media_fec_ctrl_support = false;
                 let mut tx_force_squelch_support = false;
 
+                let mut tx_force_squelches: [bool; 4] = [false; 4];
+
                 for idx in 0..18 {
                     let byte = bytes[idx];
                     match idx {
@@ -431,11 +433,8 @@ impl ParseFromModule for Performance {
                             for i in 0..4 {
                                 let ampl = byte & i as u8;
                                 let supported = ampl != 0;
-                                perf.rx_output_ampl_support[i] = if supported {
-                                    Some(ampl.into())
-                                } else {
-                                    None
-                                }
+                                perf.rx_output_ampl_support[i] =
+                                    if supported { Some(ampl.into()) } else { None }
                             }
                         }
                         // byte 227
