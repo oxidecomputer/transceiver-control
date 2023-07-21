@@ -60,7 +60,7 @@ pub enum TxInputEqualization {
     NineDb,
     TenDb,
     Reserved(u8),
-    Unsupported(u8),
+    Invalid(u8),
 }
 
 impl From<u8> for TxInputEqualization {
@@ -79,7 +79,7 @@ impl From<u8> for TxInputEqualization {
             0b1001 => NineDb,
             0b1010 => TenDb,
             0b1011..=0b1111 => Reserved(x),
-            _ => Unsupported(x),
+            _ => Invalid(x),
         }
     }
 }
@@ -107,8 +107,8 @@ impl core::fmt::Display for TxInputEqualization {
                     tmp = format!("Reserved(0x{x:x})");
                     &tmp
                 }
-                Unsupported(x) => {
-                    tmp = format!("Unsupported(0x{x:x})");
+                Invalid(x) => {
+                    tmp = format!("Invalid(0x{x:x})");
                     &tmp
                 }
             }
@@ -128,7 +128,7 @@ pub enum RxOutputEmphasis {
     SixDb,
     SevenDb,
     Reserved(u8),
-    Unsupported(u8),
+    Invalid(u8),
 }
 
 impl From<u8> for RxOutputEmphasis {
@@ -144,7 +144,7 @@ impl From<u8> for RxOutputEmphasis {
             0b0110 => SixDb,
             0b0111 => SevenDb,
             0b1000..=0b1111 => Reserved(x),
-            _ => Unsupported(x),
+            _ => Invalid(x),
         }
     }
 }
@@ -169,8 +169,8 @@ impl core::fmt::Display for RxOutputEmphasis {
                     tmp = format!("Reserved(0x{x:x})");
                     &tmp
                 }
-                Unsupported(x) => {
-                    tmp = format!("Unsupported(0x{x:x})");
+                Invalid(x) => {
+                    tmp = format!("Invalid(0x{x:x})");
                     &tmp
                 }
             }
@@ -185,7 +185,7 @@ pub enum RxOutputEmphasisType {
     SteadyState,
     Average,
     Reserved,
-    Unsupported(u8),
+    Invalid(u8),
 }
 
 impl From<u8> for RxOutputEmphasisType {
@@ -196,7 +196,7 @@ impl From<u8> for RxOutputEmphasisType {
             0b01 => SteadyState,
             0b10 => Average,
             0b11 => Reserved,
-            _ => Unsupported(x),
+            _ => Invalid(x),
         }
     }
 }
@@ -214,8 +214,8 @@ impl core::fmt::Display for RxOutputEmphasisType {
                 SteadyState => "Steady state amplitude stays constant",
                 Average => "Average of peak-to-peak and steady state amplitude stays constant",
                 Reserved => "Reserved",
-                Unsupported(x) => {
-                    tmp = format!("Unsupported(0x{x:x})");
+                Invalid(x) => {
+                    tmp = format!("Invalid(0x{x:x})");
                     &tmp
                 }
             }
@@ -231,7 +231,7 @@ pub enum RxOutputAmplitudeSupport {
     FourToEightHundred,
     SixToTwelveHundred,
     Reserved(u8),
-    Unsupported(u8),
+    Invalid(u8),
 }
 
 impl From<u8> for RxOutputAmplitudeSupport {
@@ -243,7 +243,7 @@ impl From<u8> for RxOutputAmplitudeSupport {
             0b0010 => FourToEightHundred,
             0b0011 => SixToTwelveHundred,
             0b0100..=0b1111 => Reserved(x),
-            _ => Unsupported(x),
+            _ => Invalid(x),
         }
     }
 }
@@ -264,8 +264,8 @@ impl core::fmt::Display for RxOutputAmplitudeSupport {
                     tmp = format!("Reserved(0x{x:x})");
                     &tmp
                 }
-                Unsupported(x) => {
-                    tmp = format!("Unsupported(0x{x:x})");
+                Invalid(x) => {
+                    tmp = format!("Invalid(0x{x:x})");
                     &tmp
                 }
             }
@@ -276,93 +276,152 @@ impl core::fmt::Display for RxOutputAmplitudeSupport {
 // CMIS
 
 #[derive(Clone, Debug, Default)]
-pub struct CmisPerformance {}
-/// Description of transceiver performance diagnostics control
-// #[derive(Clone, Copy, Debug, PartialEq)]
-// pub struct PerfDiagControl {
-//     pub loopback_capability: LoopbackCapabilities,
-//     pub diagnostic_measurement: DiagnosticMeasurementCapabilities,
-//     pub diagnostic_reporting: DiagnosticReportingCapabilities,
-//     pub pattern_location: PatternGenAndCheckLocation,
-// }
+pub struct CmisPerformance {
+    pub gating_support: GatingSupport,
+    pub host_pattern_gen_support: Vec<PatternId>,
+    pub media_pattern_gen_support: Vec<PatternId>,
+    pub host_pattern_check_support: Vec<PatternId>,
+    pub media_pattern_check_support: Vec<PatternId>,
+}
 
-// /// Loopback capabilties advertisement
-// pub struct LoopbackCapabilities {
-//     pub simultaneous: bool,
-//     pub media_per_lane: bool,
-//     pub host_per_lane: bool,
-//     pub host_input: bool,
-//     pub host_output: bool,
-//     pub media_input: bool,
-//     pub media_output: bool,
-// }
+/// Loopback capabilties advertisement
+#[derive(Clone, Debug, Default)]
+pub struct LoopbackCapabilities {
+    pub simultaneous: bool,
+    pub media_per_lane: bool,
+    pub host_per_lane: bool,
+    pub host_input: bool,
+    pub host_output: bool,
+    pub media_input: bool,
+    pub media_output: bool,
+}
 
-// /// Diagnostic measurement capabilities advertisement
-// pub struct DiagnosticMeasurementCapabilities {
-//     pub gating: GatingSupport,
-//     pub gating_results: bool,
-//     pub periodic_updates: bool,
-//     pub per_lane_gating: bool,
-//     pub auto_restart_gating: bool,
-// }
+/// Diagnostic measurement capabilities advertisement
+#[derive(Clone, Debug, Default)]
+pub struct DiagnosticMeasurementCapabilities {
+    pub gating_results: bool,
+    pub periodic_updates: bool,
+    pub per_lane_gating: bool,
+    pub auto_restart_gating: bool,
+}
 
-// /// Measurement over a given time interval (gating)
-// pub enum GatingSupport {
-//     NotSupported = 0b00,
-//     LTE2ms = 0b01, // <= 2ms
-//     LTE20ms = 0b10, // <= 20ms
-//     GT20ms = 0b11, // > 20ms
-// }
+/// Measurement over a given time interval (gating)
+#[derive(Clone, Debug, Default)]
+pub enum GatingSupport {
+    #[default]
+    NotSupported,
+    LTE2ms, // <= 2ms
+    LTE20ms, // <= 20ms
+    GT20ms, // > 20ms
+    Invalid(u8),
+}
 
-// /// Diagnostic reporting capabilities advertisement
-// pub struct DiagnosticReportingCapabilities {
-//     pub media_fec: bool,
-//     pub host_fec: bool,
-//     pub media_input_snr: bool,
-//     pub host_input_snr: bool,
-//     pub bits_and_errors_counting: bool,
-//     pub bit_err_ratio_results: bool,
-// }
+impl From<u8> for GatingSupport {
+    fn from(x: u8) -> GatingSupport {
+        use GatingSupport::*;
+        match x {
+            0b00 => NotSupported,
+            0b01 => LTE2ms,
+            0b10 => LTE20ms,
+            0b11 => GT20ms,
+            _ => Invalid(x),
+        }
+    }
+}
 
-// /// Pattern generation and checking location advertisement
-// pub struct PatternGenAndCheckLocation {
-//     pub media_gen_pre_fec: bool,
-//     pub media_gen_post_fec: bool,
-//     pub media_check_pre_fec: bool,
-//     pub media_check_post_fec: bool,
-//     pub host_gen_pre_fec: bool,
-//     pub host_gen_post_fec: bool,
-//     pub host_check_pre_fec: bool,
-//     pub host_check_post_fec: bool,
-// }
+impl core::fmt::Display for GatingSupport {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        use GatingSupport::*;
+        let tmp;
+        write!(
+            f,
+            "{}",
+            match self {
+                NotSupported => "--",
+                LTE2ms => "time accuracy <= 2 ms",
+                LTE20ms => "time accuracy <= 20 ms",
+                GT20ms => "time accuracy > 20 ms",
+                Invalid(x) => {
+                    tmp = format!("Invalid(0x{x:x})");
+                    &tmp
+                }
+            }
+        )
+    }
+}
 
-// /// Pattern generation capabilities advertisement
-// pub struct PatternSupport {
-//     pub host_gen: Vec<PatternId>,
-//     pub media_gen: Vec<PatternId>,
-//     pub host_check: Vec<PatternId>,
-//     pub media_check: Vec<PatternId>,
-// }
+/// Diagnostic reporting capabilities advertisement
+#[derive(Clone, Debug, Default)]
+pub struct DiagnosticReportingCapabilities {
+    pub media_fec: bool,
+    pub host_fec: bool,
+    pub media_input_snr: bool,
+    pub host_input_snr: bool,
+    pub bits_and_errors_counting: bool,
+    pub bit_err_ratio_results: bool,
+}
 
-// /// PRBS specifications for patterns
-// pub enum PatternId {
-//     Prbs31Q = 0,
-//     Prbs31 = 1,
-//     Prbs23Q = 2,
-//     Prbs23 = 3,
-//     Prbs15Q = 4,
-//     Prbs15 = 5,
-//     Prbs13Q = 6,
-//     Prbs13 = 7,
-//     Prbs9Q = 8,
-//     Prbs9 = 9,
-//     Prbs7Q = 10,
-//     Prbs7 = 11,
-//     SsprQ = 12,
-//     Reserved = 13,
-//     Custom = 14,
-//     UserPattern = 15,
-// }
+/// Pattern generation and checking location advertisement
+#[derive(Clone, Debug, Default)]
+pub struct PatternGenAndCheckLocation {
+    pub media_gen_pre_fec: bool,
+    pub media_gen_post_fec: bool,
+    pub media_check_pre_fec: bool,
+    pub media_check_post_fec: bool,
+    pub host_gen_pre_fec: bool,
+    pub host_gen_post_fec: bool,
+    pub host_check_pre_fec: bool,
+    pub host_check_post_fec: bool,
+}
+
+/// PRBS specifications for patterns
+#[derive(Clone, Debug)]
+pub enum PatternId {
+    PRBS31Q = 0,
+    PRBS31 = 1,
+    PRBS23Q = 2,
+    PRBS23 = 3,
+    PRBS15Q = 4,
+    PRBS15 = 5,
+    PRBS13Q = 6,
+    PRBS13 = 7,
+    PRBS9Q = 8,
+    PRBS9 = 9,
+    PRBS7Q = 10,
+    PRBS7 = 11,
+    SSPRQ = 12,
+    Reserved = 13,
+    Custom = 14,
+    UserPattern = 15,
+}
+
+impl core::fmt::Display for PatternId {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        use PatternId::*;
+        write!(
+            f,
+            "{}",
+            match self {
+                PRBS31Q => "PRBS31Q",
+                PRBS31 => "PRBS31",
+                PRBS23Q => "PRBS23Q",
+                PRBS23 => "PRBS23",
+                PRBS15Q => "PRBS15Q",
+                PRBS15 => "PRBS15",
+                PRBS13Q => "PRBS13Q",
+                PRBS13 => "PRBS13",
+                PRBS9Q => "PRBS9Q",
+                PRBS9 => "PRBS9",
+                PRBS7Q => "PRBS7Q",
+                PRBS7 => "PRBS7",
+                SSPRQ => "SSPRQ",
+                Reserved => "Reserved",
+                Custom => "Custom",
+                UserPattern => "UserPattern",
+            }
+        )
+    }
+}
 
 impl ParseFromModule for Performance {
     fn reads(id: Identifier) -> Result<Vec<MemoryRead>, Error> {
@@ -387,9 +446,18 @@ impl ParseFromModule for Performance {
                 reads.push(bulk);
                 Ok(reads)
             }
-            // Identifier::QsfpPlusCmis | Identifier::QsfpDD => {
+            Identifier::QsfpPlusCmis | Identifier::QsfpDD => {
+                // Begin by grabbing most of the Module Performance and
+                // Diagnostics Control page as most of it is of interest
+                //
+                // See SFF-8636 rev w.11 Table 8-66 for an overview.
+                let page = cmis::Page::Upper(cmis::UpperPage::new_banked(0x13, 0x0).unwrap());
+                let diagnostics = MemoryRead::new(page, 128, 96).unwrap();
 
-            // }
+                let mut reads = Vec::with_capacity(1);
+                reads.push(diagnostics);
+                Ok(reads)
+            }
             _ => Err(Error::UnsupportedIdentifier(id)),
         }
     }
@@ -416,8 +484,6 @@ impl ParseFromModule for Performance {
                 let mut host_fec_ctrl_support = false;
                 let mut media_fec_ctrl_support = false;
                 let mut tx_force_squelch_support = false;
-
-                let mut tx_force_squelches: [bool; 4] = [false; 4];
 
                 for idx in 0..18 {
                     let byte = bytes[idx];
@@ -559,6 +625,107 @@ impl ParseFromModule for Performance {
                 Ok(Self {
                     sff: Some(perf),
                     cmis: None,
+                })
+            }
+            Identifier::QsfpPlusCmis | Identifier::QsfpDD => {
+                let mut perf: CmisPerformance = Default::default();
+
+                let bytes = reads.next().ok_or(Error::ParseFailed)?;
+
+                let mut loopback_support: LoopbackCapabilities = Default::default();
+                let mut diagnostics_support: DiagnosticMeasurementCapabilities = Default::default();
+                let mut reporting_support: DiagnosticReportingCapabilities = Default::default();
+                let mut pattern_support: PatternGenAndCheckLocation = Default::default();
+
+                for idx in 0..96 {
+                    let byte = bytes[idx];
+                    match idx {
+                        // byte 128
+                        0 => {
+                            loopback_support.simultaneous = (byte & 0x40) != 0;
+                            loopback_support.media_per_lane = (byte & 0x20) != 0;
+                            loopback_support.host_per_lane = (byte & 0x10) != 0;
+                            loopback_support.host_input = (byte & 0x08) != 0;
+                            loopback_support.host_output = (byte & 0x04) != 0;
+                            loopback_support.media_input = (byte & 0x02) != 0;
+                            loopback_support.media_output = (byte & 0x01) != 0;
+                        },
+                        // byte 129
+                        1 => {
+                            perf.gating_support = (byte >> 6).into();
+                            diagnostics_support.gating_results = (byte & 0x20) != 0;
+                            diagnostics_support.periodic_updates = (byte & 0x10) != 0;
+                            diagnostics_support.per_lane_gating = (byte & 0x08) != 0;
+                            diagnostics_support.auto_restart_gating = (byte & 0x04) != 0;
+                        }
+                        // byte 130
+                        2 => {
+                            reporting_support.media_fec = (byte & 0x80) != 0;
+                            reporting_support.host_fec = (byte & 0x40) != 0;
+                            reporting_support.media_input_snr = (byte & 0x20) != 0;
+                            reporting_support.host_input_snr = (byte & 0x10) != 0;
+                            reporting_support.bits_and_errors_counting = (byte & 0x02) != 0;
+                            reporting_support.bit_err_ratio_results = (byte & 0x01) != 0;
+                        }
+                        // byte 131
+                        3 => {
+                            pattern_support.media_gen_pre_fec = (byte & 0x80) != 0;
+                            pattern_support.media_gen_post_fec = (byte & 0x40) != 0;
+                            pattern_support.media_check_pre_fec = (byte & 0x20) != 0;
+                            pattern_support.media_check_post_fec = (byte & 0x10) != 0;
+                            pattern_support.host_gen_pre_fec = (byte & 0x80) != 0;
+                            pattern_support.host_gen_post_fec = (byte & 0x40) != 0;
+                            pattern_support.host_check_pre_fec = (byte & 0x20) != 0;
+                            pattern_support.host_check_post_fec = (byte & 0x10) != 0;
+                        }
+                        // byte 132
+                        4 => {
+                            for i in 0..8 {
+                                let mask = 1 << i;
+                                let supported = (byte & mask) != 0;
+                                if supported {
+                                    match i {
+                                        0 => perf.host_pattern_gen_support.push(PatternId::PRBS31Q),
+                                        1 => perf.host_pattern_gen_support.push(PatternId::PRBS31),
+                                        2 => perf.host_pattern_gen_support.push(PatternId::PRBS23Q),
+                                        3 => perf.host_pattern_gen_support.push(PatternId::PRBS23),
+                                        4 => perf.host_pattern_gen_support.push(PatternId::PRBS15Q),
+                                        5 => perf.host_pattern_gen_support.push(PatternId::PRBS15),
+                                        6 => perf.host_pattern_gen_support.push(PatternId::PRBS13Q),
+                                        7 => perf.host_pattern_gen_support.push(PatternId::PRBS13),
+                                        _ => (),
+                                    }
+                                }
+                            }
+                        }
+                        // byte 133
+                        5 => {
+                            for i in 0..8 {
+                                let mask = 1 << i;
+                                let supported = (byte & mask) != 0;
+                                if supported {
+                                    match i {
+                                        0 => perf.host_pattern_gen_support.push(PatternId::PRBS9Q),
+                                        1 => perf.host_pattern_gen_support.push(PatternId::PRBS9),
+                                        2 => perf.host_pattern_gen_support.push(PatternId::PRBS7Q),
+                                        3 => perf.host_pattern_gen_support.push(PatternId::PRBS7),
+                                        4 => perf.host_pattern_gen_support.push(PatternId::SSPRQ),
+                                        5 => perf.host_pattern_gen_support.push(PatternId::Reserved),
+                                        6 => perf.host_pattern_gen_support.push(PatternId::Custom),
+                                        7 => perf.host_pattern_gen_support.push(PatternId::UserPattern),
+                                        _ => (),
+                                    }
+                                }
+                            }
+                        }
+                        // skip bytes 143 and 184-205
+                        _ => (),
+                    }
+                }
+
+                Ok(Self {
+                    sff: None,
+                    cmis: Some(perf)
                 })
             }
             _ => Err(Error::UnsupportedIdentifier(id)),
