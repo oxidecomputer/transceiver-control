@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
+// Copyright 2024 Oxide Computer Company
 
 #![cfg_attr(all(not(test), not(feature = "std")), no_std)]
 
@@ -61,12 +61,12 @@
 //! the cause of the error in detail.
 //!
 //! > **Important**: In the case that _both_ success and error data is returned
-//! in a response, success data is serialized **first**, followed immediately by
-//! error data. The length of each can be computed with
-//! [`SpResponse::expected_data_len`](message::SpResponse::expected_data_len)
-//! and
-//! [`SpResponse::expected_error_data_len`](message::SpResponse::expected_error_data_len),
-//! respectively.
+//! > in a response, success data is serialized **first**, followed immediately by
+//! > error data. The length of each can be computed with
+//! > [`SpResponse::expected_data_len`](message::SpResponse::expected_data_len)
+//! > and
+//! > [`SpResponse::expected_error_data_len`](message::SpResponse::expected_error_data_len),
+//! > respectively.
 //!
 //! For the most part, `HostRequest` variants do not contain any trailing data.
 //! The exception is [`HostRequest::Write`](message::HostRequest::Write), which
@@ -75,9 +75,9 @@
 //! descriptor.
 //!
 //! > **Important**: The trailing data in a `HostRequest::Write` message is
-//! _broadcast_ to all modules indicate by the message. After a successful
-//! write, every module will contain the requested data in the memory map
-//! location indicated by the write descriptor.
+//! > _broadcast_ to all modules indicate by the message. After a successful
+//! > write, every module will contain the requested data in the memory map
+//! > location indicated by the write descriptor.
 //!
 //! # Full message format
 //!

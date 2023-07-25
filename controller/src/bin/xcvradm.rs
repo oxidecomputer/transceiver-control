@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
+// Copyright 2024 Oxide Computer Company
 
 //! Command-line tool to administer optical transceivers.
 
@@ -14,15 +14,19 @@ use clap::Subcommand;
 use clap::ValueEnum;
 use slog::Drain;
 use slog::Level;
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::stdin;
 use std::io::Read;
 use std::net::Ipv6Addr;
 use std::path::PathBuf;
 use std::time::Duration;
+use tabled::builder::Builder;
+use tabled::settings::Style;
 use tokio::sync::mpsc;
 use transceiver_controller::Config;
 use transceiver_controller::Controller;
+use transceiver_controller::DatapathResult;
 use transceiver_controller::ExtendedStatusResult;
 use transceiver_controller::FailedModules;
 use transceiver_controller::IdentifierResult;
@@ -38,7 +42,12 @@ use transceiver_controller::VendorInfoResult;
 use transceiver_decode::Aux1Monitor;
 use transceiver_decode::Aux2Monitor;
 use transceiver_decode::Aux3Monitor;
+use transceiver_decode::ConnectorType;
+use transceiver_decode::Datapath;
+use transceiver_decode::LaneStatus;
 use transceiver_decode::ReceiverPower;
+use transceiver_decode::Sff8636Datapath;
+use transceiver_decode::SffComplianceCode;
 use transceiver_decode::VendorInfo;
 use transceiver_messages::filter_module_data;
 use transceiver_messages::mac::MacAddrs;
@@ -144,13 +153,13 @@ struct Args {
     /// - "present" addresses all present transceivers on the Sidecar.
     ///
     /// - "off", "low-power", "hi-power" address the transceivers in the given
-    /// power mode.
+    ///   power mode.
     ///
     /// - "cmis" and "sff" address all transceivers of the provided management
-    /// interface.
+    ///   interface.
     ///
     /// - A comma-separated list of integers or integer ranges. E.g., `0,1,2` or
-    /// `0-2,4`. Ranges are inclusive of both ends.
+    ///   `0-2,4`. Ranges are inclusive of both ends.
     #[arg(short, long, value_parser = parse_transceivers)]
     transceivers: Option<Transceivers>,
 
@@ -541,6 +550,18 @@ enum Cmd {
     /// near zero should be treated with caution, and the datasheet should be
     /// consulted for details.
     Monitors,
+
+    /// Return information about the datapath of a set of modules.
+    ///
+    /// This prints information about the state of the datapath, including:
+    ///
+    /// - Number of lanes (for CMIS modules only)
+    /// - Host-side electrical interface
+    /// - Media-side interface
+    /// - Transmitter state (enabled or disabled)
+    /// - Tx and Rx loss-of-signal (LOS) and loss-of-lock (LOL) information
+    /// - Datapath state (for CMIS modules only)
+    Datapath,
 }
 
 // Maximum number of bytes to read from input source for writing to module.
@@ -1040,6 +1061,16 @@ async fn main() -> anyhow::Result<()> {
                 print_failures(&monitor_result.failures);
             }
         }
+        Cmd::Datapath => {
+            let datapath_result = controller
+                .datapath(modules)
+                .await
+                .context("Failed to get datapath state")?;
+            print_datapath(&datapath_result);
+            if !args.ignore_errors {
+                print_failures(&datapath_result.failures);
+            }
+        }
     }
     Ok(())
 }
@@ -1420,6 +1451,197 @@ fn print_monitors(monitor_result: &MonitorResult) {
         // Print additional newline between each port for clarity.
         need_newline = true;
     }
+}
+
+fn print_datapath(datapath: &DatapathResult) {
+    let mut need_newline = false;
+    for (port, path) in datapath.iter() {
+        if need_newline {
+            println!();
+        }
+
+        match path {
+            Datapath::Sff8636 {
+                specification,
+                lanes,
+                connector,
+            } => print_sff8636_datapath(port, connector, specification, lanes),
+            Datapath::Cmis {
+                connector,
+                supported_lanes,
+                datapaths,
+            } => print_cmis_datapath(port, connector, *supported_lanes, datapaths),
+        }
+
+        need_newline = true;
+    }
+}
+
+type CmisLaneStatusPrinter = fn(&LaneStatus) -> String;
+type CmisRowPrinter<'a> = (&'a str, CmisLaneStatusPrinter);
+
+fn print_cmis_datapath(
+    port: u8,
+    connector: &ConnectorType,
+    supported_lanes: u8,
+    datapaths: &BTreeMap<u8, transceiver_decode::CmisDatapath>,
+) {
+    println!("Port {port}");
+    println!("        Connector: {connector}");
+    for (id, datapath) in datapaths.iter() {
+        println!("   Application ID: {}", id);
+        println!(
+            "  Supported lanes: [{}]",
+            (0..8u8)
+                .filter(|bit| supported_lanes & (1 << bit) != 0)
+                .map(|index| (index + 1).to_string())
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+        println!("   Host interface: {}", datapath.application.host_id);
+        println!("  Media interface: {}", datapath.application.media_id);
+        const ROWS: &[CmisRowPrinter] = &[
+            ("State", |st| st.state.to_string()),
+            ("Tx enabled", |st| {
+                st.tx_output_enabled
+                    .map(|p| p.to_string())
+                    .unwrap_or_else(|| String::from("Unsupported"))
+            }),
+            ("Tx input polarity", |st| {
+                st.tx_input_polarity
+                    .map(|p| p.to_string())
+                    .unwrap_or_else(|| String::from("Unsupported"))
+            }),
+            ("Tx auto-squelch", |st| {
+                st.tx_auto_squelch_disable
+                    .map(|p| {
+                        if p {
+                            String::from("Disabled")
+                        } else {
+                            String::from("Enabled")
+                        }
+                    })
+                    .unwrap_or_else(|| String::from("Unsupported"))
+            }),
+            ("Tx force-squelch", |st| {
+                st.tx_force_squelch
+                    .map(|p| p.to_string())
+                    .unwrap_or_else(|| String::from("Unsupported"))
+            }),
+            ("Tx output", |st| st.tx_output_status.to_string()),
+            ("Tx failure", |st| {
+                st.tx_failure
+                    .map(|p| p.to_string())
+                    .unwrap_or_else(|| String::from("Unsupported"))
+            }),
+            ("Tx LOS", |st| {
+                st.tx_los
+                    .map(|p| p.to_string())
+                    .unwrap_or_else(|| String::from("Unsupported"))
+            }),
+            ("Tx LOL", |st| {
+                st.tx_lol
+                    .map(|p| p.to_string())
+                    .unwrap_or_else(|| String::from("Unsupported"))
+            }),
+            ("Tx adaptive EQ fail", |st| {
+                st.tx_adaptive_eq_fail
+                    .map(|p| p.to_string())
+                    .unwrap_or_else(|| String::from("Unsupported"))
+            }),
+            ("Rx enabled", |st| {
+                st.rx_output_enabled
+                    .map(|p| p.to_string())
+                    .unwrap_or_else(|| String::from("Unsupported"))
+            }),
+            ("Rx input polarity", |st| {
+                st.tx_input_polarity
+                    .map(|p| p.to_string())
+                    .unwrap_or_else(|| String::from("Unsupported"))
+            }),
+            ("Rx auto-squelch", |st| {
+                st.rx_auto_squelch_disable
+                    .map(|p| {
+                        if p {
+                            String::from("Disabled")
+                        } else {
+                            String::from("Enabled")
+                        }
+                    })
+                    .unwrap_or_else(|| String::from("Unsupported"))
+            }),
+            ("Rx output", |st| st.rx_output_status.to_string()),
+            ("Rx LOS", |st| {
+                st.rx_los
+                    .map(|p| p.to_string())
+                    .unwrap_or_else(|| String::from("Unsupported"))
+            }),
+            ("Rx LOL", |st| {
+                st.rx_lol
+                    .map(|p| p.to_string())
+                    .unwrap_or_else(|| String::from("Unsupported"))
+            }),
+        ];
+        if !datapath.lane_status.is_empty() {
+            let mut builder = Builder::new();
+            // Push header row
+            let mut header = vec![String::new()];
+            header.extend(
+                datapath
+                    .lane_status
+                    .keys()
+                    .map(|lane| format!("Lane {lane}")),
+            );
+            builder.push_record(header);
+            for (name, getter) in ROWS.iter() {
+                let mut row = vec![String::from(*name)];
+                for (_, status) in datapath.lane_status.iter() {
+                    row.push(getter(status).to_string());
+                }
+                builder.push_record(row);
+            }
+            println!("{}", builder.build().with(Style::empty()));
+        }
+        println!();
+    }
+}
+
+type SffDatapathFlagGetter = fn(&Sff8636Datapath) -> bool;
+type SffDatapathRowGetter<'a> = (&'a str, SffDatapathFlagGetter);
+
+fn print_sff8636_datapath(
+    port: u8,
+    connector: &ConnectorType,
+    specification: &SffComplianceCode,
+    lanes: &[Sff8636Datapath; 4],
+) {
+    println!("Port {port}");
+    println!("        Connector: {connector}");
+    println!("    Specification: {specification}");
+    println!();
+    let mut builder = Builder::with_capacity(9, 5);
+    let mut headers = vec![String::new()];
+    headers.extend((0..4).map(|lane| format!("Lane {lane}")));
+    builder.push_record(headers);
+    const ROWS: &[SffDatapathRowGetter] = &[
+        ("Tx enabled", |p| p.tx_enabled),
+        ("Tx LOS", |p| p.tx_los),
+        ("Tx LOL", |p| p.tx_lol),
+        ("Tx CDR enabled", |p| p.tx_cdr_enabled),
+        ("Tx adapt EQ fault", |p| p.tx_adaptive_eq_fault),
+        ("Tx fault", |p| p.tx_fault),
+        ("Rx LOS", |p| p.rx_los),
+        ("Rx LOL", |p| p.rx_lol),
+        ("Rx CDR enabled", |p| p.rx_cdr_enabled),
+    ];
+    for (name, getter) in ROWS.iter() {
+        let mut row = vec![String::from(*name)];
+        for lane in lanes.iter() {
+            row.push(getter(lane).to_string());
+        }
+        builder.push_record(row);
+    }
+    println!("{}", builder.build().with(Style::empty()));
 }
 
 #[cfg(test)]
