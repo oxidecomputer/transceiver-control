@@ -31,6 +31,7 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
+use transceiver_decode::Datapath;
 use transceiver_decode::Error as DecodeError;
 use transceiver_decode::Identifier;
 use transceiver_decode::MemoryModel;
@@ -1157,6 +1158,11 @@ impl Controller {
     /// Return the monitoring information of a set of modules.
     pub async fn monitors(&self, modules: ModuleId) -> Result<MonitorResult, Error> {
         self.parse_modules_by_identifier::<Monitors>(modules).await
+    }
+
+    /// Return the datapath state for a set of modules.
+    pub async fn datapath(&self, modules: ModuleId) -> Result<DatapathResult, Error> {
+        self.parse_modules_by_identifier::<Datapath>(modules).await
     }
 
     // Parse a decodable piece of data from each module.

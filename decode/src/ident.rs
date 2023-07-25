@@ -439,6 +439,697 @@ fn ascii_to_string(buf: &[u8]) -> String {
     }
 }
 
+/// The host electrical interface ID.
+///
+/// See SFF-8024 Table 4-5.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[repr(u8)]
+#[cfg_attr(
+    any(feature = "api-traits", test),
+    derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)
+)]
+#[cfg_attr(any(feature = "api-traits", test), serde(rename_all = "snake_case"))]
+pub enum HostElectricalInterfaceId {
+    Undefined,
+    Id1000BaseCX,
+    IdXaui,
+    IdXfi,
+    IdSfi,
+    Id25Gaui,
+    IdXlaui,
+    IdXlppi,
+    IdXlaui2,
+    Id50Gaui2,
+    Id50Gaui1,
+    IdCaui4,
+    IdCaui4WithoutFec,
+    IdCaui4WithRsFec,
+    Id100GGaui4,
+    Id100GGaui2,
+    Id100GGaui1S,
+    Id100GGaui1L,
+    Id200GGaui8,
+    Id200GGaui4,
+    Id200GGaui2S,
+    Id200GGaui2L,
+    Id400Gaui16,
+    Id400Gaui8,
+    Id400Gaui4S,
+    Id400Gaui4L,
+    Id800GS,
+    Id800GL,
+    Id10GBaseCx4,
+    Id25GBaseCrCa25GL,
+    Id25GBaseCrS,
+    Id25GBaseCrN,
+    Id40GBaseCr4,
+    Id50GBaseCr2WithRsFec,
+    Id50GBaseCr2WithFirecodeFec,
+    Id50GBaseCr2,
+    Id50GBaseCr,
+    Id100GBaseCr10,
+    Id100GBaseCr4,
+    Id100GBaseCr2,
+    Id100GBaseCr1,
+    Id200GBaseCr4,
+    Id200GBaseCr2,
+    Id400GCr8,
+    Id400GBaseCr4,
+    Id800GEtcCr8,
+    Reserved(u8),
+    Other(u8),
+    Custom(u8),
+    EndOfList,
+}
+
+impl From<u8> for HostElectricalInterfaceId {
+    fn from(x: u8) -> Self {
+        match x {
+            0x00 => HostElectricalInterfaceId::Undefined,
+            0x01 => HostElectricalInterfaceId::Id1000BaseCX,
+            0x02 => HostElectricalInterfaceId::IdXaui,
+            0x03 => HostElectricalInterfaceId::IdXfi,
+            0x04 => HostElectricalInterfaceId::IdSfi,
+            0x05 => HostElectricalInterfaceId::Id25Gaui,
+            0x06 => HostElectricalInterfaceId::IdXlaui,
+            0x07 => HostElectricalInterfaceId::IdXlppi,
+            0x08 => HostElectricalInterfaceId::IdXlaui2,
+            0x09 => HostElectricalInterfaceId::Id50Gaui2,
+            0x0a => HostElectricalInterfaceId::Id50Gaui1,
+            0x0b => HostElectricalInterfaceId::IdCaui4,
+            0x41 => HostElectricalInterfaceId::IdCaui4WithoutFec,
+            0x42 => HostElectricalInterfaceId::IdCaui4WithRsFec,
+            0x0c => HostElectricalInterfaceId::Id100GGaui4,
+            0x0d => HostElectricalInterfaceId::Id100GGaui2,
+            0x4b => HostElectricalInterfaceId::Id100GGaui1S,
+            0x4c => HostElectricalInterfaceId::Id100GGaui1L,
+            0x0e => HostElectricalInterfaceId::Id200GGaui8,
+            0x0f => HostElectricalInterfaceId::Id200GGaui4,
+            0x4d => HostElectricalInterfaceId::Id200GGaui2S,
+            0x4e => HostElectricalInterfaceId::Id200GGaui2L,
+            0x10 => HostElectricalInterfaceId::Id400Gaui16,
+            0x11 => HostElectricalInterfaceId::Id400Gaui8,
+            0x4f => HostElectricalInterfaceId::Id400Gaui4S,
+            0x50 => HostElectricalInterfaceId::Id400Gaui4L,
+            0x51 => HostElectricalInterfaceId::Id800GS,
+            0x52 => HostElectricalInterfaceId::Id800GL,
+            0x13 => HostElectricalInterfaceId::Id10GBaseCx4,
+            0x14 => HostElectricalInterfaceId::Id25GBaseCrCa25GL,
+            0x15 => HostElectricalInterfaceId::Id25GBaseCrS,
+            0x16 => HostElectricalInterfaceId::Id25GBaseCrN,
+            0x17 => HostElectricalInterfaceId::Id40GBaseCr4,
+            0x43 => HostElectricalInterfaceId::Id50GBaseCr2WithRsFec,
+            0x44 => HostElectricalInterfaceId::Id50GBaseCr2WithFirecodeFec,
+            0x45 => HostElectricalInterfaceId::Id50GBaseCr2,
+            0x18 => HostElectricalInterfaceId::Id50GBaseCr,
+            0x19 => HostElectricalInterfaceId::Id100GBaseCr10,
+            0x1a => HostElectricalInterfaceId::Id100GBaseCr4,
+            0x1b => HostElectricalInterfaceId::Id100GBaseCr2,
+            0x46 => HostElectricalInterfaceId::Id100GBaseCr1,
+            0x1c => HostElectricalInterfaceId::Id200GBaseCr4,
+            0x47 => HostElectricalInterfaceId::Id200GBaseCr2,
+            0x1d => HostElectricalInterfaceId::Id400GCr8,
+            0x48 => HostElectricalInterfaceId::Id400GBaseCr4,
+            0x49 => HostElectricalInterfaceId::Id800GEtcCr8,
+            0x12 | 0x30..=0x36 | 0x54..=0xbf => HostElectricalInterfaceId::Reserved(x),
+            0xff => HostElectricalInterfaceId::EndOfList,
+            0xc0..=0xfe => HostElectricalInterfaceId::Custom(x),
+            _ => HostElectricalInterfaceId::Other(x),
+        }
+    }
+}
+
+impl fmt::Display for HostElectricalInterfaceId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let s = match self {
+            HostElectricalInterfaceId::Reserved(x) => format!("Reserved ({x})"),
+            HostElectricalInterfaceId::Custom(x) => format!("Custom ({x})"),
+            HostElectricalInterfaceId::Other(x) => format!("Other ({x})"),
+            _ => match self {
+                HostElectricalInterfaceId::Undefined => "Undefined",
+                HostElectricalInterfaceId::Id1000BaseCX => "1000BASE-CX",
+                HostElectricalInterfaceId::IdXaui => "XAUI",
+                HostElectricalInterfaceId::IdXfi => "XFI",
+                HostElectricalInterfaceId::IdSfi => "SFI",
+                HostElectricalInterfaceId::Id25Gaui => "25GAUI C2M",
+                HostElectricalInterfaceId::IdXlaui => "XLAUI C2M",
+                HostElectricalInterfaceId::IdXlppi => "XLPPI",
+                HostElectricalInterfaceId::IdXlaui2 => "LAUI-2 C2M",
+                HostElectricalInterfaceId::Id50Gaui2 => "50GAUI-2 C2M",
+                HostElectricalInterfaceId::Id50Gaui1 => "50GAUI-1 C2M",
+                HostElectricalInterfaceId::IdCaui4 => "CAUI-4 C2M",
+                HostElectricalInterfaceId::IdCaui4WithoutFec => "CAUI-4 C2M with out FEC",
+                HostElectricalInterfaceId::IdCaui4WithRsFec => "CAUI-4 C2M with RS(528, 514) FEC",
+                HostElectricalInterfaceId::Id100GGaui4 => "100GAUI-4 C2M",
+                HostElectricalInterfaceId::Id100GGaui2 => "100GAUI-2 C2M",
+                HostElectricalInterfaceId::Id100GGaui1S => "100GAUI-1-S C2M",
+                HostElectricalInterfaceId::Id100GGaui1L => "100GAUI-1-L C2M",
+                HostElectricalInterfaceId::Id200GGaui8 => "200GAUI-8 C2M",
+                HostElectricalInterfaceId::Id200GGaui4 => "200GAUI-4 C2M",
+                HostElectricalInterfaceId::Id200GGaui2S => "200GAUI-2-S C2M",
+                HostElectricalInterfaceId::Id200GGaui2L => "200GAUI-2-L C2M",
+                HostElectricalInterfaceId::Id400Gaui16 => "400GAUI-16 C2M",
+                HostElectricalInterfaceId::Id400Gaui8 => "400GAUI-8 C2M",
+                HostElectricalInterfaceId::Id400Gaui4S => "400GAUI-4-S C2M",
+                HostElectricalInterfaceId::Id400Gaui4L => "400GAUI-4-L C2M",
+                HostElectricalInterfaceId::Id800GS => "800G S C2M",
+                HostElectricalInterfaceId::Id800GL => "800G L C2M",
+                HostElectricalInterfaceId::Id10GBaseCx4 => "10GBASE-CX4",
+                HostElectricalInterfaceId::Id25GBaseCrCa25GL => "25GBASE-CR CA-25G-L",
+                HostElectricalInterfaceId::Id25GBaseCrS => "25GBASE-CR or 25GBASE-CR-S CA-25G-S",
+                HostElectricalInterfaceId::Id25GBaseCrN => "25GBASE-CR or 25GBASE-CR-S CA-25G-N",
+                HostElectricalInterfaceId::Id40GBaseCr4 => "40GBASE-CR4",
+                HostElectricalInterfaceId::Id50GBaseCr2WithRsFec => {
+                    "50GBASE-CR2 with RS(528, 514) FEC"
+                }
+                HostElectricalInterfaceId::Id50GBaseCr2WithFirecodeFec => {
+                    "50GBASE-CR2 with Firecode FEC"
+                }
+                HostElectricalInterfaceId::Id50GBaseCr2 => "50GBASE-CR2 with no FEC",
+                HostElectricalInterfaceId::Id50GBaseCr => "50GBASE-CR",
+                HostElectricalInterfaceId::Id100GBaseCr10 => "100GBASE-CR10",
+                HostElectricalInterfaceId::Id100GBaseCr4 => "100GBASE-CR4",
+                HostElectricalInterfaceId::Id100GBaseCr2 => "100GBASE-CR2",
+                HostElectricalInterfaceId::Id100GBaseCr1 => "100GBASE-CR1",
+                HostElectricalInterfaceId::Id200GBaseCr4 => "200GBASE-CR4",
+                HostElectricalInterfaceId::Id200GBaseCr2 => "200GBASE-CR2",
+                HostElectricalInterfaceId::Id400GCr8 => "400G CR8",
+                HostElectricalInterfaceId::Id400GBaseCr4 => "400GBASE-CR4",
+                HostElectricalInterfaceId::Id800GEtcCr8 => "800G-ETC-CR8",
+                HostElectricalInterfaceId::EndOfList => "End of list",
+                _ => unreachable!(),
+            }
+            .to_string(),
+        };
+        write!(f, "{s}")
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(
+    any(feature = "api-traits", test),
+    derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)
+)]
+#[cfg_attr(any(feature = "api-traits", test), serde(rename_all = "snake_case"))]
+pub enum MediaType {
+    Undefined,
+    MultiModeFiber,
+    SingleModeFiber,
+    PassiveCopper,
+    ActiveCable,
+    BaseT,
+    Reserved(u8),
+    Custom(u8),
+}
+
+impl fmt::Display for MediaType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        let s = match self {
+            MediaType::Reserved(x) => format!("Reserved ({x})"),
+            MediaType::Custom(x) => format!("Custom ({x})"),
+            _ => match self {
+                MediaType::Undefined => "Undefined",
+                MediaType::MultiModeFiber => "Multi-mode fiber",
+                MediaType::SingleModeFiber => "Single-mode fiber",
+                MediaType::PassiveCopper => "Passive copper",
+                MediaType::ActiveCable => "Active cable",
+                MediaType::BaseT => "BASE-T",
+                _ => unreachable!(),
+            }
+            .to_string(),
+        };
+        write!(f, "{s}")
+    }
+}
+
+impl From<u8> for MediaType {
+    fn from(x: u8) -> Self {
+        match x {
+            0x00 => Self::Undefined,
+            0x01 => Self::MultiModeFiber,
+            0x02 => Self::SingleModeFiber,
+            0x03 => Self::PassiveCopper,
+            0x04 => Self::ActiveCable,
+            0x05 => Self::BaseT,
+            0x40..=0x8f => Self::Custom(x),
+            _ => Self::Reserved(x),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(
+    any(feature = "api-traits", test),
+    derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)
+)]
+#[cfg_attr(any(feature = "api-traits", test), serde(rename_all = "snake_case"))]
+pub enum MediaInterfaceId {
+    Mmf(MmfMediaInterfaceId),
+    Smf(SmfMediaInterfaceId),
+    PassiveCopper(PassiveCopperMediaInterfaceId),
+    ActiveCable(ActiveCableMediaInterfaceId),
+    BaseT(BaseTMediaInterfaceId),
+}
+
+impl MediaInterfaceId {
+    pub fn from_u8(media_type: MediaType, x: u8) -> Option<Self> {
+        match media_type {
+            MediaType::Undefined | MediaType::Reserved(_) | MediaType::Custom(_) => None,
+            MediaType::MultiModeFiber => Some(MediaInterfaceId::Mmf(MmfMediaInterfaceId::from(x))),
+            MediaType::SingleModeFiber => Some(MediaInterfaceId::Smf(SmfMediaInterfaceId::from(x))),
+            MediaType::PassiveCopper => Some(MediaInterfaceId::PassiveCopper(
+                PassiveCopperMediaInterfaceId::from(x),
+            )),
+            MediaType::ActiveCable => Some(MediaInterfaceId::ActiveCable(
+                ActiveCableMediaInterfaceId::from(x),
+            )),
+            MediaType::BaseT => Some(MediaInterfaceId::BaseT(BaseTMediaInterfaceId::from(x))),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(
+    any(feature = "api-traits", test),
+    derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)
+)]
+#[cfg_attr(any(feature = "api-traits", test), serde(rename_all = "snake_case"))]
+pub enum MmfMediaInterfaceId {
+    Undefined,
+    Id10GBaseSw,
+    Id10GBaseSr,
+    Id25GBaseSr,
+    Id40GBaseSr3,
+    Id40GESwdm4,
+    Id40GEBiDi,
+    Id50GBaseSr,
+    Id100GBaseSr10,
+    Id100GBaseSr4,
+    Id100GBaseSwdm4,
+    Id100GEBiDi,
+    Id100GBaseSr2,
+    Id100GBaseSr1,
+    Id100GBaseVr1,
+    Id200GBaseSr4,
+    Id200GBaseSr2,
+    Id200GBaseVr2,
+    Id400GBaseSr16,
+    Id400GBaseSr8,
+    Id400GBaseSr4,
+    Id400GBaseVr4,
+    Id800GBaseSr8,
+    Id800GBaseVr8,
+    Id400GBaseSr42,
+    Other(u8),
+}
+
+impl From<u8> for MmfMediaInterfaceId {
+    fn from(x: u8) -> Self {
+        match x {
+            0x00 => MmfMediaInterfaceId::Undefined,
+            0x01 => MmfMediaInterfaceId::Id10GBaseSw,
+            0x02 => MmfMediaInterfaceId::Id10GBaseSr,
+            0x03 => MmfMediaInterfaceId::Id25GBaseSr,
+            0x04 => MmfMediaInterfaceId::Id40GBaseSr3,
+            0x05 => MmfMediaInterfaceId::Id40GESwdm4,
+            0x06 => MmfMediaInterfaceId::Id40GEBiDi,
+            0x07 => MmfMediaInterfaceId::Id50GBaseSr,
+            0x08 => MmfMediaInterfaceId::Id100GBaseSr10,
+            0x09 => MmfMediaInterfaceId::Id100GBaseSr4,
+            0x0a => MmfMediaInterfaceId::Id100GBaseSwdm4,
+            0x0b => MmfMediaInterfaceId::Id100GEBiDi,
+            0x0c => MmfMediaInterfaceId::Id100GBaseSr2,
+            0x0d => MmfMediaInterfaceId::Id100GBaseSr1,
+            0x1d => MmfMediaInterfaceId::Id100GBaseVr1,
+            0x0e => MmfMediaInterfaceId::Id200GBaseSr4,
+            0x1b => MmfMediaInterfaceId::Id200GBaseSr2,
+            0x1e => MmfMediaInterfaceId::Id200GBaseVr2,
+            0x0f => MmfMediaInterfaceId::Id400GBaseSr16,
+            0x10 => MmfMediaInterfaceId::Id400GBaseSr8,
+            0x11 => MmfMediaInterfaceId::Id400GBaseSr4,
+            0x1f => MmfMediaInterfaceId::Id400GBaseVr4,
+            0x12 => MmfMediaInterfaceId::Id800GBaseSr8,
+            0x20 => MmfMediaInterfaceId::Id800GBaseVr8,
+            0x1a => MmfMediaInterfaceId::Id400GBaseSr42,
+            _ => MmfMediaInterfaceId::Other(x),
+        }
+    }
+}
+
+impl fmt::Display for MmfMediaInterfaceId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if let MmfMediaInterfaceId::Other(x) = self {
+            write!(f, "Other ({x:0x})")
+        } else {
+            let s = match self {
+                MmfMediaInterfaceId::Undefined => "Undefined",
+                MmfMediaInterfaceId::Id10GBaseSw => "10GBASE-SW",
+                MmfMediaInterfaceId::Id10GBaseSr => "10GBASE-SR",
+                MmfMediaInterfaceId::Id25GBaseSr => "25GBASE-SR",
+                MmfMediaInterfaceId::Id40GBaseSr3 => "40GBASE-SR4",
+                MmfMediaInterfaceId::Id40GESwdm4 => "40GE SWDM4",
+                MmfMediaInterfaceId::Id40GEBiDi => "40GE BiDi",
+                MmfMediaInterfaceId::Id50GBaseSr => "50GBASE-SR",
+                MmfMediaInterfaceId::Id100GBaseSr10 => "100GBASE-SR10",
+                MmfMediaInterfaceId::Id100GBaseSr4 => "100GBASE-SR4",
+                MmfMediaInterfaceId::Id100GBaseSwdm4 => "100GE SWDM4",
+                MmfMediaInterfaceId::Id100GEBiDi => "100GE BiDi",
+                MmfMediaInterfaceId::Id100GBaseSr2 => "100GBASE-SR2",
+                MmfMediaInterfaceId::Id100GBaseSr1 => "100GBASE-SR1",
+                MmfMediaInterfaceId::Id100GBaseVr1 => "100GBASE-VR1",
+                MmfMediaInterfaceId::Id200GBaseSr4 => "200GBASE-SR4",
+                MmfMediaInterfaceId::Id200GBaseSr2 => "200GBASE-SR2",
+                MmfMediaInterfaceId::Id200GBaseVr2 => "200GBASE-VR4",
+                MmfMediaInterfaceId::Id400GBaseSr16 => "400GBASE-SR16",
+                MmfMediaInterfaceId::Id400GBaseSr8 => "400GBASE-SR8",
+                MmfMediaInterfaceId::Id400GBaseSr4 => "400GBASE-SR4",
+                MmfMediaInterfaceId::Id400GBaseVr4 => "400GBASE-VR4",
+                MmfMediaInterfaceId::Id800GBaseSr8 => "800GBASE-SR8",
+                MmfMediaInterfaceId::Id800GBaseVr8 => "800GBASE-VR8",
+                MmfMediaInterfaceId::Id400GBaseSr42 => "400GBASE-SR4.2",
+                MmfMediaInterfaceId::Other(_) => unreachable!(),
+            };
+            write!(f, "{s}")
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(
+    any(feature = "api-traits", test),
+    derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)
+)]
+#[cfg_attr(any(feature = "api-traits", test), serde(rename_all = "snake_case"))]
+pub enum SmfMediaInterfaceId {
+    Undefined,
+    Id10GBaseLw,
+    Id10GBaseEw,
+    Id10GZw,
+    Id10GBaseLr,
+    Id10GBaseEr,
+    Id10GBaseBr,
+    Id10GZr,
+    Id25GBaseLr,
+    Id25GBaseEr,
+    Id25GBaseBr,
+    Id40GBaseLr4,
+    Id40GBaseFr,
+    Id50GBaseFr,
+    Id50GBaseLr,
+    Id50GBaseEr,
+    Id50GBaseBr,
+    Id100GBaseLr4,
+    Id100GBaseEr4,
+    Id100GPsm4,
+    Id100GCwdm4Ocp,
+    Id100GCwdm4,
+    Id100G4wdm10,
+    Id100G4wdm20,
+    Id100G4wdm40,
+    Id100GBaseDr,
+    Id100GFr,
+    Id100GLr,
+    Id100GLr120,
+    Id100GEr130,
+    Id100GEr140,
+    Id100GBaseZr,
+    Id200GBaseDr4,
+    Id200GBaseFr4,
+    Id200GBaseLr4,
+    Id200GBaseEr4,
+    Id400GBaseFr8,
+    Id400GBaseLr8,
+    Id400GBaseEr8,
+    Id400GBaseDr4,
+    Id400GBaseDr42,
+    Id400GFr4,
+    Id400GBaseLr46,
+    Id400GLr410,
+    Id400GBaseZr,
+    Id800GBaseDr8,
+    Id800GBaseDr82,
+    Other(u8),
+}
+
+impl From<u8> for SmfMediaInterfaceId {
+    fn from(x: u8) -> Self {
+        match x {
+            0x00 => SmfMediaInterfaceId::Undefined,
+            0x01 => SmfMediaInterfaceId::Id10GBaseLw,
+            0x02 => SmfMediaInterfaceId::Id10GBaseEw,
+            0x03 => SmfMediaInterfaceId::Id10GZw,
+            0x04 => SmfMediaInterfaceId::Id10GBaseLr,
+            0x05 => SmfMediaInterfaceId::Id10GBaseEr,
+            0x4e => SmfMediaInterfaceId::Id10GBaseBr,
+            0x06 => SmfMediaInterfaceId::Id10GZr,
+            0x07 => SmfMediaInterfaceId::Id25GBaseLr,
+            0x08 => SmfMediaInterfaceId::Id25GBaseEr,
+            0x4f => SmfMediaInterfaceId::Id25GBaseBr,
+            0x09 => SmfMediaInterfaceId::Id40GBaseLr4,
+            0x0a => SmfMediaInterfaceId::Id40GBaseFr,
+            0x0b => SmfMediaInterfaceId::Id50GBaseFr,
+            0x0c => SmfMediaInterfaceId::Id50GBaseLr,
+            0x40 => SmfMediaInterfaceId::Id50GBaseEr,
+            0x50 => SmfMediaInterfaceId::Id50GBaseBr,
+            0x0d => SmfMediaInterfaceId::Id100GBaseLr4,
+            0x0e => SmfMediaInterfaceId::Id100GBaseEr4,
+            0x0f => SmfMediaInterfaceId::Id100GPsm4,
+            0x34 => SmfMediaInterfaceId::Id100GCwdm4Ocp,
+            0x10 => SmfMediaInterfaceId::Id100GCwdm4,
+            0x11 => SmfMediaInterfaceId::Id100G4wdm10,
+            0x12 => SmfMediaInterfaceId::Id100G4wdm20,
+            0x13 => SmfMediaInterfaceId::Id100G4wdm40,
+            0x14 => SmfMediaInterfaceId::Id100GBaseDr,
+            0x15 => SmfMediaInterfaceId::Id100GFr,
+            0x16 => SmfMediaInterfaceId::Id100GLr,
+            0x4a => SmfMediaInterfaceId::Id100GLr120,
+            0x4b => SmfMediaInterfaceId::Id100GEr130,
+            0x4c => SmfMediaInterfaceId::Id100GEr140,
+            0x44 => SmfMediaInterfaceId::Id100GBaseZr,
+            0x17 => SmfMediaInterfaceId::Id200GBaseDr4,
+            0x18 => SmfMediaInterfaceId::Id200GBaseFr4,
+            0x19 => SmfMediaInterfaceId::Id200GBaseLr4,
+            0x41 => SmfMediaInterfaceId::Id200GBaseEr4,
+            0x1a => SmfMediaInterfaceId::Id400GBaseFr8,
+            0x1b => SmfMediaInterfaceId::Id400GBaseLr8,
+            0x42 => SmfMediaInterfaceId::Id400GBaseEr8,
+            0x1c => SmfMediaInterfaceId::Id400GBaseDr4,
+            0x55 => SmfMediaInterfaceId::Id400GBaseDr42,
+            0x1d => SmfMediaInterfaceId::Id400GFr4,
+            0x43 => SmfMediaInterfaceId::Id400GBaseLr46,
+            0x1e => SmfMediaInterfaceId::Id400GLr410,
+            0x4d => SmfMediaInterfaceId::Id400GBaseZr,
+            0x56 => SmfMediaInterfaceId::Id800GBaseDr8,
+            0x57 => SmfMediaInterfaceId::Id800GBaseDr82,
+            _ => SmfMediaInterfaceId::Other(x),
+        }
+    }
+}
+
+impl fmt::Display for SmfMediaInterfaceId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        if let SmfMediaInterfaceId::Other(x) = self {
+            write!(f, "Other ({x:02x})")
+        } else {
+            let s = match self {
+                SmfMediaInterfaceId::Undefined => "Undefined",
+                SmfMediaInterfaceId::Id10GBaseLw => "10GBASE-LW",
+                SmfMediaInterfaceId::Id10GBaseEw => "10GBASE-EW",
+                SmfMediaInterfaceId::Id10GZw => "10G-ZW",
+                SmfMediaInterfaceId::Id10GBaseLr => "10GBASE-LR",
+                SmfMediaInterfaceId::Id10GBaseEr => "10GBASE-ER",
+                SmfMediaInterfaceId::Id10GBaseBr => "10GBASE-BR",
+                SmfMediaInterfaceId::Id10GZr => "10G-ZR",
+                SmfMediaInterfaceId::Id25GBaseLr => "25GBASE-LR",
+                SmfMediaInterfaceId::Id25GBaseEr => "25GBASE-ER",
+                SmfMediaInterfaceId::Id25GBaseBr => "25GBASE-BR",
+                SmfMediaInterfaceId::Id40GBaseLr4 => "40GBASE-LR4",
+                SmfMediaInterfaceId::Id40GBaseFr => "40GBASE-FR",
+                SmfMediaInterfaceId::Id50GBaseFr => "50GBASE-FR",
+                SmfMediaInterfaceId::Id50GBaseLr => "50GBASE-LR",
+                SmfMediaInterfaceId::Id50GBaseEr => "50GBASE-ER",
+                SmfMediaInterfaceId::Id50GBaseBr => "50GBASE-BR",
+                SmfMediaInterfaceId::Id100GBaseLr4 => "100GBASE-LR4",
+                SmfMediaInterfaceId::Id100GBaseEr4 => "100GBASE-ER4",
+                SmfMediaInterfaceId::Id100GPsm4 => "100G PSM4",
+                SmfMediaInterfaceId::Id100GCwdm4Ocp => "100G CWDM4-OCP",
+                SmfMediaInterfaceId::Id100GCwdm4 => "100G CWDM4",
+                SmfMediaInterfaceId::Id100G4wdm10 => "100G 4WDM-10",
+                SmfMediaInterfaceId::Id100G4wdm20 => "100G 4WDM-20",
+                SmfMediaInterfaceId::Id100G4wdm40 => "100G 4WDM-40",
+                SmfMediaInterfaceId::Id100GBaseDr => "100GBASE-DR",
+                SmfMediaInterfaceId::Id100GFr => "100G-FR / 100GBASE-FR1",
+                SmfMediaInterfaceId::Id100GLr => "100G-LR / 100GBASE-LR1",
+                SmfMediaInterfaceId::Id100GLr120 => "100G-LR1-20",
+                SmfMediaInterfaceId::Id100GEr130 => "100G-ER1-30",
+                SmfMediaInterfaceId::Id100GEr140 => "100G-ER1-40",
+                SmfMediaInterfaceId::Id100GBaseZr => "100GBASE-ZR",
+                SmfMediaInterfaceId::Id200GBaseDr4 => "200GBASE-DR4",
+                SmfMediaInterfaceId::Id200GBaseFr4 => "200GBASE-FR4",
+                SmfMediaInterfaceId::Id200GBaseLr4 => "200GBASE-LR4",
+                SmfMediaInterfaceId::Id200GBaseEr4 => "200GBASE-ER4",
+                SmfMediaInterfaceId::Id400GBaseFr8 => "400GBASE-FR8",
+                SmfMediaInterfaceId::Id400GBaseLr8 => "400GBASE-LR8",
+                SmfMediaInterfaceId::Id400GBaseEr8 => "400GBASE-ER8",
+                SmfMediaInterfaceId::Id400GBaseDr4 => "400GBASE-DR4",
+                SmfMediaInterfaceId::Id400GBaseDr42 => "400GBASE-DR4-2",
+                SmfMediaInterfaceId::Id400GFr4 => "400G-FR4 / 400GBASE-FR4",
+                SmfMediaInterfaceId::Id400GBaseLr46 => "400GBASE-LR4-6",
+                SmfMediaInterfaceId::Id400GLr410 => "400G-LR4-10",
+                SmfMediaInterfaceId::Id400GBaseZr => "400GBASE-ZR",
+                SmfMediaInterfaceId::Id800GBaseDr8 => "800GBASE-DR8",
+                SmfMediaInterfaceId::Id800GBaseDr82 => "800GBASE-DR8-2",
+                SmfMediaInterfaceId::Other(_) => unreachable!(),
+            };
+            write!(f, "{s}")
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(
+    any(feature = "api-traits", test),
+    derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)
+)]
+#[cfg_attr(any(feature = "api-traits", test), serde(rename_all = "snake_case"))]
+pub enum PassiveCopperMediaInterfaceId {
+    Undefined,
+    CopperCable,
+    PassiveLoopback,
+    Custom(u8),
+    Reserved(u8),
+}
+
+impl From<u8> for PassiveCopperMediaInterfaceId {
+    fn from(x: u8) -> Self {
+        match x {
+            0x00 => PassiveCopperMediaInterfaceId::Undefined,
+            0x01 => PassiveCopperMediaInterfaceId::CopperCable,
+            0xbf => PassiveCopperMediaInterfaceId::PassiveLoopback,
+            0x02..=0xbe => PassiveCopperMediaInterfaceId::Reserved(x),
+            0xc0..=0xff => PassiveCopperMediaInterfaceId::Custom(x),
+        }
+    }
+}
+
+impl fmt::Display for PassiveCopperMediaInterfaceId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Undefined => write!(f, "Undefined"),
+            Self::CopperCable => write!(f, "Copper cable"),
+            Self::PassiveLoopback => write!(f, "Passive loopback"),
+            Self::Reserved(x) => write!(f, "Reserved ({x:02x})"),
+            Self::Custom(x) => write!(f, "Custom ({x:02x})"),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(
+    any(feature = "api-traits", test),
+    derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)
+)]
+#[cfg_attr(any(feature = "api-traits", test), serde(rename_all = "snake_case"))]
+pub enum ActiveCableMediaInterfaceId {
+    Undefined,
+    ActiveWithBer1en12,
+    ActiveWithBer5en5,
+    ActiveWithBer2p6en4,
+    ActiveWithBer10en6,
+    ActiveLoopback,
+    Custom(u8),
+    Reserved(u8),
+}
+
+impl From<u8> for ActiveCableMediaInterfaceId {
+    fn from(x: u8) -> Self {
+        match x {
+            0x00 => ActiveCableMediaInterfaceId::Undefined,
+            0x01 => ActiveCableMediaInterfaceId::ActiveWithBer1en12,
+            0x02 => ActiveCableMediaInterfaceId::ActiveWithBer5en5,
+            0x03 => ActiveCableMediaInterfaceId::ActiveWithBer2p6en4,
+            0x04 => ActiveCableMediaInterfaceId::ActiveWithBer10en6,
+            0xbf => ActiveCableMediaInterfaceId::ActiveLoopback,
+            0x05..=0xbe => ActiveCableMediaInterfaceId::Reserved(x),
+            0xc0..=0xff => ActiveCableMediaInterfaceId::Custom(x),
+        }
+    }
+}
+
+impl fmt::Display for ActiveCableMediaInterfaceId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ActiveCableMediaInterfaceId::Custom(x) => write!(f, "Custom ({x:02x})"),
+            ActiveCableMediaInterfaceId::Reserved(x) => write!(f, "Reserved ({x:02x})"),
+            ActiveCableMediaInterfaceId::Undefined => write!(f, "Undefined"),
+            ActiveCableMediaInterfaceId::ActiveLoopback => write!(f, "Active Loopback module"),
+            _other => {
+                let ber = match self {
+                    ActiveCableMediaInterfaceId::ActiveWithBer1en12 => 10e-12,
+                    ActiveCableMediaInterfaceId::ActiveWithBer5en5 => 5e-5,
+                    ActiveCableMediaInterfaceId::ActiveWithBer2p6en4 => 2.6e-4,
+                    ActiveCableMediaInterfaceId::ActiveWithBer10en6 => 10e-6,
+                    _ => unreachable!(),
+                };
+                write!(f, "Active Cable assembly with BER < {ber:0.1e}")
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(
+    any(feature = "api-traits", test),
+    derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)
+)]
+#[cfg_attr(any(feature = "api-traits", test), serde(rename_all = "snake_case"))]
+pub enum BaseTMediaInterfaceId {
+    Undefined,
+    Id1000BaseT,
+    Id2p5GBaseT,
+    Id5GBaseT,
+    Id10GBaseT,
+    Id25GBaseT,
+    Id40GBaseT,
+    Id50GBaseT,
+    Custom(u8),
+    Reserved(u8),
+}
+
+impl From<u8> for BaseTMediaInterfaceId {
+    fn from(x: u8) -> Self {
+        match x {
+            0x00 => BaseTMediaInterfaceId::Undefined,
+            0x01 => BaseTMediaInterfaceId::Id1000BaseT,
+            0x02 => BaseTMediaInterfaceId::Id2p5GBaseT,
+            0x03 => BaseTMediaInterfaceId::Id5GBaseT,
+            0x04 => BaseTMediaInterfaceId::Id10GBaseT,
+            0x05 => BaseTMediaInterfaceId::Id25GBaseT,
+            0x06 => BaseTMediaInterfaceId::Id40GBaseT,
+            0x07 => BaseTMediaInterfaceId::Id50GBaseT,
+            0xc0..=0xff => BaseTMediaInterfaceId::Custom(x),
+            0x08..=0xbf => BaseTMediaInterfaceId::Reserved(x),
+        }
+    }
+}
+
+impl fmt::Display for BaseTMediaInterfaceId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            BaseTMediaInterfaceId::Undefined => write!(f, "Undefined"),
+            BaseTMediaInterfaceId::Id1000BaseT => write!(f, "1000BASE-T"),
+            BaseTMediaInterfaceId::Id2p5GBaseT => write!(f, "2.5GBASE-T"),
+            BaseTMediaInterfaceId::Id5GBaseT => write!(f, "5GBASE-T"),
+            BaseTMediaInterfaceId::Id10GBaseT => write!(f, "10GBASE-T"),
+            BaseTMediaInterfaceId::Id25GBaseT => write!(f, "25GBASE-T"),
+            BaseTMediaInterfaceId::Id40GBaseT => write!(f, "40GBASE-T"),
+            BaseTMediaInterfaceId::Id50GBaseT => write!(f, "50GBASE-T"),
+            BaseTMediaInterfaceId::Custom(x) => write!(f, "Custom ({x:02x})"),
+            BaseTMediaInterfaceId::Reserved(x) => write!(f, "Reserved ({x:02x})"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::Identifier;

@@ -23,6 +23,7 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 use transceiver_controller::Config;
 use transceiver_controller::Controller;
+use transceiver_controller::DatapathResult;
 use transceiver_controller::ExtendedStatusResult;
 use transceiver_controller::FailedModules;
 use transceiver_controller::IdentifierResult;
@@ -38,7 +39,9 @@ use transceiver_controller::VendorInfoResult;
 use transceiver_decode::Aux1Monitor;
 use transceiver_decode::Aux2Monitor;
 use transceiver_decode::Aux3Monitor;
+use transceiver_decode::Datapath;
 use transceiver_decode::ReceiverPower;
+use transceiver_decode::Sff8636Datapath;
 use transceiver_decode::VendorInfo;
 use transceiver_messages::filter_module_data;
 use transceiver_messages::mac::MacAddrs;
@@ -541,6 +544,18 @@ enum Cmd {
     /// near zero should be treated with caution, and the datasheet should be
     /// consulted for details.
     Monitors,
+
+    /// Return information about the datapath of a set of modules.
+    ///
+    /// This prints information about the state of the datapath, including:
+    ///
+    /// - Number of lanes (for CMIS modules only)
+    /// - Host-side electrical interface
+    /// - Media-side interface
+    /// - Transmitter state (enabled or disabled)
+    /// - Tx and Rx loss-of-signal (LOS) and loss-of-lock (LOL) information
+    /// - Datapath state (for CMIS modules only)
+    Datapath,
 }
 
 // Maximum number of bytes to read from input source for writing to module.
@@ -1040,6 +1055,16 @@ async fn main() -> anyhow::Result<()> {
                 print_failures(&monitor_result.failures);
             }
         }
+        Cmd::Datapath => {
+            let datapath_result = controller
+                .datapath(modules)
+                .await
+                .context("Failed to get datapath state")?;
+            print_datapath(&datapath_result);
+            if !args.ignore_errors {
+                print_failures(&datapath_result.failures);
+            }
+        }
     }
     Ok(())
 }
@@ -1420,6 +1445,57 @@ fn print_monitors(monitor_result: &MonitorResult) {
         // Print additional newline between each port for clarity.
         need_newline = true;
     }
+}
+
+fn print_datapath(datapath: &DatapathResult) {
+    let mut need_newline = false;
+    for (port, path) in datapath.iter() {
+        if need_newline {
+            println!();
+        }
+
+        match path {
+            Datapath::Sff8636(p) => print_sff8636_datapath(port, p),
+            _ => todo!(),
+        }
+
+        need_newline = true;
+    }
+}
+
+fn print_sff8636_datapath(port: u8, datapaths: &[Sff8636Datapath; 4]) {
+    const WIDTH: usize = 18;
+    const LANE_WIDTH: usize = 6;
+    println!("{:WIDTH$}", format!("Port {port}"));
+    print!("{:WIDTH$}", "");
+    for lane in 0..datapaths.len() {
+        print!("  Lane {lane}");
+    }
+    println!();
+    fn print_field(
+        datapaths: &[Sff8636Datapath; 4],
+        name: &str,
+        getter: impl Fn(&Sff8636Datapath) -> bool,
+    ) {
+        print!("{name:>WIDTH$}: ");
+        for (lane, datapath) in datapaths.iter().enumerate() {
+            print!("{:<LANE_WIDTH$}", getter(&datapath));
+            if lane < datapaths.len() - 1 {
+                print!("  ");
+            } else {
+                println!();
+            }
+        }
+    }
+    print_field(&datapaths, "Tx enabled", |p| p.tx_enabled);
+    print_field(&datapaths, "Tx LOS", |p| p.tx_los);
+    print_field(&datapaths, "Tx LOL", |p| p.tx_lol);
+    print_field(&datapaths, "Tx CDR enabled", |p| p.tx_cdr_enabled);
+    print_field(&datapaths, "Tx adapt EQ fault", |p| p.tx_adaptive_eq_fault);
+    print_field(&datapaths, "Tx fault", |p| p.tx_fault);
+    print_field(&datapaths, "Rx LOS", |p| p.rx_los);
+    print_field(&datapaths, "Rx LOL", |p| p.rx_lol);
+    print_field(&datapaths, "Rx CDR enabled", |p| p.rx_cdr_enabled);
 }
 
 #[cfg(test)]

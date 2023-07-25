@@ -6,11 +6,13 @@
 
 //! Decode various transceiver module memory maps and data.
 
+mod datapath;
 mod ident;
 mod memory_model;
 mod monitors;
 mod power;
 
+pub use datapath::*;
 pub use ident::*;
 pub use memory_model::*;
 pub use monitors::*;

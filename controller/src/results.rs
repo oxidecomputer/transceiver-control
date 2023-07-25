@@ -26,6 +26,7 @@
 use crate::PowerMode;
 use crate::TransceiverError;
 use std::collections::BTreeMap;
+use transceiver_decode::Datapath;
 use transceiver_decode::Identifier;
 use transceiver_decode::MemoryModel;
 use transceiver_decode::Monitors;
@@ -202,6 +203,9 @@ pub type LedStateResult = ModuleResult<LedState>;
 
 /// The result of reading the monitoring data of a set of transceivers.
 pub type MonitorResult = ModuleResult<Monitors>;
+
+/// The result of reading the datapath state of a set of transceivers.
+pub type DatapathResult = ModuleResult<Datapath>;
 
 /// A generic type for accessing module-specific data and failures.
 ///
