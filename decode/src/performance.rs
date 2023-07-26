@@ -278,10 +278,17 @@ impl core::fmt::Display for RxOutputAmplitudeSupport {
 #[derive(Clone, Debug, Default)]
 pub struct CmisPerformance {
     pub gating_support: GatingSupport,
-    pub host_pattern_gen_support: Vec<PatternId>,
-    pub media_pattern_gen_support: Vec<PatternId>,
-    pub host_pattern_check_support: Vec<PatternId>,
-    pub media_pattern_check_support: Vec<PatternId>,
+    pub host_gen_support: PatternIdVec,
+    pub media_gen_support: PatternIdVec,
+    pub host_check_support: PatternIdVec,
+    pub media_check_support: PatternIdVec,
+    pub recovered_clock_for_generator: RecoveredClockForGenerator,
+    pub reference_clock_for_patterns_support: bool,
+    pub user_length_support: u8,
+    pub host_gen_per_lane_control: PatternPerLaneControls,
+    pub host_check_per_lane_control: PatternPerLaneControls,
+    pub media_gen_per_lane_control: PatternPerLaneControls,
+    pub media_check_per_lane_control: PatternPerLaneControls,
 }
 
 /// Loopback capabilties advertisement
@@ -375,29 +382,57 @@ pub struct PatternGenAndCheckLocation {
 }
 
 /// PRBS specifications for patterns
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub enum PatternId {
-    PRBS31Q = 0,
-    PRBS31 = 1,
-    PRBS23Q = 2,
-    PRBS23 = 3,
-    PRBS15Q = 4,
-    PRBS15 = 5,
-    PRBS13Q = 6,
-    PRBS13 = 7,
-    PRBS9Q = 8,
-    PRBS9 = 9,
-    PRBS7Q = 10,
-    PRBS7 = 11,
-    SSPRQ = 12,
-    Reserved = 13,
-    Custom = 14,
-    UserPattern = 15,
+    PRBS31Q,
+    PRBS31,
+    PRBS23Q,
+    PRBS23,
+    PRBS15Q,
+    PRBS15,
+    PRBS13Q,
+    PRBS13,
+    PRBS9Q,
+    PRBS9,
+    PRBS7Q,
+    PRBS7,
+    SSPRQ,
+    #[default]
+    Reserved,
+    Custom,
+    UserPattern,
+    Invalid(u8),
+}
+
+impl From<u8> for PatternId {
+    fn from(x: u8) -> PatternId {
+        use PatternId::*;
+        match x {
+            0b0000 => PRBS31Q,
+            0b0001 => PRBS31,
+            0b0010 => PRBS23Q,
+            0b0011 => PRBS23,
+            0b0100 => PRBS15Q,
+            0b0101 => PRBS15,
+            0b0110 => PRBS13Q,
+            0b0111 => PRBS13,
+            0b1000 => PRBS9Q,
+            0b1001 => PRBS9,
+            0b1010 => PRBS7Q,
+            0b1011 => PRBS7,
+            0b1100 => SSPRQ,
+            0b1101 => Reserved,
+            0b1110 => Custom,
+            0b1111 => UserPattern,
+            _ => Invalid(x)
+        }
+    }
 }
 
 impl core::fmt::Display for PatternId {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         use PatternId::*;
+        let tmp;
         write!(
             f,
             "{}",
@@ -418,10 +453,195 @@ impl core::fmt::Display for PatternId {
                 Reserved => "Reserved",
                 Custom => "Custom",
                 UserPattern => "UserPattern",
+                Invalid(x) => {
+                    tmp = format!("Invalid(0x{x:x})");
+                    &tmp
+                }
             }
         )
     }
 }
+
+/// Helper-type to map PatternId support into a Vec datastructure
+#[derive(Clone, Debug, Default)]
+pub struct PatternIdVec(pub Vec<PatternId>);
+
+impl PatternIdVec {
+    /// First byte represents patterns 7..0, second byte 15..8
+    /// 
+    /// Pattern Ids are definied by CMIS 5.0 Table 8-93
+    pub fn new(bytes: [u8; 2]) -> Self {
+        let ids = u16::from_le_bytes(bytes);
+        let mut new_vec = Vec::<PatternId>::new();
+        for bit in 0..=15 {
+            let mask: u16 = 1 << bit;
+            let supported = (ids & mask) != 0;
+            if supported {
+                match mask {
+                        0 => new_vec.push(PatternId::PRBS31Q),
+                        1 => new_vec.push(PatternId::PRBS31),
+                        2 => new_vec.push(PatternId::PRBS23Q),
+                        3 => new_vec.push(PatternId::PRBS23),
+                        4 => new_vec.push(PatternId::PRBS15Q),
+                        5 => new_vec.push(PatternId::PRBS15),
+                        6 => new_vec.push(PatternId::PRBS13Q),
+                        7 => new_vec.push(PatternId::PRBS13),
+                        8 => new_vec.push(PatternId::PRBS9Q),
+                        9 => new_vec.push(PatternId::PRBS9),
+                        10 => new_vec.push(PatternId::PRBS7Q),
+                        11 => new_vec.push(PatternId::PRBS7),
+                        12 => new_vec.push(PatternId::SSPRQ),
+                        13 => new_vec.push(PatternId::Reserved),
+                        14 => new_vec.push(PatternId::Custom),
+                        15 => new_vec.push(PatternId::UserPattern),
+                        _ => (),
+                }
+            }
+        }
+        Self(new_vec)
+    }
+}
+
+/// Recovered clock for generator options
+#[derive(Clone, Debug, Default)]
+pub enum RecoveredClockForGenerator {
+    #[default]
+    NotSupported,
+    WithoutLoopback,
+    WithLoopback,
+    WithAndWithoutLoopback,
+    Invalid(u8),
+}
+
+impl From<u8> for RecoveredClockForGenerator {
+    fn from(x: u8) -> RecoveredClockForGenerator {
+        use RecoveredClockForGenerator::*;
+        match x {
+            0b00 => NotSupported,
+            0b01 => WithoutLoopback,
+            0b10 => WithLoopback,
+            0b11 => WithAndWithoutLoopback,
+            _ => Invalid(x),
+        }
+    }
+}
+
+impl core::fmt::Display for RecoveredClockForGenerator {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        use RecoveredClockForGenerator::*;
+        let tmp;
+        write!(
+            f,
+            "{}",
+            match self {
+                NotSupported => "Not supported",
+                WithoutLoopback => "Supported without loopback",
+                WithLoopback => "Supported with loopback",
+                WithAndWithoutLoopback => "Supported with and without loopback",
+                Invalid(x) => {
+                    tmp = format!("Invalid(0x{x:x})");
+                    &tmp
+                }
+            }
+        )
+    }
+}
+
+/// Pattern generation and checking data swap and inversion advertisement
+#[derive(Clone, Debug, Default)]
+pub struct PatternGenAndCheckDataSupport {
+    pub media_check_swap: bool,
+    pub media_check_invert: bool,
+    pub media_gen_swap: bool,
+    pub media_gen_invert: bool,
+    pub host_check_swap: bool,
+    pub host_check_invert: bool,
+    pub host_gen_swap: bool,
+    pub host_gen_invert: bool,
+}
+
+/// Pattern generation and checking per-lane enable and pattern advertisement
+#[derive(Clone, Debug, Default)]
+pub struct PatternGenAndCheckPerLaneSupport {
+    pub media_check_per_lane_enable: bool,
+    pub media_check_per_lane_pattern: bool,
+    pub media_gen_per_lane_enable: bool,
+    pub media_gen_per_lane_pattern: bool,
+    pub host_check_per_lane_enable: bool,
+    pub host_check_per_lane_pattern: bool,
+    pub host_gen_per_lane_enable: bool,
+    pub host_gen_per_lane_pattern: bool,
+}
+
+/// Pattern generation and checker controls for both host and media
+#[derive(Clone, Debug, Default)]
+pub struct PatternPerLaneControls {
+    pub enable: [bool; 8],
+    pub invert: [bool; 8],
+    pub byte_swap: [bool; 8],
+    pub pre_fec_enable: [bool; 8],
+    pub pattern_select: [PatternId; 8],
+}
+
+impl PatternPerLaneControls {
+    pub fn new(bytes: [u8; 8]) -> PatternPerLaneControls {
+        let mut ctrl: PatternPerLaneControls = Default::default();
+        for bit in 0..=7 {
+            let mask = 1 << bit;
+            ctrl.enable[bit] = (bytes[0] & mask) != 0;
+            ctrl.invert[bit] = (bytes[1] & mask) != 0;
+            ctrl.byte_swap[bit] = (bytes[2] & mask) != 0;
+            ctrl.pre_fec_enable[bit] = (bytes[3] & mask) != 0;
+        }
+
+        // byte 145
+        let byte = bytes[17];
+        for bit in 0..=7 {
+            
+        }
+
+        // byte 146
+        let byte = bytes[18];
+        for bit in 0..=7 {
+            
+        }
+
+        // byte 147
+        let byte = bytes[19];
+        for bit in 0..=7 {
+            
+        }
+
+        // byte 148
+        let byte = bytes[20];
+        ctrl.pattern_select[0] = (byte & 0x0f).into();
+        ctrl.pattern_select[1] = (byte & 0xf0).into();
+
+        // byte 149
+        let byte = bytes[21];
+        ctrl.pattern_select[2] = (byte & 0x0f).into();
+        ctrl.pattern_select[3] = (byte & 0xf0).into();
+
+        // byte 150
+        let byte = bytes[22];
+        ctrl.pattern_select[4] = (byte & 0x0f).into();
+        ctrl.pattern_select[5] = (byte & 0xf0).into();
+
+        // byte 151
+        let byte = bytes[23];
+        ctrl.pattern_select[6] = (byte & 0x0f).into();
+        ctrl.pattern_select[7] = (byte & 0xf0).into();
+    }
+}
+
+const BIT0: u8 = 1 << 0;
+const BIT1: u8 = 1 << 1;
+const BIT2: u8 = 1 << 2;
+const BIT3: u8 = 1 << 3;
+const BIT4: u8 = 1 << 4;
+const BIT5: u8 = 1 << 5;
+const BIT6: u8 = 1 << 6;
+const BIT7: u8 = 1 << 7;
 
 impl ParseFromModule for Performance {
     fn reads(id: Identifier) -> Result<Vec<MemoryRead>, Error> {
@@ -447,15 +667,29 @@ impl ParseFromModule for Performance {
                 Ok(reads)
             }
             Identifier::QsfpPlusCmis | Identifier::QsfpDD => {
-                // Begin by grabbing most of the Module Performance and
-                // Diagnostics Control page as most of it is of interest
+                // The goal here is grabbing most of the Module Performance and
+                // Diagnostics Control page as most of it is of interest. This
+                // will be done with a series of reads as CMIS only allows
+                // 8-byte reads.
                 //
-                // See SFF-8636 rev w.11 Table 8-66 for an overview.
+                // See CMIS rev 5.0 Table 8-66 for an overview.
                 let page = cmis::Page::Upper(cmis::UpperPage::new_banked(0x13, 0x0).unwrap());
-                let diagnostics = MemoryRead::new(page, 128, 96).unwrap();
+
+                // bytes 128->183 in 8-byte reads (ends up with byte 184 too)
+                let step: u8 = 8;
+                let first_block = (128..183)
+                    .step_by(usize::from(step))
+                    .map(|offset| MemoryRead::new(page, offset, step).unwrap());
+                // bytes 184->205 are reserved or custom, so we skip them
+                // bytes 206->223 in 6-byte reads (ends up with byte 224 too)
+                let step: u8 = 6;
+                let second_block = (206..223)
+                    .step_by(usize::from(step))
+                    .map(|offset| MemoryRead::new(page, offset, step).unwrap());
 
                 let mut reads = Vec::with_capacity(1);
-                reads.push(diagnostics);
+                reads.extend(first_block);
+                reads.extend(second_block);
                 Ok(reads)
             }
             _ => Err(Error::UnsupportedIdentifier(id)),
@@ -472,8 +706,8 @@ impl ParseFromModule for Performance {
                     .first()
                     .ok_or(Error::ParseFailed)?;
 
-                let tx_adapt_eq_freeze_supported = (byte_193 & 0x10) != 0;
-                let tx_eq_auto_adapt_supported = (byte_193 & 0x08) != 0;
+                let tx_adapt_eq_freeze_supported = (byte_193 & BIT4) != 0;
+                let tx_eq_auto_adapt_supported = (byte_193 & BIT3) != 0;
 
                 let mut perf: SffPerformance = Default::default();
 
@@ -505,11 +739,11 @@ impl ParseFromModule for Performance {
                         }
                         // byte 227
                         3 => {
-                            host_fec_ctrl_support = (byte & 0x80) != 0;
-                            media_fec_ctrl_support = (byte & 0x40) != 0;
-                            tx_force_squelch_support = (byte & 0x08) != 0;
-                            perf.rxlosl_fast_mode_support = (byte & 0x04) != 0;
-                            perf.txdis_fast_mode_support = (byte & 0x02) != 0;
+                            host_fec_ctrl_support = (byte & BIT7) != 0;
+                            media_fec_ctrl_support = (byte & BIT6) != 0;
+                            tx_force_squelch_support = (byte & BIT3) != 0;
+                            perf.rxlosl_fast_mode_support = (byte & BIT2) != 0;
+                            perf.txdis_fast_mode_support = (byte & BIT1) != 0;
                         }
                         // byte 228
                         4 => perf.max_tc_stable_time = if byte != 0 { Some(byte) } else { None },
@@ -518,12 +752,12 @@ impl ParseFromModule for Performance {
                         // byte 230
                         6 => {
                             perf.host_fec_enabled = if host_fec_ctrl_support {
-                                Some((byte & 0x80) != 0)
+                                Some((byte & BIT7) != 0)
                             } else {
                                 None
                             };
                             perf.media_fec_enabled = if media_fec_ctrl_support {
-                                Some((byte & 0x40) != 0)
+                                Some((byte & BIT6) != 0)
                             } else {
                                 None
                             }
@@ -532,10 +766,10 @@ impl ParseFromModule for Performance {
                         7 => {
                             perf.tx_force_squelches = if tx_force_squelch_support {
                                 Some([
-                                    (byte & 0x01) != 0,
-                                    (byte & 0x02) != 0,
-                                    (byte & 0x04) != 0,
-                                    (byte & 0x08) != 0,
+                                    (byte & BIT0) != 0,
+                                    (byte & BIT1) != 0,
+                                    (byte & BIT2) != 0,
+                                    (byte & BIT3) != 0,
                                 ])
                             } else {
                                 None
@@ -545,10 +779,10 @@ impl ParseFromModule for Performance {
                         9 => {
                             perf.tx_ae_freezes = if tx_adapt_eq_freeze_supported {
                                 Some([
-                                    (byte & 0x01) != 0,
-                                    (byte & 0x02) != 0,
-                                    (byte & 0x04) != 0,
-                                    (byte & 0x08) != 0,
+                                    (byte & BIT0) != 0,
+                                    (byte & BIT1) != 0,
+                                    (byte & BIT2) != 0,
+                                    (byte & BIT3) != 0,
                                 ])
                             } else {
                                 None
@@ -587,32 +821,32 @@ impl ParseFromModule for Performance {
                         // byte 240
                         16 => {
                             perf.rx_squelch_disables = [
-                                (byte & 0x10) != 0,
-                                (byte & 0x20) != 0,
-                                (byte & 0x40) != 0,
-                                (byte & 0x80) != 0,
+                                (byte & BIT4) != 0,
+                                (byte & BIT5) != 0,
+                                (byte & BIT6) != 0,
+                                (byte & BIT7) != 0,
                             ];
                             perf.tx_squelch_disables = [
-                                (byte & 0x01) != 0,
-                                (byte & 0x02) != 0,
-                                (byte & 0x04) != 0,
-                                (byte & 0x08) != 0,
+                                (byte & BIT0) != 0,
+                                (byte & BIT1) != 0,
+                                (byte & BIT2) != 0,
+                                (byte & BIT3) != 0,
                             ];
                         }
                         // byte 241
                         17 => {
                             perf.rx_output_disables = [
-                                (byte & 0x10) != 0,
-                                (byte & 0x20) != 0,
-                                (byte & 0x40) != 0,
-                                (byte & 0x80) != 0,
+                                (byte & BIT4) != 0,
+                                (byte & BIT5) != 0,
+                                (byte & BIT6) != 0,
+                                (byte & BIT7) != 0,
                             ];
                             perf.tx_adaptive_eq_enables = if tx_eq_auto_adapt_supported {
                                 Some([
-                                    (byte & 0x01) != 0,
-                                    (byte & 0x02) != 0,
-                                    (byte & 0x04) != 0,
-                                    (byte & 0x08) != 0,
+                                    (byte & BIT0) != 0,
+                                    (byte & BIT1) != 0,
+                                    (byte & BIT2) != 0,
+                                    (byte & BIT3) != 0,
                                 ])
                             } else {
                                 None
@@ -628,100 +862,146 @@ impl ParseFromModule for Performance {
                 })
             }
             Identifier::QsfpPlusCmis | Identifier::QsfpDD => {
-                let mut perf: CmisPerformance = Default::default();
-
-                let bytes = reads.next().ok_or(Error::ParseFailed)?;
-
-                let mut loopback_support: LoopbackCapabilities = Default::default();
-                let mut diagnostics_support: DiagnosticMeasurementCapabilities = Default::default();
-                let mut reporting_support: DiagnosticReportingCapabilities = Default::default();
-                let mut pattern_support: PatternGenAndCheckLocation = Default::default();
-
-                for idx in 0..96 {
-                    let byte = bytes[idx];
-                    match idx {
-                        // byte 128
-                        0 => {
-                            loopback_support.simultaneous = (byte & 0x40) != 0;
-                            loopback_support.media_per_lane = (byte & 0x20) != 0;
-                            loopback_support.host_per_lane = (byte & 0x10) != 0;
-                            loopback_support.host_input = (byte & 0x08) != 0;
-                            loopback_support.host_output = (byte & 0x04) != 0;
-                            loopback_support.media_input = (byte & 0x02) != 0;
-                            loopback_support.media_output = (byte & 0x01) != 0;
-                        },
-                        // byte 129
-                        1 => {
-                            perf.gating_support = (byte >> 6).into();
-                            diagnostics_support.gating_results = (byte & 0x20) != 0;
-                            diagnostics_support.periodic_updates = (byte & 0x10) != 0;
-                            diagnostics_support.per_lane_gating = (byte & 0x08) != 0;
-                            diagnostics_support.auto_restart_gating = (byte & 0x04) != 0;
-                        }
-                        // byte 130
-                        2 => {
-                            reporting_support.media_fec = (byte & 0x80) != 0;
-                            reporting_support.host_fec = (byte & 0x40) != 0;
-                            reporting_support.media_input_snr = (byte & 0x20) != 0;
-                            reporting_support.host_input_snr = (byte & 0x10) != 0;
-                            reporting_support.bits_and_errors_counting = (byte & 0x02) != 0;
-                            reporting_support.bit_err_ratio_results = (byte & 0x01) != 0;
-                        }
-                        // byte 131
-                        3 => {
-                            pattern_support.media_gen_pre_fec = (byte & 0x80) != 0;
-                            pattern_support.media_gen_post_fec = (byte & 0x40) != 0;
-                            pattern_support.media_check_pre_fec = (byte & 0x20) != 0;
-                            pattern_support.media_check_post_fec = (byte & 0x10) != 0;
-                            pattern_support.host_gen_pre_fec = (byte & 0x80) != 0;
-                            pattern_support.host_gen_post_fec = (byte & 0x40) != 0;
-                            pattern_support.host_check_pre_fec = (byte & 0x20) != 0;
-                            pattern_support.host_check_post_fec = (byte & 0x10) != 0;
-                        }
-                        // byte 132
-                        4 => {
-                            for i in 0..8 {
-                                let mask = 1 << i;
-                                let supported = (byte & mask) != 0;
-                                if supported {
-                                    match i {
-                                        0 => perf.host_pattern_gen_support.push(PatternId::PRBS31Q),
-                                        1 => perf.host_pattern_gen_support.push(PatternId::PRBS31),
-                                        2 => perf.host_pattern_gen_support.push(PatternId::PRBS23Q),
-                                        3 => perf.host_pattern_gen_support.push(PatternId::PRBS23),
-                                        4 => perf.host_pattern_gen_support.push(PatternId::PRBS15Q),
-                                        5 => perf.host_pattern_gen_support.push(PatternId::PRBS15),
-                                        6 => perf.host_pattern_gen_support.push(PatternId::PRBS13Q),
-                                        7 => perf.host_pattern_gen_support.push(PatternId::PRBS13),
-                                        _ => (),
-                                    }
-                                }
-                            }
-                        }
-                        // byte 133
-                        5 => {
-                            for i in 0..8 {
-                                let mask = 1 << i;
-                                let supported = (byte & mask) != 0;
-                                if supported {
-                                    match i {
-                                        0 => perf.host_pattern_gen_support.push(PatternId::PRBS9Q),
-                                        1 => perf.host_pattern_gen_support.push(PatternId::PRBS9),
-                                        2 => perf.host_pattern_gen_support.push(PatternId::PRBS7Q),
-                                        3 => perf.host_pattern_gen_support.push(PatternId::PRBS7),
-                                        4 => perf.host_pattern_gen_support.push(PatternId::SSPRQ),
-                                        5 => perf.host_pattern_gen_support.push(PatternId::Reserved),
-                                        6 => perf.host_pattern_gen_support.push(PatternId::Custom),
-                                        7 => perf.host_pattern_gen_support.push(PatternId::UserPattern),
-                                        _ => (),
-                                    }
-                                }
-                            }
-                        }
-                        // skip bytes 143 and 184-205
-                        _ => (),
+                // We do a number of reads to get all the bytes we intend to
+                // decode here and they don't fall nicely into 8-byte groups,
+                // so before we start the decode we unpack them into a single
+                // structure
+                let mut bytes: Vec<u8> = Vec::new();
+                for read in reads {
+                    for byte in read {
+                        bytes.push(*byte);
                     }
                 }
+
+                let mut perf: CmisPerformance = Default::default();
+
+                // byte 128
+                let byte = bytes[0];
+                let mut loopback_support: LoopbackCapabilities = Default::default();
+                loopback_support.simultaneous = (byte & BIT6) != 0;
+                loopback_support.media_per_lane = (byte & BIT5) != 0;
+                loopback_support.host_per_lane = (byte & BIT4) != 0;
+                loopback_support.host_input = (byte & BIT3) != 0;
+                loopback_support.host_output = (byte & BIT2) != 0;
+                loopback_support.media_input = (byte & BIT1) != 0;
+                loopback_support.media_output = (byte & BIT0) != 0;
+
+                // byte 129
+                let byte = bytes[1];
+                let mut diagnostics_support: DiagnosticMeasurementCapabilities = Default::default();
+                perf.gating_support = (byte >> 6).into();
+                diagnostics_support.gating_results = (byte & BIT5) != 0;
+                diagnostics_support.periodic_updates = (byte & BIT4) != 0;
+                diagnostics_support.per_lane_gating = (byte & BIT3) != 0;
+                diagnostics_support.auto_restart_gating = (byte & BIT2) != 0;
+
+                // byte 130
+                let byte = bytes[2];
+                let mut reporting_support: DiagnosticReportingCapabilities = Default::default();
+                reporting_support.media_fec = (byte & BIT7) != 0;
+                reporting_support.host_fec = (byte & BIT6) != 0;
+                reporting_support.media_input_snr = (byte & BIT5) != 0;
+                reporting_support.host_input_snr = (byte & BIT4) != 0;
+                reporting_support.bits_and_errors_counting = (byte & BIT1) != 0;
+                reporting_support.bit_err_ratio_results = (byte & BIT0) != 0;
+
+                // byte 131
+                let byte = bytes[3];
+                let mut pattern_support: PatternGenAndCheckLocation = Default::default();
+                pattern_support.media_gen_pre_fec = (byte & BIT7) != 0;
+                pattern_support.media_gen_post_fec = (byte & BIT6) != 0;
+                pattern_support.media_check_pre_fec = (byte & BIT5) != 0;
+                pattern_support.media_check_post_fec = (byte & BIT4) != 0;
+                pattern_support.host_gen_pre_fec = (byte & BIT3) != 0;
+                pattern_support.host_gen_post_fec = (byte & BIT2) != 0;
+                pattern_support.host_check_pre_fec = (byte & BIT1) != 0;
+                pattern_support.host_check_post_fec = (byte & BIT0) != 0;
+
+                // bytes 132 & 133
+                perf.host_gen_support = PatternIdVec::new([bytes[4], bytes[5]]);
+                // bytes 134 & 135
+                perf.media_gen_support = PatternIdVec::new([bytes[6], bytes[7]]);
+                // bytes 136 & 137
+                perf.host_check_support = PatternIdVec::new([bytes[8], bytes[9]]);
+                // bytes 138 & 139
+                perf.media_check_support = PatternIdVec::new([bytes[10], bytes[11]]);
+
+                // byte 140
+                let byte = bytes[12];
+                perf.recovered_clock_for_generator = (byte >> 6).into();
+                perf.reference_clock_for_patterns_support = (byte & BIT5) != 0;
+                perf.user_length_support = 2 * ((byte & 0x0f) + 1);
+
+                // byte 141
+                let byte = bytes[13];
+                let mut data_support: PatternGenAndCheckDataSupport = Default::default();
+                data_support.media_check_swap = (byte & BIT7) != 0;
+                data_support.media_check_invert = (byte & BIT6) != 0;
+                data_support.media_gen_swap = (byte & BIT5) != 0;
+                data_support.media_gen_invert = (byte & BIT4) != 0;
+                data_support.host_check_swap = (byte & BIT3) != 0;
+                data_support.host_check_invert = (byte & BIT2) != 0;
+                data_support.host_gen_swap = (byte & BIT1) != 0;
+                data_support.host_gen_invert = (byte & BIT0) != 0;
+
+                // byte 142
+                let byte = bytes[14];
+                let mut per_lane_support :PatternGenAndCheckPerLaneSupport = Default::default();
+                per_lane_support.media_check_per_lane_enable = (byte & BIT7) != 0;
+                per_lane_support.media_check_per_lane_pattern = (byte & BIT6) != 0;
+                per_lane_support.media_gen_per_lane_enable = (byte & BIT5) != 0;
+                per_lane_support.media_gen_per_lane_pattern = (byte & BIT4) != 0;
+                per_lane_support.host_check_per_lane_enable = (byte & BIT3) != 0;
+                per_lane_support.host_check_per_lane_pattern = (byte & BIT2) != 0;
+                per_lane_support.host_gen_per_lane_enable = (byte & BIT1) != 0;
+                per_lane_support.host_gen_per_lane_pattern = (byte & BIT0) != 0;
+
+                // byte 143 is reserved, so we skip it
+
+                // byte 144
+                let byte = bytes[16];
+                for bit in 0..=7 {
+                    perf.host_gen_per_lane_control.enable[bit] = (byte & (1 << bit)) != 0;
+                }
+
+                // byte 145
+                let byte = bytes[17];
+                for bit in 0..=7 {
+                    perf.host_gen_per_lane_control.invert[bit] = (byte & (1 << bit)) != 0;
+                }
+
+                // byte 146
+                let byte = bytes[18];
+                for bit in 0..=7 {
+                    perf.host_gen_per_lane_control.byte_swap[bit] = (byte & (1 << bit)) != 0;
+                }
+
+                // byte 147
+                let byte = bytes[19];
+                for bit in 0..=7 {
+                    perf.host_gen_per_lane_control.pre_fec_enable[bit] = (byte & (1 << bit)) != 0;
+                }
+
+                // byte 148
+                let byte = bytes[20];
+                perf.host_gen_per_lane_control.pattern_select[0] = (byte & 0x0f).into();
+                perf.host_gen_per_lane_control.pattern_select[1] = (byte & 0xf0).into();
+
+                // byte 149
+                let byte = bytes[21];
+                perf.host_gen_per_lane_control.pattern_select[2] = (byte & 0x0f).into();
+                perf.host_gen_per_lane_control.pattern_select[3] = (byte & 0xf0).into();
+
+                // byte 150
+                let byte = bytes[22];
+                perf.host_gen_per_lane_control.pattern_select[4] = (byte & 0x0f).into();
+                perf.host_gen_per_lane_control.pattern_select[5] = (byte & 0xf0).into();
+
+                // byte 151
+                let byte = bytes[23];
+                perf.host_gen_per_lane_control.pattern_select[6] = (byte & 0x0f).into();
+                perf.host_gen_per_lane_control.pattern_select[7] = (byte & 0xf0).into();
+
 
                 Ok(Self {
                     sff: None,
