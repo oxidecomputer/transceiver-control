@@ -6,6 +6,7 @@
 
 //! Decode transceiver health and monitoring data.
 
+use crate::utils::decode_with_scale;
 use crate::Error;
 use crate::Identifier;
 use crate::ParseFromModule;
@@ -229,8 +230,7 @@ const WATT_TO_MW: f32 = 1e3;
 const AMP_TO_MA: f32 = 1e3;
 
 fn decode_temperature(bytes: [u8; 2]) -> f32 {
-    let unscaled = i16::from_be_bytes(bytes);
-    f32::from(unscaled) * TEMP_RESOLUTION
+    decode_with_scale::<i16>(bytes, TEMP_RESOLUTION)
 }
 
 fn decode_supply_voltage(bytes: [u8; 2]) -> f32 {

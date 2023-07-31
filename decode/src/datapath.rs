@@ -6,13 +6,16 @@
 
 //! Decode module datapath state.
 
+use crate::utils::extract_bit;
 use crate::Error;
+use crate::ExtendedSpecificationComplianceCode;
 use crate::HostElectricalInterfaceId;
 use crate::Identifier;
 use crate::MediaInterfaceId;
 use crate::MediaType;
 use crate::ParseFromModule;
 use std::collections::BTreeMap;
+use std::fmt;
 use transceiver_messages::mgmt::cmis;
 use transceiver_messages::mgmt::sff8636;
 pub use transceiver_messages::mgmt::ManagementInterface;
@@ -44,7 +47,53 @@ pub enum Datapath {
     /// contained mapping.
     Cmis(BTreeMap<u8, CmisDatapath>),
     /// Datapath state about each lane in an SFF-8636 module.
-    Sff8636([Sff8636Datapath; 4]),
+    Sff8636 {
+        specification: SffComplianceCode,
+        lanes: [Sff8636Datapath; 4],
+    },
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(
+    any(feature = "api-traits", test),
+    derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)
+)]
+#[cfg_attr(any(feature = "api-traits", test), serde(rename_all = "snake_case"))]
+pub enum SffComplianceCode {
+    Extended(ExtendedSpecificationComplianceCode),
+    Ethernet(u8),
+}
+
+impl fmt::Display for SffComplianceCode {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Extended(ext) => write!(f, "{}", ext),
+            Self::Ethernet(x) => match x {
+                0b0000_0001 => write!(f, "40G Active Cable"),
+                0b0000_0010 => write!(f, "40GBASE-LR4"),
+                0b0000_0100 => write!(f, "40GBASE-SR4"),
+                0b0000_1000 => write!(f, "40GBASE-CR4"),
+                0b0001_0000 => write!(f, "10GBASE-SR"),
+                0b0010_0000 => write!(f, "10GBASE-LR"),
+                0b0100_0000 => write!(f, "10GBASE-LRM"),
+                _ => unreachable!(),
+            },
+        }
+    }
+}
+
+impl SffComplianceCode {
+    /// Decode specification compliance, from the core specification and
+    /// possibly the extended specification compliance byte.
+    pub fn new(specification: u8, extended_specification: u8) -> Self {
+        if specification == 0x80 {
+            Self::Extended(ExtendedSpecificationComplianceCode::from(
+                extended_specification,
+            ))
+        } else {
+            Self::Ethernet(specification)
+        }
+    }
 }
 
 impl ParseFromModule for Datapath {
@@ -54,7 +103,11 @@ impl ParseFromModule for Datapath {
                 let tx_enable = MemoryRead::new(sff8636::Page::Lower, 86, 1)?;
                 let los = MemoryRead::new(sff8636::Page::Lower, 3, 3)?;
                 let cdr = MemoryRead::new(sff8636::Page::Lower, 98, 1)?;
-                Ok(vec![tx_enable, los, cdr])
+                let compliance =
+                    MemoryRead::new(sff8636::Page::Upper(sff8636::UpperPage::new(0)?), 131, 1)?;
+                let extended_compliance =
+                    MemoryRead::new(sff8636::Page::Upper(sff8636::UpperPage::new(0)?), 192, 1)?;
+                Ok(vec![tx_enable, los, cdr, compliance, extended_compliance])
             }
             Identifier::QsfpPlusCmis | Identifier::QsfpDD => {
                 // As with most module data, CMIS is _far_ more complicated than
@@ -171,6 +224,13 @@ impl ParseFromModule for Datapath {
                 assert_eq!(los.len(), 3);
                 let cdr = reads.next().unwrap();
                 assert_eq!(cdr.len(), 1);
+                let compliance = reads.next().unwrap();
+                assert_eq!(compliance.len(), 1);
+                let extended_compliance = reads.next().unwrap();
+                assert_eq!(compliance.len(), 1);
+
+                // Extract specification compliance code.
+                let specification = SffComplianceCode::new(compliance[0], extended_compliance[0]);
 
                 // Extract data for all four lanes.
                 //
@@ -179,29 +239,29 @@ impl ParseFromModule for Datapath {
                 // described by the memory map. We could extract it from the
                 // host-electrical ID, but that doesn't constrain it enough,
                 // since some IDs support multiple lane configurations.
-                let datapath = (0..4)
+                let lanes = (0..4)
                     .map(|lane| {
                         // Byte 86 bits 0..3 are Tx _disabled_.
-                        let tx_enabled = ((0b1 << lane) & tx_enable[0]) == 0;
+                        let tx_enabled = !extract_bit(tx_enable[0], lane)?;
 
                         // The LOS / LOL bits are not inverted: 1 means there is
                         // such as state. Some of these are shifted by 4, since the
                         // lower 4 bits are for the Rx side of things.
                         let tx_lane = lane + 4;
-                        let tx_los = ((0b1 << tx_lane) & los[0]) != 0;
-                        let tx_adaptive_eq_fault = ((0b1 << tx_lane) & los[1]) != 0;
-                        let tx_fault = ((0b1 << lane) & los[1]) != 0;
-                        let tx_lol = ((0b1 << tx_lane) & los[2]) != 0;
+                        let tx_los = extract_bit(los[0], tx_lane)?;
+                        let tx_adaptive_eq_fault = extract_bit(los[1], tx_lane)?;
+                        let tx_fault = extract_bit(los[1], lane)?;
+                        let tx_lol = extract_bit(los[2], tx_lane)?;
 
                         // Rx side state is in the lower 4 bits.
-                        let rx_los = ((0b1 << lane) & los[0]) != 0;
-                        let rx_lol = ((0b1 << lane) & los[2]) != 0;
+                        let rx_los = extract_bit(los[0], lane)?;
+                        let rx_lol = extract_bit(los[2], lane)?;
 
                         // Extract CDR bits.
-                        let tx_cdr_enabled = ((0b1 << tx_lane) & cdr[0]) != 0;
-                        let rx_cdr_enabled = ((0b1 << lane) & cdr[0]) != 0;
+                        let tx_cdr_enabled = extract_bit(cdr[0], tx_lane)?;
+                        let rx_cdr_enabled = extract_bit(cdr[0], lane)?;
 
-                        Sff8636Datapath {
+                        Ok(Sff8636Datapath {
                             tx_enabled,
                             tx_los,
                             rx_los,
@@ -211,12 +271,15 @@ impl ParseFromModule for Datapath {
                             rx_lol,
                             tx_cdr_enabled,
                             rx_cdr_enabled,
-                        }
+                        })
                     })
-                    .collect::<Vec<_>>()
+                    .collect::<Result<Vec<_>, Error>>()?
                     .try_into()
                     .unwrap();
-                Ok(Datapath::Sff8636(datapath))
+                Ok(Datapath::Sff8636 {
+                    specification,
+                    lanes,
+                })
             }
             Identifier::QsfpPlusCmis | Identifier::QsfpDD => {
                 // We first read the lane configuration, which tells us which
@@ -292,8 +355,8 @@ impl ParseFromModule for Datapath {
                     control: u8,
                     lane: u8,
                 ) -> Option<bool> {
-                    if support & (0b1 << bit) != 0 {
-                        Some(control & (0b1 << lane) != 0)
+                    if let Ok(true) = extract_bit(support, bit) {
+                        extract_bit(control, lane).ok()
                     } else {
                         None
                     }
@@ -605,51 +668,19 @@ pub struct LaneStatus {
     pub rx_lol: Option<bool>,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-#[cfg_attr(
-    any(feature = "api-traits", test),
-    derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)
-)]
-#[cfg_attr(any(feature = "api-traits", test), serde(rename_all = "snake_case"))]
-pub enum CmisDatapathState {
-    Deactivated,
-    Init,
-    Deinit,
-    Activated,
-    TxTurnOn,
-    TxTurnOff,
-    Initialized,
-}
-
-impl TryFrom<u8> for CmisDatapathState {
-    type Error = Error;
-
-    fn try_from(x: u8) -> Result<Self, Self::Error> {
-        match x & 0x0F {
-            0x1 => Ok(Self::Deactivated),
-            0x2 => Ok(Self::Init),
-            0x3 => Ok(Self::Deinit),
-            0x4 => Ok(Self::Activated),
-            0x5 => Ok(Self::TxTurnOn),
-            0x6 => Ok(Self::TxTurnOff),
-            0x7 => Ok(Self::Initialized),
-            _ => Err(Error::ParseFailed),
-        }
-    }
-}
-
-impl From<CmisDatapathState> for u8 {
-    fn from(s: CmisDatapathState) -> u8 {
-        match s {
-            CmisDatapathState::Deactivated => 0x1,
-            CmisDatapathState::Init => 0x2,
-            CmisDatapathState::Deinit => 0x3,
-            CmisDatapathState::Activated => 0x4,
-            CmisDatapathState::TxTurnOn => 0x5,
-            CmisDatapathState::TxTurnOff => 0x6,
-            CmisDatapathState::Initialized => 0x7,
-        }
-    }
+crate::bitfield_enum! {
+    name = CmisDatapathState,
+    description = "The state of a datapath in the CMIS datapath state machine.",
+    bits = 2:0,
+    variants = {
+        0x1, Deactivated, "Deactivated",
+        0x2, Init, "Initializing",
+        0x3, Deinit, "Deinitializing",
+        0x4, Activated, "Activated",
+        0x5, TxTurnOn, "Tx turning on",
+        0x6, TxTurnOff, "Tx turning off",
+        0x7, Initialized, "Initialized",
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]

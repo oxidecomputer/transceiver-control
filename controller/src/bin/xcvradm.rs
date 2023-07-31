@@ -41,6 +41,7 @@ use transceiver_decode::Aux3Monitor;
 use transceiver_decode::Datapath;
 use transceiver_decode::ReceiverPower;
 use transceiver_decode::Sff8636Datapath;
+use transceiver_decode::SffComplianceCode;
 use transceiver_decode::VendorInfo;
 use transceiver_messages::filter_module_data;
 use transceiver_messages::mac::MacAddrs;
@@ -1365,7 +1366,10 @@ fn print_datapath(datapath: &DatapathResult) {
         }
 
         match path {
-            Datapath::Sff8636(p) => print_sff8636_datapath(port, p),
+            Datapath::Sff8636 {
+                specification,
+                lanes,
+            } => print_sff8636_datapath(port, specification, lanes),
             _ => todo!(),
         }
 
@@ -1373,39 +1377,43 @@ fn print_datapath(datapath: &DatapathResult) {
     }
 }
 
-fn print_sff8636_datapath(port: u8, datapaths: &[Sff8636Datapath; 4]) {
+fn print_sff8636_datapath(
+    port: u8,
+    specification: &SffComplianceCode,
+    lanes: &[Sff8636Datapath; 4],
+) {
     const WIDTH: usize = 18;
     const LANE_WIDTH: usize = 6;
-    println!("{:WIDTH$}", format!("Port {port}"));
+    println!("Port {port} ({specification})");
     print!("{:WIDTH$}", "");
-    for lane in 0..datapaths.len() {
+    for lane in 0..lanes.len() {
         print!("  Lane {lane}");
     }
     println!();
     fn print_field(
-        datapaths: &[Sff8636Datapath; 4],
+        lanes: &[Sff8636Datapath; 4],
         name: &str,
         getter: impl Fn(&Sff8636Datapath) -> bool,
     ) {
         print!("{name:>WIDTH$}: ");
-        for (lane, datapath) in datapaths.iter().enumerate() {
-            print!("{:<LANE_WIDTH$}", getter(&datapath));
-            if lane < datapaths.len() - 1 {
+        for (i, lane) in lanes.iter().enumerate() {
+            print!("{:<LANE_WIDTH$}", getter(&lane));
+            if i < lanes.len() - 1 {
                 print!("  ");
             } else {
                 println!();
             }
         }
     }
-    print_field(&datapaths, "Tx enabled", |p| p.tx_enabled);
-    print_field(&datapaths, "Tx LOS", |p| p.tx_los);
-    print_field(&datapaths, "Tx LOL", |p| p.tx_lol);
-    print_field(&datapaths, "Tx CDR enabled", |p| p.tx_cdr_enabled);
-    print_field(&datapaths, "Tx adapt EQ fault", |p| p.tx_adaptive_eq_fault);
-    print_field(&datapaths, "Tx fault", |p| p.tx_fault);
-    print_field(&datapaths, "Rx LOS", |p| p.rx_los);
-    print_field(&datapaths, "Rx LOL", |p| p.rx_lol);
-    print_field(&datapaths, "Rx CDR enabled", |p| p.rx_cdr_enabled);
+    print_field(&lanes, "Tx enabled", |p| p.tx_enabled);
+    print_field(&lanes, "Tx LOS", |p| p.tx_los);
+    print_field(&lanes, "Tx LOL", |p| p.tx_lol);
+    print_field(&lanes, "Tx CDR enabled", |p| p.tx_cdr_enabled);
+    print_field(&lanes, "Tx adapt EQ fault", |p| p.tx_adaptive_eq_fault);
+    print_field(&lanes, "Tx fault", |p| p.tx_fault);
+    print_field(&lanes, "Rx LOS", |p| p.rx_los);
+    print_field(&lanes, "Rx LOL", |p| p.rx_lol);
+    print_field(&lanes, "Rx CDR enabled", |p| p.rx_cdr_enabled);
 }
 
 #[cfg(test)]
