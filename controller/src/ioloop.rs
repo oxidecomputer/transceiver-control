@@ -140,7 +140,7 @@ impl IoLoop {
         // Safety: Serialization can only fail in a few constrained
         // circumstances, such as a buffer overrun or unsupported types. None of
         // those apply here, so we just unwrap in that direction.
-        let mut request = self.outstanding_request.as_mut().unwrap();
+        let request = self.outstanding_request.as_mut().unwrap();
 
         // Serialize the header first.
         //

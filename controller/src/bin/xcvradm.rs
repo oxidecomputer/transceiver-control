@@ -211,10 +211,13 @@ struct Args {
 enum InputKind {
     /// Input is raw binary data.
     Binary,
-    /// Input is decimal text.
+    /// Input is decimal text, space-delimited.
     Decimal,
-    /// Input is hexadecimal text.
+    /// Input is hexadecimal text, with or without a leading `0x`,
+    /// space-delimited.
     Hex,
+    /// Input is a binary string, e.g., `0b0100`.
+    BinaryString,
 }
 
 // How to print the `Status`.
@@ -354,6 +357,21 @@ enum Cmd {
     },
 
     /// Write the lower page of a set of transceiver modules.
+    ///
+    /// This takes data from stdin until EOF, or from a named file, and writes
+    /// bytes to the provided locations.
+    ///
+    /// Input data may be specified in either binary or text formats. If the
+    /// input is from a file, the input kind _must_ be specified. If the input
+    /// is from stdin, then the kind may be omitted for _text_ input. The radix
+    /// will be interpreted from the input, where:
+    ///
+    ///     `0x...` implies hex
+    ///     `0b...` implies a binary string,
+    ///      and anything else is read as decimal.
+    ///
+    /// Note that raw binary input from stdin will only be correctly interpreted
+    /// if the `--input-kind binary` flag is provided.
     #[command(group(ArgGroup::new("interface").required(true).args(["sff", "cmis"])))]
     WriteLower {
         /// Interpret the module's memory map as SFF-8636.
@@ -365,12 +383,12 @@ enum Cmd {
         cmis: bool,
 
         /// The input file for data, defaulting to stdin.
-        #[arg(short, long)]
+        #[arg(short, long, requires = "input_kind")]
         input: Option<PathBuf>,
 
         /// How to interpret the input data.
-        #[arg(long, default_value_t = InputKind::Binary, value_enum)]
-        input_kind: InputKind,
+        #[arg(long, value_enum)]
+        input_kind: Option<InputKind>,
 
         /// The offset to start writing to.
         offset: u8,
@@ -414,6 +432,21 @@ enum Cmd {
     },
 
     /// Write the upper page of a set of transceiver modules.
+    ///
+    /// This takes data from stdin until EOF, or from a named file, and writes
+    /// bytes to the provided locations.
+    ///
+    /// Input data may be specified in either binary or text formats. If the
+    /// input is from a file, the input kind _must_ be specified. If the input
+    /// is from stdin, then the kind may be omitted for _text_ input. The radix
+    /// will be interpreted from the input, where:
+    ///
+    ///     `0x...` implies hex
+    ///     `0b...` implies a binary string,
+    ///      and anything else is read as decimal.
+    ///
+    /// Note that raw binary input from stdin will only be correctly interpreted
+    /// if the `--input-kind binary` flag is provided.
     #[command(group(ArgGroup::new("interface").required(true).args(["sff", "cmis"])))]
     WriteUpper {
         /// Interpret the module's memory map as SFF-8636.
@@ -425,12 +458,12 @@ enum Cmd {
         cmis: bool,
 
         /// The input file for data, defaulting to stdin.
-        #[arg(short, long)]
+        #[arg(short, long, requires = "input_kind")]
         input: Option<PathBuf>,
 
         /// How to interpret the input data.
-        #[arg(long, default_value_t = InputKind::Binary, value_enum)]
-        input_kind: InputKind,
+        #[arg(long, value_enum)]
+        input_kind: Option<InputKind>,
 
         /// The upper page to read from.
         #[arg(short, long, default_value_t = 0)]
@@ -509,14 +542,11 @@ enum Cmd {
     Monitors,
 }
 
-fn load_write_data(file: Option<PathBuf>, kind: InputKind) -> anyhow::Result<Vec<u8>> {
-    let mut rdr: Box<dyn Read> = if let Some(path) = file {
-        Box::new(File::open(path)?)
-    } else {
-        Box::new(stdin())
-    };
+// Maximum number of bytes to read from input source for writing to module.
+const MAX_BYTES: usize = 128;
 
-    const MAX_BYTES: usize = 128;
+// Load data from a reader, once the input kind is known.
+fn load_known_write_data<R: Read>(rdr: &mut R, kind: InputKind) -> anyhow::Result<Vec<u8>> {
     match kind {
         InputKind::Binary => {
             let mut data = vec![0; MAX_BYTES];
@@ -525,12 +555,18 @@ fn load_write_data(file: Option<PathBuf>, kind: InputKind) -> anyhow::Result<Vec
             Ok(data)
         }
         text => {
-            let radix = if matches!(text, InputKind::Decimal) {
-                10
-            } else {
-                16
+            let conv = match text {
+                InputKind::Decimal => {
+                    |x: &str| u8::from_str_radix(x, 10).map_err(anyhow::Error::from)
+                }
+                InputKind::Hex => |x: &str| {
+                    u8::from_str_radix(x.trim_start_matches("0x"), 16).map_err(anyhow::Error::from)
+                },
+                InputKind::BinaryString => |x: &str| {
+                    u8::from_str_radix(x.trim_start_matches("0b"), 2).map_err(anyhow::Error::from)
+                },
+                InputKind::Binary => unreachable!(),
             };
-            let conv = |x| u8::from_str_radix(x, radix).map_err(anyhow::Error::from);
             let mut buf = String::with_capacity(MAX_BYTES * 4);
             rdr.take(buf.capacity().try_into().unwrap())
                 .read_to_string(&mut buf)?;
@@ -540,6 +576,43 @@ fn load_write_data(file: Option<PathBuf>, kind: InputKind) -> anyhow::Result<Vec
                 .collect::<anyhow::Result<Vec<_>>>()?;
             ensure!(data.len() <= MAX_BYTES, "Input data too large");
             Ok(data)
+        }
+    }
+}
+
+// Try to autodetect the input kind, based on the first few
+// characters.
+//
+// 0b -> binary string
+// 0x -> hex
+// _ -> decimal
+fn load_write_data_autodetect_kind(buf: String) -> anyhow::Result<Vec<u8>> {
+    anyhow::ensure!(!buf.is_empty(), "No input provided on stdin");
+    let kind = match &buf[..2] {
+        "0b" => InputKind::BinaryString,
+        "0x" => InputKind::Hex,
+        _ => InputKind::Decimal,
+    };
+    let mut cursor = std::io::Cursor::new(buf);
+    load_known_write_data(&mut cursor, kind)
+}
+
+fn load_write_data(file: Option<PathBuf>, kind: Option<InputKind>) -> anyhow::Result<Vec<u8>> {
+    if let Some(path) = file {
+        let kind = kind.context("clap failed to ensure required argument")?;
+        let mut f = File::open(path).context("failed to open data file")?;
+        load_known_write_data(&mut f, kind)
+    } else {
+        let mut stdin = stdin();
+        // If provided, directly use the input kind.
+        if let Some(kind) = kind {
+            load_known_write_data(&mut stdin, kind)
+        } else {
+            let mut buf = String::with_capacity(MAX_BYTES);
+            stdin
+                .read_to_string(&mut buf)
+                .context("failed to read from stdin")?;
+            load_write_data_autodetect_kind(buf)
         }
     }
 }
@@ -1335,6 +1408,7 @@ fn print_monitors(monitor_result: &MonitorResult) {
 #[cfg(test)]
 mod tests {
     use super::load_write_data;
+    use super::load_write_data_autodetect_kind;
     use super::parse_transceivers;
     use super::InputKind;
     use super::ManagementInterface;
@@ -1344,13 +1418,42 @@ mod tests {
     use std::io::Write;
     use tempfile::NamedTempFile;
 
+    // Read from file:
+    //
+    // binary
+    // hex with prefix / without prefix
+    // decimal
+    // binary string with / without prefix
+    //
+    // Read from stdin
+
     #[test]
     fn test_load_write_data_binary() {
         let mut f = NamedTempFile::new().unwrap();
         f.write(&[1, 2, 3]).unwrap();
         assert_eq!(
-            load_write_data(Some(f.path().to_path_buf()), InputKind::Binary).unwrap(),
+            load_write_data(Some(f.path().to_path_buf()), Some(InputKind::Binary)).unwrap(),
             vec![1, 2, 3]
+        );
+    }
+
+    #[test]
+    fn test_load_write_data_binary_string() {
+        let mut f = NamedTempFile::new().unwrap();
+        write!(f, "0b00 0b01 0b11").unwrap();
+        assert_eq!(
+            load_write_data(Some(f.path().to_path_buf()), Some(InputKind::BinaryString)).unwrap(),
+            vec![0b00, 0x01, 0b11]
+        );
+    }
+
+    #[test]
+    fn test_load_write_data_binary_string_with_0b_prefix() {
+        let mut f = NamedTempFile::new().unwrap();
+        write!(f, "00 01 11").unwrap();
+        assert_eq!(
+            load_write_data(Some(f.path().to_path_buf()), Some(InputKind::BinaryString)).unwrap(),
+            vec![0b00, 0b01, 0b11]
         );
     }
 
@@ -1359,7 +1462,17 @@ mod tests {
         let mut f = NamedTempFile::new().unwrap();
         write!(f, "aa bb cc").unwrap();
         assert_eq!(
-            load_write_data(Some(f.path().to_path_buf()), InputKind::Hex).unwrap(),
+            load_write_data(Some(f.path().to_path_buf()), Some(InputKind::Hex)).unwrap(),
+            vec![0xaa, 0xbb, 0xcc]
+        );
+    }
+
+    #[test]
+    fn test_load_write_data_hex_with_0x_prefix() {
+        let mut f = NamedTempFile::new().unwrap();
+        write!(f, "0xaa 0xbb 0xcc").unwrap();
+        assert_eq!(
+            load_write_data(Some(f.path().to_path_buf()), Some(InputKind::Hex)).unwrap(),
             vec![0xaa, 0xbb, 0xcc]
         );
     }
@@ -1369,8 +1482,42 @@ mod tests {
         let mut f = NamedTempFile::new().unwrap();
         write!(f, "10 20 30").unwrap();
         assert_eq!(
-            load_write_data(Some(f.path().to_path_buf()), InputKind::Decimal).unwrap(),
+            load_write_data(Some(f.path().to_path_buf()), Some(InputKind::Decimal)).unwrap(),
             vec![10, 20, 30]
+        );
+    }
+
+    #[test]
+    fn test_load_write_data_decimal_trailing_newline() {
+        let mut f = NamedTempFile::new().unwrap();
+        write!(f, "10 20 30\n").unwrap();
+        assert_eq!(
+            load_write_data(Some(f.path().to_path_buf()), Some(InputKind::Decimal)).unwrap(),
+            vec![10, 20, 30]
+        );
+    }
+
+    #[test]
+    fn test_load_write_data_autodetect() {
+        let data = [10, 20, 30];
+        test_load_autodetect(&data, InputKind::BinaryString);
+        test_load_autodetect(&data, InputKind::Hex);
+        test_load_autodetect(&data, InputKind::Decimal);
+    }
+
+    fn test_load_autodetect(data: &[u8], kind: InputKind) {
+        let data_as_string: Vec<String> = match kind {
+            InputKind::Decimal => data.iter().map(ToString::to_string).collect(),
+            InputKind::Hex => data.iter().map(|x| format!("0x{x:x}")).collect(),
+            InputKind::BinaryString => data.iter().map(|x| format!("0b{x:b}")).collect(),
+            _ => unimplemented!(),
+        };
+        let all_data = data_as_string.join(" ");
+        let loaded = load_write_data_autodetect_kind(all_data.clone()).unwrap();
+        assert_eq!(
+            data, loaded,
+            "failed to autodetect / load data for input kind {:?}",
+            kind,
         );
     }
 
