@@ -1013,7 +1013,7 @@ impl ParseFromModule for Performance {
                 // See CMIS rev 5.0 Table 8-66 for an overview.
                 let page = cmis::Page::Upper(cmis::UpperPage::new_banked(0x13, 0x0).unwrap());
 
-                // bytes 128->183 in 8-byte reads (ends up with byte 184 too)
+                // bytes 128->183 in 8-byte reads
                 let step: u8 = 8;
                 let first_block = (128..183)
                     .step_by(usize::from(step))
@@ -1351,49 +1351,49 @@ impl ParseFromModule for Performance {
                         false => None,
                     };
 
-                // byte 184 is not implemented, skip it. The reads used to
-                // created the bytes buffer now jump to byte 206.
+                // The reads used to created the bytes buffer now jump to byte
+                // 206.
 
                 // byte 206
-                let byte = bytes[57];
+                let byte = bytes[56];
                 perf.diagnostics_masks.loss_of_ref_clk_mask = (byte & BIT7) != 0;
 
                 // byte 207 is reserved, skip it
 
                 // byte 208
-                let byte = bytes[59];
+                let byte = bytes[58];
                 for i in 0..=7 {
                     perf.diagnostics_masks.pattern_check_gating_complete_host[i] =
                         (byte & (1 << i)) != 0;
                 }
 
                 // byte 209
-                let byte = bytes[60];
+                let byte = bytes[59];
                 for i in 0..=7 {
                     perf.diagnostics_masks.pattern_check_gating_complete_media[i] =
                         (byte & (1 << i)) != 0;
                 }
 
                 // byte 210
-                let byte = bytes[61];
+                let byte = bytes[60];
                 for i in 0..=7 {
                     perf.diagnostics_masks.pattern_check_lol_host[i] = (byte & (1 << i)) != 0;
                 }
 
                 // byte 211
-                let byte = bytes[62];
+                let byte = bytes[61];
                 for i in 0..=7 {
                     perf.diagnostics_masks.pattern_check_lol_media[i] = (byte & (1 << i)) != 0;
                 }
 
                 // byte 212
-                let byte = bytes[63];
+                let byte = bytes[62];
                 for i in 0..=7 {
                     perf.diagnostics_masks.pattern_gen_lol_host[i] = (byte & (1 << i)) != 0;
                 }
 
                 // byte 213
-                let byte = bytes[64];
+                let byte = bytes[63];
                 for i in 0..=7 {
                     perf.diagnostics_masks.pattern_gen_lol_media[i] = (byte & (1 << i)) != 0;
                 }
