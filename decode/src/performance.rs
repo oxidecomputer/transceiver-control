@@ -735,7 +735,7 @@ impl core::fmt::Display for MediaPRBSGeneratorClockSource {
             "{}",
             match self {
                 InternalClock => "All lanes use Internal Clock",
-                RefClk => "All lanes use Reference CLock"
+                RefClk => "All lanes use Reference CLock",
                 RefClkMediaLane(x) => {
                     tmp = format!("All lanes use Reference Clock Host Lane {x}");
                     &tmp
@@ -974,7 +974,7 @@ const BIT7: u8 = 1 << 7;
 // single lane, meaning all 8 lanes can be represented in a single byte. This is
 // a handy function for that.
 fn bool_per_lane(byte: u8) -> [bool; 8] {
-    let mut a: [bool; 8];
+    let mut a: [bool; 8] = [false; 8];
     for i in 0..=7 {
         a[i] = (byte & (1 << i)) != 0;
     }
