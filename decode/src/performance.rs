@@ -14,7 +14,7 @@ use transceiver_messages::mgmt::sff8636;
 pub use transceiver_messages::mgmt::ManagementInterface;
 use transceiver_messages::mgmt::MemoryRead;
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct Performance {
     pub sff: Option<SffPerformance>,
     pub cmis: Option<CmisPerformance>,
@@ -22,7 +22,7 @@ pub struct Performance {
 
 // SFF-8636
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct SffPerformance {
     pub max_tx_input_eq: TxInputEqualization,
     pub max_rx_output_emphasis: RxOutputEmphasis,
@@ -275,7 +275,7 @@ impl core::fmt::Display for RxOutputAmplitudeSupport {
 
 // CMIS
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct CmisPerformance {
     pub loopback_support: LoopbackCapabilities,
     pub diag_meas_capability: DiagnosticMeasurementCapabilities,
@@ -472,7 +472,7 @@ impl core::fmt::Display for PatternId {
 }
 
 /// Helper-type to map PatternId support into a Vec datastructure
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct PatternIdVec(pub Vec<PatternId>);
 
 impl PatternIdVec {
