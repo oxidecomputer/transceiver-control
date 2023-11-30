@@ -1288,16 +1288,16 @@ impl ParseFromModule for Performance {
                 // byte 143 is reserved, skip it
 
                 // bytes 144-151
-                perf.host_gen_per_lane_control = PatternPerLaneControls::new(&bytes[16..23]);
+                perf.host_gen_per_lane_control = PatternPerLaneControls::new(&bytes[16..=23]);
 
                 // bytes 152-159
-                perf.media_gen_per_lane_control = PatternPerLaneControls::new(&bytes[24..31]);
+                perf.media_gen_per_lane_control = PatternPerLaneControls::new(&bytes[24..=31]);
 
                 // bytes 160-167
-                perf.host_check_per_lane_control = PatternPerLaneControls::new(&bytes[32..39]);
+                perf.host_check_per_lane_control = PatternPerLaneControls::new(&bytes[32..=39]);
 
                 // bytes 168-175
-                perf.media_check_per_lane_control = PatternPerLaneControls::new(&bytes[40..47]);
+                perf.media_check_per_lane_control = PatternPerLaneControls::new(&bytes[40..=47]);
 
                 // byte 176
                 let byte = bytes[48];
