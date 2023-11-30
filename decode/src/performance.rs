@@ -14,7 +14,7 @@ use transceiver_messages::mgmt::sff8636;
 pub use transceiver_messages::mgmt::ManagementInterface;
 use transceiver_messages::mgmt::MemoryRead;
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct Performance {
     pub sff: Option<SffPerformance>,
     pub cmis: Option<CmisPerformance>,
@@ -22,7 +22,7 @@ pub struct Performance {
 
 // SFF-8636
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct SffPerformance {
     pub max_tx_input_eq: TxInputEqualization,
     pub max_rx_output_emphasis: RxOutputEmphasis,
@@ -275,7 +275,7 @@ impl core::fmt::Display for RxOutputAmplitudeSupport {
 
 // CMIS
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct CmisPerformance {
     pub loopback_support: LoopbackCapabilities,
     pub diag_meas_capability: DiagnosticMeasurementCapabilities,
@@ -300,7 +300,7 @@ pub struct CmisPerformance {
 }
 
 /// Loopback capabilties advertisement
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct LoopbackCapabilities {
     pub simultaneous: bool,
     pub media_per_lane: bool,
@@ -312,7 +312,7 @@ pub struct LoopbackCapabilities {
 }
 
 /// Diagnostic measurement capabilities advertisement
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct DiagnosticMeasurementCapabilities {
     pub gating_support: GatingSupport,
     pub gating_results: bool,
@@ -322,7 +322,7 @@ pub struct DiagnosticMeasurementCapabilities {
 }
 
 /// Measurement over a given time interval (gating)
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub enum GatingSupport {
     #[default]
     NotSupported,
@@ -367,7 +367,7 @@ impl core::fmt::Display for GatingSupport {
 }
 
 /// Diagnostic reporting capabilities advertisement
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct DiagnosticReportingCapabilities {
     pub media_fec: bool,
     pub host_fec: bool,
@@ -378,7 +378,7 @@ pub struct DiagnosticReportingCapabilities {
 }
 
 /// Pattern generation and checking location advertisement
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct PatternGenAndCheckLocation {
     pub media_gen_pre_fec: bool,
     pub media_gen_post_fec: bool,
@@ -391,7 +391,7 @@ pub struct PatternGenAndCheckLocation {
 }
 
 /// PRBS specifications for patterns
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub enum PatternId {
     PRBS31Q,
     PRBS31,
@@ -472,7 +472,7 @@ impl core::fmt::Display for PatternId {
 }
 
 /// Helper-type to map PatternId support into a Vec datastructure
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct PatternIdVec(pub Vec<PatternId>);
 
 impl PatternIdVec {
@@ -512,7 +512,7 @@ impl PatternIdVec {
 }
 
 /// Recovered clock for generator options
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub enum RecoveredClockForGenerator {
     #[default]
     NotSupported,
@@ -557,7 +557,7 @@ impl core::fmt::Display for RecoveredClockForGenerator {
 }
 
 /// Pattern generation and checking data swap and inversion advertisement
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct PatternGenAndCheckDataSupport {
     pub media_check_swap: bool,
     pub media_check_invert: bool,
@@ -570,7 +570,7 @@ pub struct PatternGenAndCheckDataSupport {
 }
 
 /// Pattern generation and checking per-lane enable and pattern advertisement
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct PatternGenAndCheckPerLaneSupport {
     pub media_check_per_lane_enable: bool,
     pub media_check_per_lane_pattern: bool,
@@ -583,7 +583,7 @@ pub struct PatternGenAndCheckPerLaneSupport {
 }
 
 /// Pattern generation and checker controls for both host and media
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct PatternPerLaneControls {
     pub enable: [bool; 8],
     pub invert: [bool; 8],
@@ -636,7 +636,7 @@ impl PatternPerLaneControls {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct ClockingAndMeasurementControls {
     pub host_prbs_gen_clk_src: HostPRBSGeneratorClockSource,
     pub media_prbs_gen_clk_src: MediaPRBSGeneratorClockSource,
@@ -650,7 +650,7 @@ pub struct ClockingAndMeasurementControls {
 }
 
 /// Clock source for Host Side PRBS Pattern Generation
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub enum HostPRBSGeneratorClockSource {
     #[default]
     InternalClock,
@@ -701,7 +701,7 @@ impl core::fmt::Display for HostPRBSGeneratorClockSource {
 }
 
 /// Clock source for Media Side PRBS Pattern Generation
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub enum MediaPRBSGeneratorClockSource {
     #[default]
     InternalClock,
@@ -755,7 +755,7 @@ impl core::fmt::Display for MediaPRBSGeneratorClockSource {
 }
 
 /// Measurement (gating) time for one complete result over a defined period
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub enum MeasurementGatingTime {
     #[default]
     Ungated,
@@ -812,7 +812,7 @@ impl core::fmt::Display for MeasurementGatingTime {
 }
 
 /// Time between incremental updates to intermediate error counting results during a longer gating period
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub enum UpdatePeriodSelect {
     #[default]
     Interval1Sec,
@@ -851,7 +851,7 @@ impl core::fmt::Display for UpdatePeriodSelect {
 }
 
 /// The clock source used for the Host PRBS Pattern Checker
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub enum MediaPRBSCheckerClockSource {
     #[default]
     RecoveredClkFromMediaLane,
@@ -896,7 +896,7 @@ impl core::fmt::Display for MediaPRBSCheckerClockSource {
 }
 
 /// The clock source used for the Media PRBS Pattern Checker
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub enum HostPRBSCheckerClockSource {
     #[default]
     RecoveredClkFromHostLane,
@@ -941,7 +941,7 @@ impl core::fmt::Display for HostPRBSCheckerClockSource {
 }
 
 /// Host and Media side loopback control
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct LoopbackControls {
     pub media_output_loopback_per_lane_enable: Option<[bool; 8]>,
     pub media_input_loopback_per_lane_enable: Option<[bool; 8]>,
@@ -950,7 +950,7 @@ pub struct LoopbackControls {
 }
 
 /// Mask bits for all diagnostiscs flags
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 pub struct DiagnosticsMasks {
     pub loss_of_ref_clk_mask: bool,
     pub pattern_check_gating_complete_host: [bool; 8],
