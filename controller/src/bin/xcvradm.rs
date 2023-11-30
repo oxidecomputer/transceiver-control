@@ -1520,7 +1520,145 @@ fn print_performance(performance_result: &PerformanceResult) {
         }
 
         match &perf.cmis {
-            _ => (),
+            Some(cmis) => {
+                if need_newline {
+                    println!("");
+                }
+
+                println!("Port {port}");
+
+                print_property(
+                    NAME_WIDTH,
+                    "Media output loopback",
+                    cmis.loopback_support.media_output,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Media input loopback",
+                    cmis.loopback_support.media_input,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Media per lane loopback",
+                    cmis.loopback_support.media_per_lane,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Host output loopback",
+                    cmis.loopback_support.host_output,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Host input loopback",
+                    cmis.loopback_support.host_input,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Host per lane loopback",
+                    cmis.loopback_support.host_per_lane,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Simultaneous host/media loopback",
+                    cmis.loopback_support.simultaneous,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Gating support",
+                    cmis.diag_meas_capability.gating_support,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Gating results support",
+                    cmis.diag_meas_capability.gating_results,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Periodic updates support",
+                    cmis.diag_meas_capability.periodic_updates,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Per lane gating timers support",
+                    cmis.diag_meas_capability.per_lane_gating,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Auto restart gating support",
+                    cmis.diag_meas_capability.auto_restart_gating,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Media FEC support",
+                    cmis.diag_report_capability.media_fec,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Host FEC support",
+                    cmis.diag_report_capability.host_fec,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Media input SNR measurement support",
+                    cmis.diag_report_capability.media_input_snr,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Host input SNR measurement support",
+                    cmis.diag_report_capability.host_input_snr,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Bits and error counting support",
+                    cmis.diag_report_capability.bits_and_errors_counting,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Bit error ratio results support",
+                    cmis.diag_report_capability.bit_err_ratio_results,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Media PRBS generator pre-FEC support",
+                    cmis.gen_check_location.media_gen_pre_fec,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Media PRBS generator post-FEC support",
+                    cmis.gen_check_location.media_gen_post_fec,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Media PRBS checker pre-FEC support",
+                    cmis.gen_check_location.media_check_pre_fec,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Media PRBS checker post-FEC support",
+                    cmis.gen_check_location.media_check_post_fec,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Host PRBS generator pre-FEC support",
+                    cmis.gen_check_location.host_gen_pre_fec,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Host PRBS generator post-FEC support",
+                    cmis.gen_check_location.host_gen_post_fec,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Host PRBS checker pre-FEC support",
+                    cmis.gen_check_location.host_check_pre_fec,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Host PRBS checker post-FEC support",
+                    cmis.gen_check_location.host_check_post_fec,
+                );
+            }
+            None => (),
         }
     }
 }

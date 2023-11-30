@@ -87,7 +87,7 @@ impl From<u8> for TxInputEqualization {
 impl core::fmt::Display for TxInputEqualization {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         use TxInputEqualization::*;
-        let tmp;
+        let tmp: String;
         write!(
             f,
             "{}",
@@ -152,7 +152,7 @@ impl From<u8> for RxOutputEmphasis {
 impl core::fmt::Display for RxOutputEmphasis {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         use RxOutputEmphasis::*;
-        let tmp;
+        let tmp: String;
         write!(
             f,
             "{}",
@@ -204,7 +204,7 @@ impl From<u8> for RxOutputEmphasisType {
 impl core::fmt::Display for RxOutputEmphasisType {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         use RxOutputEmphasisType::*;
-        let tmp;
+        let tmp: String;
         write!(
             f,
             "{}",
@@ -251,7 +251,7 @@ impl From<u8> for RxOutputAmplitudeSupport {
 impl core::fmt::Display for RxOutputAmplitudeSupport {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         use RxOutputAmplitudeSupport::*;
-        let tmp;
+        let tmp: String;
         write!(
             f,
             "{}",
@@ -277,7 +277,12 @@ impl core::fmt::Display for RxOutputAmplitudeSupport {
 
 #[derive(Clone, Debug, Default)]
 pub struct CmisPerformance {
-    pub gating_support: GatingSupport,
+    pub loopback_support: LoopbackCapabilities,
+    pub diag_meas_capability: DiagnosticMeasurementCapabilities,
+    pub diag_report_capability: DiagnosticReportingCapabilities,
+    pub gen_check_location: PatternGenAndCheckLocation,
+    pub gen_check_data_support: PatternGenAndCheckDataSupport,
+    pub gen_check_per_lane_support: PatternGenAndCheckPerLaneSupport,
     pub host_gen_support: PatternIdVec,
     pub media_gen_support: PatternIdVec,
     pub host_check_support: PatternIdVec,
@@ -289,6 +294,9 @@ pub struct CmisPerformance {
     pub host_check_per_lane_control: PatternPerLaneControls,
     pub media_gen_per_lane_control: PatternPerLaneControls,
     pub media_check_per_lane_control: PatternPerLaneControls,
+    pub clk_and_measurement_control: ClockingAndMeasurementControls,
+    pub loopback_control: LoopbackControls,
+    pub diagnostics_masks: DiagnosticsMasks,
 }
 
 /// Loopback capabilties advertisement
@@ -306,6 +314,7 @@ pub struct LoopbackCapabilities {
 /// Diagnostic measurement capabilities advertisement
 #[derive(Clone, Debug, Default)]
 pub struct DiagnosticMeasurementCapabilities {
+    pub gating_support: GatingSupport,
     pub gating_results: bool,
     pub periodic_updates: bool,
     pub per_lane_gating: bool,
@@ -317,9 +326,9 @@ pub struct DiagnosticMeasurementCapabilities {
 pub enum GatingSupport {
     #[default]
     NotSupported,
-    LTE2ms, // <= 2ms
+    LTE2ms,  // <= 2ms
     LTE20ms, // <= 20ms
-    GT20ms, // > 20ms
+    GT20ms,  // > 20ms
     Invalid(u8),
 }
 
@@ -339,7 +348,7 @@ impl From<u8> for GatingSupport {
 impl core::fmt::Display for GatingSupport {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         use GatingSupport::*;
-        let tmp;
+        let tmp: String;
         write!(
             f,
             "{}",
@@ -424,7 +433,7 @@ impl From<u8> for PatternId {
             0b1101 => Reserved,
             0b1110 => Custom,
             0b1111 => UserPattern,
-            _ => Invalid(x)
+            _ => Invalid(x),
         }
     }
 }
@@ -432,7 +441,7 @@ impl From<u8> for PatternId {
 impl core::fmt::Display for PatternId {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         use PatternId::*;
-        let tmp;
+        let tmp: String;
         write!(
             f,
             "{}",
@@ -468,7 +477,7 @@ pub struct PatternIdVec(pub Vec<PatternId>);
 
 impl PatternIdVec {
     /// First byte represents patterns 7..0, second byte 15..8
-    /// 
+    ///
     /// Pattern Ids are definied by CMIS 5.0 Table 8-93
     pub fn new(bytes: [u8; 2]) -> Self {
         let ids = u16::from_le_bytes(bytes);
@@ -478,23 +487,23 @@ impl PatternIdVec {
             let supported = (ids & mask) != 0;
             if supported {
                 match mask {
-                        0 => new_vec.push(PatternId::PRBS31Q),
-                        1 => new_vec.push(PatternId::PRBS31),
-                        2 => new_vec.push(PatternId::PRBS23Q),
-                        3 => new_vec.push(PatternId::PRBS23),
-                        4 => new_vec.push(PatternId::PRBS15Q),
-                        5 => new_vec.push(PatternId::PRBS15),
-                        6 => new_vec.push(PatternId::PRBS13Q),
-                        7 => new_vec.push(PatternId::PRBS13),
-                        8 => new_vec.push(PatternId::PRBS9Q),
-                        9 => new_vec.push(PatternId::PRBS9),
-                        10 => new_vec.push(PatternId::PRBS7Q),
-                        11 => new_vec.push(PatternId::PRBS7),
-                        12 => new_vec.push(PatternId::SSPRQ),
-                        13 => new_vec.push(PatternId::Reserved),
-                        14 => new_vec.push(PatternId::Custom),
-                        15 => new_vec.push(PatternId::UserPattern),
-                        _ => (),
+                    0 => new_vec.push(PatternId::PRBS31Q),
+                    1 => new_vec.push(PatternId::PRBS31),
+                    2 => new_vec.push(PatternId::PRBS23Q),
+                    3 => new_vec.push(PatternId::PRBS23),
+                    4 => new_vec.push(PatternId::PRBS15Q),
+                    5 => new_vec.push(PatternId::PRBS15),
+                    6 => new_vec.push(PatternId::PRBS13Q),
+                    7 => new_vec.push(PatternId::PRBS13),
+                    8 => new_vec.push(PatternId::PRBS9Q),
+                    9 => new_vec.push(PatternId::PRBS9),
+                    10 => new_vec.push(PatternId::PRBS7Q),
+                    11 => new_vec.push(PatternId::PRBS7),
+                    12 => new_vec.push(PatternId::SSPRQ),
+                    13 => new_vec.push(PatternId::Reserved),
+                    14 => new_vec.push(PatternId::Custom),
+                    15 => new_vec.push(PatternId::UserPattern),
+                    _ => (),
                 }
             }
         }
@@ -529,7 +538,7 @@ impl From<u8> for RecoveredClockForGenerator {
 impl core::fmt::Display for RecoveredClockForGenerator {
     fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
         use RecoveredClockForGenerator::*;
-        let tmp;
+        let tmp: String;
         write!(
             f,
             "{}",
@@ -584,7 +593,20 @@ pub struct PatternPerLaneControls {
 }
 
 impl PatternPerLaneControls {
-    pub fn new(bytes: [u8; 8]) -> PatternPerLaneControls {
+    /// Bytes is an slice of 8 bytes which contain the per lane pattern controls
+    ///
+    /// Page 13h bytes 144-151: Host side generator
+    /// Page 13h bytes 152-159: Media side generator
+    /// Page 13h bytes 160-167: Host side checker
+    /// Page 13h bytes 168-175: Media side checker
+    ///
+    /// Panics if the slice does not contain 8 bytes which would occur as a
+    /// programmer error.
+    pub fn new(bytes: &[u8]) -> PatternPerLaneControls {
+        let bytes: [u8; 8] = match bytes.try_into() {
+            Ok(arr) => arr,
+            Err(_) => panic!("slice did not contain 8 bytes"),
+        };
         let mut ctrl: PatternPerLaneControls = Default::default();
         for bit in 0..=7 {
             let mask = 1 << bit;
@@ -594,44 +616,349 @@ impl PatternPerLaneControls {
             ctrl.pre_fec_enable[bit] = (bytes[3] & mask) != 0;
         }
 
-        // byte 145
-        let byte = bytes[17];
-        for bit in 0..=7 {
-            
-        }
-
-        // byte 146
-        let byte = bytes[18];
-        for bit in 0..=7 {
-            
-        }
-
-        // byte 147
-        let byte = bytes[19];
-        for bit in 0..=7 {
-            
-        }
-
-        // byte 148
-        let byte = bytes[20];
+        let byte = bytes[4];
         ctrl.pattern_select[0] = (byte & 0x0f).into();
         ctrl.pattern_select[1] = (byte & 0xf0).into();
 
-        // byte 149
-        let byte = bytes[21];
+        let byte = bytes[5];
         ctrl.pattern_select[2] = (byte & 0x0f).into();
         ctrl.pattern_select[3] = (byte & 0xf0).into();
 
-        // byte 150
-        let byte = bytes[22];
+        let byte = bytes[6];
         ctrl.pattern_select[4] = (byte & 0x0f).into();
         ctrl.pattern_select[5] = (byte & 0xf0).into();
 
-        // byte 151
-        let byte = bytes[23];
+        let byte = bytes[7];
         ctrl.pattern_select[6] = (byte & 0x0f).into();
         ctrl.pattern_select[7] = (byte & 0xf0).into();
+
+        ctrl
     }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ClockingAndMeasurementControls {
+    pub host_prbs_gen_clk_src: HostPRBSGeneratorClockSource,
+    pub media_prbs_gen_clk_src: MediaPRBSGeneratorClockSource,
+    pub start_stop_is_global: bool,
+    pub reset_error_information: bool,
+    pub auto_restart_gating: bool,
+    pub measurement_time: MeasurementGatingTime,
+    pub update_period_select: UpdatePeriodSelect,
+    pub host_prbs_check_clk_src: HostPRBSCheckerClockSource,
+    pub media_prbs_check_clk_src: MediaPRBSCheckerClockSource,
+}
+
+/// Clock source for Host Side PRBS Pattern Generation
+#[derive(Clone, Debug, Default)]
+pub enum HostPRBSGeneratorClockSource {
+    #[default]
+    InternalClock,
+    RefClkMediaLane(u8),
+    Reserved(u8),
+    RefClkPerMediaLaneOrDataPath,
+    Invalid(u8),
+}
+
+impl From<u8> for HostPRBSGeneratorClockSource {
+    fn from(x: u8) -> Self {
+        use HostPRBSGeneratorClockSource::*;
+        match x {
+            0b0000 => InternalClock,
+            0b0001..=0b1000 => RefClkMediaLane(x),
+            0b1001..=0b1110 => Reserved(x),
+            0b1111 => RefClkPerMediaLaneOrDataPath,
+            _ => Invalid(x),
+        }
+    }
+}
+
+impl core::fmt::Display for HostPRBSGeneratorClockSource {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        use HostPRBSGeneratorClockSource::*;
+        let tmp: String;
+        write!(
+            f,
+            "{}",
+            match self {
+                InternalClock => "All lanes use Internal Clock",
+                RefClkMediaLane(x) => {
+                    tmp = format!("All lanes use Reference Clock Media Lane {x}");
+                    &tmp
+                }
+                Reserved(x) => {
+                    tmp = format!("Reserved(0x{x:x})");
+                    &tmp
+                }
+                RefClkPerMediaLaneOrDataPath => "Recovered clock per Media Lane or Data Path",
+                Invalid(x) => {
+                    tmp = format!("Invalid(0x{x:x})");
+                    &tmp
+                }
+            }
+        )
+    }
+}
+
+/// Clock source for Media Side PRBS Pattern Generation
+#[derive(Clone, Debug, Default)]
+pub enum MediaPRBSGeneratorClockSource {
+    #[default]
+    InternalClock,
+    RefClk,
+    RefClkMediaLane(u8),
+    Reserved(u8),
+    RefClkPerHostLaneOrDataPath,
+    Invalid(u8),
+}
+
+impl From<u8> for MediaPRBSGeneratorClockSource {
+    fn from(x: u8) -> Self {
+        use MediaPRBSGeneratorClockSource::*;
+        match x {
+            0b0000 => InternalClock,
+            0b0001 => RefClk,
+            0b0010..=0b1001 => RefClkMediaLane(x - 1),
+            0b1010..=0b1110 => Reserved(x),
+            0b1111 => RefClkPerHostLaneOrDataPath,
+            _ => Invalid(x),
+        }
+    }
+}
+
+impl core::fmt::Display for MediaPRBSGeneratorClockSource {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        use MediaPRBSGeneratorClockSource::*;
+        let tmp: String;
+        write!(
+            f,
+            "{}",
+            match self {
+                InternalClock => "All lanes use Internal Clock",
+                RefClk => "All lanes use Reference CLock"
+                RefClkMediaLane(x) => {
+                    tmp = format!("All lanes use Reference Clock Host Lane {x}");
+                    &tmp
+                }
+                Reserved(x) => {
+                    tmp = format!("Reserved(0x{x:x})");
+                    &tmp
+                }
+                RefClkPerHostLaneOrDataPath => "Recovered clock per Host Lane or Data Path",
+                Invalid(x) => {
+                    tmp = format!("Invalid(0x{x:x})");
+                    &tmp
+                }
+            }
+        )
+    }
+}
+
+/// Measurement (gating) time for one complete result over a defined period
+#[derive(Clone, Debug, Default)]
+pub enum MeasurementGatingTime {
+    #[default]
+    Ungated,
+    Gate5Sec,
+    Gate10Sec,
+    Gate30Sec,
+    Gate60Sec,
+    Gate120Sec,
+    Gate300Sec,
+    Custom,
+    Invalid(u8),
+}
+
+impl From<u8> for MeasurementGatingTime {
+    fn from(x: u8) -> Self {
+        use MeasurementGatingTime::*;
+        match x {
+            0b000 => Ungated,
+            0b001 => Gate5Sec,
+            0b010 => Gate10Sec,
+            0b011 => Gate30Sec,
+            0b100 => Gate60Sec,
+            0b101 => Gate120Sec,
+            0b110 => Gate300Sec,
+            0b111 => Custom,
+            _ => Invalid(x),
+        }
+    }
+}
+
+impl core::fmt::Display for MeasurementGatingTime {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        use MeasurementGatingTime::*;
+        let tmp: String;
+        write!(
+            f,
+            "{}",
+            match self {
+                Ungated => "Ungated, counters accrue indefinitely (infinite gate time)",
+                Gate5Sec => "5 sec gate time",
+                Gate10Sec => "10 sec gate time",
+                Gate30Sec => "30 sec gate time",
+                Gate60Sec => "60 sec gate time",
+                Gate120Sec => "120 sec gate time",
+                Gate300Sec => "300 sec gate time",
+                Custom => "Custom",
+                Invalid(x) => {
+                    tmp = format!("Invalid(0x{x:x})");
+                    &tmp
+                }
+            }
+        )
+    }
+}
+
+/// Time between incremental updates to intermediate error counting results during a longer gating period
+#[derive(Clone, Debug, Default)]
+pub enum UpdatePeriodSelect {
+    #[default]
+    Interval1Sec,
+    Interval5Sec,
+    Invalid(u8),
+}
+
+impl From<u8> for UpdatePeriodSelect {
+    fn from(x: u8) -> Self {
+        use UpdatePeriodSelect::*;
+        match x {
+            0b0 => Interval1Sec,
+            0b1 => Interval5Sec,
+            _ => Invalid(x),
+        }
+    }
+}
+
+impl core::fmt::Display for UpdatePeriodSelect {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        use UpdatePeriodSelect::*;
+        let tmp: String;
+        write!(
+            f,
+            "{}",
+            match self {
+                Interval1Sec => "1 sec update interval",
+                Interval5Sec => "5 sec update interval",
+                Invalid(x) => {
+                    tmp = format!("Invalid(0x{x:x})");
+                    &tmp
+                }
+            }
+        )
+    }
+}
+
+/// The clock source used for the Host PRBS Pattern Checker
+#[derive(Clone, Debug, Default)]
+pub enum MediaPRBSCheckerClockSource {
+    #[default]
+    RecoveredClkFromMediaLane,
+    InternalClock,
+    RefClk,
+    Reserved,
+    Invalid(u8),
+}
+
+impl From<u8> for MediaPRBSCheckerClockSource {
+    fn from(x: u8) -> Self {
+        use MediaPRBSCheckerClockSource::*;
+        match x {
+            0b00 => RecoveredClkFromMediaLane,
+            0b01 => InternalClock,
+            0b10 => RefClk,
+            0b11 => Reserved,
+            _ => Invalid(x),
+        }
+    }
+}
+
+impl core::fmt::Display for MediaPRBSCheckerClockSource {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        use MediaPRBSCheckerClockSource::*;
+        let tmp: String;
+        write!(
+            f,
+            "{}",
+            match self {
+                RecoveredClkFromMediaLane => "Recovered clocks from Media Lane/Data paths",
+                InternalClock => "All lanes use Internal Clock",
+                RefClk => "All lanes use Reference Clock",
+                Reserved => "Reserved",
+                Invalid(x) => {
+                    tmp = format!("Invalid(0x{x:x})");
+                    &tmp
+                }
+            }
+        )
+    }
+}
+
+/// The clock source used for the Media PRBS Pattern Checker
+#[derive(Clone, Debug, Default)]
+pub enum HostPRBSCheckerClockSource {
+    #[default]
+    RecoveredClkFromHostLane,
+    InternalClock,
+    RefClk,
+    Reserved,
+    Invalid(u8),
+}
+
+impl From<u8> for HostPRBSCheckerClockSource {
+    fn from(x: u8) -> Self {
+        use HostPRBSCheckerClockSource::*;
+        match x {
+            0b00 => RecoveredClkFromHostLane,
+            0b01 => InternalClock,
+            0b10 => RefClk,
+            0b11 => Reserved,
+            _ => Invalid(x),
+        }
+    }
+}
+
+impl core::fmt::Display for HostPRBSCheckerClockSource {
+    fn fmt(&self, f: &mut core::fmt::Formatter) -> core::fmt::Result {
+        use HostPRBSCheckerClockSource::*;
+        let tmp: String;
+        write!(
+            f,
+            "{}",
+            match self {
+                RecoveredClkFromHostLane => "Recovered clocks from Host Lane/Data paths",
+                InternalClock => "All lanes use Internal Clock",
+                RefClk => "All lanes use Reference Clock",
+                Reserved => "Reserved",
+                Invalid(x) => {
+                    tmp = format!("Invalid(0x{x:x})");
+                    &tmp
+                }
+            }
+        )
+    }
+}
+
+/// Host and Media side loopback control
+#[derive(Clone, Debug, Default)]
+pub struct LoopbackControls {
+    pub media_output_loopback_per_lane_enable: Option<[bool; 8]>,
+    pub media_input_loopback_per_lane_enable: Option<[bool; 8]>,
+    pub host_output_loopback_per_lane_enable: Option<[bool; 8]>,
+    pub host_input_loopback_per_lane_enable: Option<[bool; 8]>,
+}
+
+/// Mask bits for all diagnostiscs flags
+#[derive(Clone, Debug, Default)]
+pub struct DiagnosticsMasks {
+    pub loss_of_ref_clk_mask: bool,
+    pub pattern_check_gating_complete_host: [bool; 8],
+    pub pattern_check_gating_complete_media: [bool; 8],
+    pub pattern_gen_lol_host: [bool; 8],
+    pub pattern_gen_lol_media: [bool; 8],
+    pub pattern_check_lol_host: [bool; 8],
+    pub pattern_check_lol_media: [bool; 8],
 }
 
 const BIT0: u8 = 1 << 0;
@@ -642,6 +969,17 @@ const BIT4: u8 = 1 << 4;
 const BIT5: u8 = 1 << 5;
 const BIT6: u8 = 1 << 6;
 const BIT7: u8 = 1 << 7;
+
+// A common construct in the memory map is to have a bit represent state for a
+// single lane, meaning all 8 lanes can be represented in a single byte. This is
+// a handy function for that.
+fn bool_per_lane(byte: u8) -> [bool; 8] {
+    let mut a: [bool; 8];
+    for i in 0..=7 {
+        a[i] = (byte & (1 << i)) != 0;
+    }
+    a
+}
 
 impl ParseFromModule for Performance {
     fn reads(id: Identifier) -> Result<Vec<MemoryRead>, Error> {
@@ -681,11 +1019,8 @@ impl ParseFromModule for Performance {
                     .step_by(usize::from(step))
                     .map(|offset| MemoryRead::new(page, offset, step).unwrap());
                 // bytes 184->205 are reserved or custom, so we skip them
-                // bytes 206->223 in 6-byte reads (ends up with byte 224 too)
-                let step: u8 = 6;
-                let second_block = (206..223)
-                    .step_by(usize::from(step))
-                    .map(|offset| MemoryRead::new(page, offset, step).unwrap());
+                // bytes 206->213 in a single 8-byte read
+                let second_block = MemoryRead::new(page, 206, 8);
 
                 let mut reads = Vec::with_capacity(1);
                 reads.extend(first_block);
@@ -877,45 +1212,41 @@ impl ParseFromModule for Performance {
 
                 // byte 128
                 let byte = bytes[0];
-                let mut loopback_support: LoopbackCapabilities = Default::default();
-                loopback_support.simultaneous = (byte & BIT6) != 0;
-                loopback_support.media_per_lane = (byte & BIT5) != 0;
-                loopback_support.host_per_lane = (byte & BIT4) != 0;
-                loopback_support.host_input = (byte & BIT3) != 0;
-                loopback_support.host_output = (byte & BIT2) != 0;
-                loopback_support.media_input = (byte & BIT1) != 0;
-                loopback_support.media_output = (byte & BIT0) != 0;
+                perf.loopback_support.simultaneous = (byte & BIT6) != 0;
+                perf.loopback_support.media_per_lane = (byte & BIT5) != 0;
+                perf.loopback_support.host_per_lane = (byte & BIT4) != 0;
+                perf.loopback_support.host_input = (byte & BIT3) != 0;
+                perf.loopback_support.host_output = (byte & BIT2) != 0;
+                perf.loopback_support.media_input = (byte & BIT1) != 0;
+                perf.loopback_support.media_output = (byte & BIT0) != 0;
 
                 // byte 129
                 let byte = bytes[1];
-                let mut diagnostics_support: DiagnosticMeasurementCapabilities = Default::default();
-                perf.gating_support = (byte >> 6).into();
-                diagnostics_support.gating_results = (byte & BIT5) != 0;
-                diagnostics_support.periodic_updates = (byte & BIT4) != 0;
-                diagnostics_support.per_lane_gating = (byte & BIT3) != 0;
-                diagnostics_support.auto_restart_gating = (byte & BIT2) != 0;
+                perf.diag_meas_capability.gating_support = (byte >> 6).into();
+                perf.diag_meas_capability.gating_results = (byte & BIT5) != 0;
+                perf.diag_meas_capability.periodic_updates = (byte & BIT4) != 0;
+                perf.diag_meas_capability.per_lane_gating = (byte & BIT3) != 0;
+                perf.diag_meas_capability.auto_restart_gating = (byte & BIT2) != 0;
 
                 // byte 130
                 let byte = bytes[2];
-                let mut reporting_support: DiagnosticReportingCapabilities = Default::default();
-                reporting_support.media_fec = (byte & BIT7) != 0;
-                reporting_support.host_fec = (byte & BIT6) != 0;
-                reporting_support.media_input_snr = (byte & BIT5) != 0;
-                reporting_support.host_input_snr = (byte & BIT4) != 0;
-                reporting_support.bits_and_errors_counting = (byte & BIT1) != 0;
-                reporting_support.bit_err_ratio_results = (byte & BIT0) != 0;
+                perf.diag_report_capability.media_fec = (byte & BIT7) != 0;
+                perf.diag_report_capability.host_fec = (byte & BIT6) != 0;
+                perf.diag_report_capability.media_input_snr = (byte & BIT5) != 0;
+                perf.diag_report_capability.host_input_snr = (byte & BIT4) != 0;
+                perf.diag_report_capability.bits_and_errors_counting = (byte & BIT1) != 0;
+                perf.diag_report_capability.bit_err_ratio_results = (byte & BIT0) != 0;
 
                 // byte 131
                 let byte = bytes[3];
-                let mut pattern_support: PatternGenAndCheckLocation = Default::default();
-                pattern_support.media_gen_pre_fec = (byte & BIT7) != 0;
-                pattern_support.media_gen_post_fec = (byte & BIT6) != 0;
-                pattern_support.media_check_pre_fec = (byte & BIT5) != 0;
-                pattern_support.media_check_post_fec = (byte & BIT4) != 0;
-                pattern_support.host_gen_pre_fec = (byte & BIT3) != 0;
-                pattern_support.host_gen_post_fec = (byte & BIT2) != 0;
-                pattern_support.host_check_pre_fec = (byte & BIT1) != 0;
-                pattern_support.host_check_post_fec = (byte & BIT0) != 0;
+                perf.gen_check_location.media_gen_pre_fec = (byte & BIT7) != 0;
+                perf.gen_check_location.media_gen_post_fec = (byte & BIT6) != 0;
+                perf.gen_check_location.media_check_pre_fec = (byte & BIT5) != 0;
+                perf.gen_check_location.media_check_post_fec = (byte & BIT4) != 0;
+                perf.gen_check_location.host_gen_pre_fec = (byte & BIT3) != 0;
+                perf.gen_check_location.host_gen_post_fec = (byte & BIT2) != 0;
+                perf.gen_check_location.host_check_pre_fec = (byte & BIT1) != 0;
+                perf.gen_check_location.host_check_post_fec = (byte & BIT0) != 0;
 
                 // bytes 132 & 133
                 perf.host_gen_support = PatternIdVec::new([bytes[4], bytes[5]]);
@@ -934,78 +1265,142 @@ impl ParseFromModule for Performance {
 
                 // byte 141
                 let byte = bytes[13];
-                let mut data_support: PatternGenAndCheckDataSupport = Default::default();
-                data_support.media_check_swap = (byte & BIT7) != 0;
-                data_support.media_check_invert = (byte & BIT6) != 0;
-                data_support.media_gen_swap = (byte & BIT5) != 0;
-                data_support.media_gen_invert = (byte & BIT4) != 0;
-                data_support.host_check_swap = (byte & BIT3) != 0;
-                data_support.host_check_invert = (byte & BIT2) != 0;
-                data_support.host_gen_swap = (byte & BIT1) != 0;
-                data_support.host_gen_invert = (byte & BIT0) != 0;
+                perf.gen_check_data_support.media_check_swap = (byte & BIT7) != 0;
+                perf.gen_check_data_support.media_check_invert = (byte & BIT6) != 0;
+                perf.gen_check_data_support.media_gen_swap = (byte & BIT5) != 0;
+                perf.gen_check_data_support.media_gen_invert = (byte & BIT4) != 0;
+                perf.gen_check_data_support.host_check_swap = (byte & BIT3) != 0;
+                perf.gen_check_data_support.host_check_invert = (byte & BIT2) != 0;
+                perf.gen_check_data_support.host_gen_swap = (byte & BIT1) != 0;
+                perf.gen_check_data_support.host_gen_invert = (byte & BIT0) != 0;
 
                 // byte 142
                 let byte = bytes[14];
-                let mut per_lane_support :PatternGenAndCheckPerLaneSupport = Default::default();
-                per_lane_support.media_check_per_lane_enable = (byte & BIT7) != 0;
-                per_lane_support.media_check_per_lane_pattern = (byte & BIT6) != 0;
-                per_lane_support.media_gen_per_lane_enable = (byte & BIT5) != 0;
-                per_lane_support.media_gen_per_lane_pattern = (byte & BIT4) != 0;
-                per_lane_support.host_check_per_lane_enable = (byte & BIT3) != 0;
-                per_lane_support.host_check_per_lane_pattern = (byte & BIT2) != 0;
-                per_lane_support.host_gen_per_lane_enable = (byte & BIT1) != 0;
-                per_lane_support.host_gen_per_lane_pattern = (byte & BIT0) != 0;
+                perf.gen_check_per_lane_support.media_check_per_lane_enable = (byte & BIT7) != 0;
+                perf.gen_check_per_lane_support.media_check_per_lane_pattern = (byte & BIT6) != 0;
+                perf.gen_check_per_lane_support.media_gen_per_lane_enable = (byte & BIT5) != 0;
+                perf.gen_check_per_lane_support.media_gen_per_lane_pattern = (byte & BIT4) != 0;
+                perf.gen_check_per_lane_support.host_check_per_lane_enable = (byte & BIT3) != 0;
+                perf.gen_check_per_lane_support.host_check_per_lane_pattern = (byte & BIT2) != 0;
+                perf.gen_check_per_lane_support.host_gen_per_lane_enable = (byte & BIT1) != 0;
+                perf.gen_check_per_lane_support.host_gen_per_lane_pattern = (byte & BIT0) != 0;
 
-                // byte 143 is reserved, so we skip it
+                // byte 143 is reserved, skip it
 
-                // byte 144
-                let byte = bytes[16];
-                for bit in 0..=7 {
-                    perf.host_gen_per_lane_control.enable[bit] = (byte & (1 << bit)) != 0;
+                // bytes 144-151
+                perf.host_gen_per_lane_control = PatternPerLaneControls::new(&bytes[16..23]);
+
+                // bytes 152-159
+                perf.media_gen_per_lane_control = PatternPerLaneControls::new(&bytes[24..31]);
+
+                // bytes 160-167
+                perf.host_check_per_lane_control = PatternPerLaneControls::new(&bytes[32..39]);
+
+                // bytes 168-175
+                perf.media_check_per_lane_control = PatternPerLaneControls::new(&bytes[40..47]);
+
+                // byte 176
+                let byte = bytes[48];
+                perf.clk_and_measurement_control.host_prbs_gen_clk_src =
+                    ((byte & 0xf0) >> 4).into();
+                perf.clk_and_measurement_control.media_prbs_gen_clk_src = (byte & 0x0f).into();
+
+                // byte 177
+                let byte = bytes[49];
+                perf.clk_and_measurement_control.start_stop_is_global = (byte & BIT7) != 0;
+                perf.clk_and_measurement_control.reset_error_information = (byte & BIT5) != 0;
+                perf.clk_and_measurement_control.auto_restart_gating = (byte & BIT4) != 0;
+                perf.clk_and_measurement_control.measurement_time =
+                    (byte & (BIT3 | BIT2 | BIT1)).into();
+                perf.clk_and_measurement_control.update_period_select = (byte & BIT0).into();
+
+                // byte 178
+                let byte = bytes[50];
+                perf.clk_and_measurement_control.host_prbs_check_clk_src =
+                    (byte & (BIT3 | BIT2)).into();
+                perf.clk_and_measurement_control.media_prbs_check_clk_src =
+                    (byte & (BIT1 | BIT0)).into();
+
+                // byte 179 is reserved, skip it
+
+                // byte 180
+                perf.loopback_control.media_output_loopback_per_lane_enable =
+                    match loopback_support.media_output {
+                        true => Some(bool_per_lane(bytes[52])),
+                        false => None,
+                    };
+
+                // byte 181
+                perf.loopback_control.media_input_loopback_per_lane_enable =
+                    match loopback_support.media_input {
+                        true => Some(bool_per_lane(bytes[53])),
+                        false => None,
+                    };
+
+                // byte 182
+                perf.loopback_control.host_output_loopback_per_lane_enable =
+                    match loopback_support.host_output {
+                        true => Some(bool_per_lane(bytes[54])),
+                        false => None,
+                    };
+
+                // byte 183
+                perf.loopback_control.host_input_loopback_per_lane_enable =
+                    match loopback_support.host_input {
+                        true => Some(bool_per_lane(bytes[55])),
+                        false => None,
+                    };
+
+                // byte 184 is not implemented, skip it. The reads used to
+                // created the bytes buffer now jump to byte 206.
+
+                // byte 206
+                let byte = bytes[57];
+                perf.diagnostics_masks.loss_of_ref_clk_mask = (byte & BIT7) != 0;
+
+                // byte 207 is reserved, skip it
+
+                // byte 208
+                let byte = bytes[59];
+                for i in 0..=7 {
+                    perf.diagnostics_masks.pattern_check_gating_complete_host[i] =
+                        (byte & (1 << i)) != 0;
                 }
 
-                // byte 145
-                let byte = bytes[17];
-                for bit in 0..=7 {
-                    perf.host_gen_per_lane_control.invert[bit] = (byte & (1 << bit)) != 0;
+                // byte 209
+                let byte = bytes[60];
+                for i in 0..=7 {
+                    perf.diagnostics_masks.pattern_check_gating_complete_media[i] =
+                        (byte & (1 << i)) != 0;
                 }
 
-                // byte 146
-                let byte = bytes[18];
-                for bit in 0..=7 {
-                    perf.host_gen_per_lane_control.byte_swap[bit] = (byte & (1 << bit)) != 0;
+                // byte 210
+                let byte = bytes[61];
+                for i in 0..=7 {
+                    perf.diagnostics_masks.pattern_check_lol_host[i] = (byte & (1 << i)) != 0;
                 }
 
-                // byte 147
-                let byte = bytes[19];
-                for bit in 0..=7 {
-                    perf.host_gen_per_lane_control.pre_fec_enable[bit] = (byte & (1 << bit)) != 0;
+                // byte 211
+                let byte = bytes[62];
+                for i in 0..=7 {
+                    perf.diagnostics_masks.pattern_check_lol_media[i] = (byte & (1 << i)) != 0;
                 }
 
-                // byte 148
-                let byte = bytes[20];
-                perf.host_gen_per_lane_control.pattern_select[0] = (byte & 0x0f).into();
-                perf.host_gen_per_lane_control.pattern_select[1] = (byte & 0xf0).into();
+                // byte 212
+                let byte = bytes[63];
+                for i in 0..=7 {
+                    perf.diagnostics_masks.pattern_gen_lol_host[i] = (byte & (1 << i)) != 0;
+                }
 
-                // byte 149
-                let byte = bytes[21];
-                perf.host_gen_per_lane_control.pattern_select[2] = (byte & 0x0f).into();
-                perf.host_gen_per_lane_control.pattern_select[3] = (byte & 0xf0).into();
-
-                // byte 150
-                let byte = bytes[22];
-                perf.host_gen_per_lane_control.pattern_select[4] = (byte & 0x0f).into();
-                perf.host_gen_per_lane_control.pattern_select[5] = (byte & 0xf0).into();
-
-                // byte 151
-                let byte = bytes[23];
-                perf.host_gen_per_lane_control.pattern_select[6] = (byte & 0x0f).into();
-                perf.host_gen_per_lane_control.pattern_select[7] = (byte & 0xf0).into();
-
+                // byte 213
+                let byte = bytes[64];
+                for i in 0..=7 {
+                    perf.diagnostics_masks.pattern_gen_lol_media[i] = (byte & (1 << i)) != 0;
+                }
 
                 Ok(Self {
                     sff: None,
-                    cmis: Some(perf)
+                    cmis: Some(perf),
                 })
             }
             _ => Err(Error::UnsupportedIdentifier(id)),
