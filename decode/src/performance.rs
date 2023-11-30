@@ -1325,28 +1325,28 @@ impl ParseFromModule for Performance {
 
                 // byte 180
                 perf.loopback_control.media_output_loopback_per_lane_enable =
-                    match loopback_support.media_output {
+                    match perf.loopback_support.media_output {
                         true => Some(bool_per_lane(bytes[52])),
                         false => None,
                     };
 
                 // byte 181
                 perf.loopback_control.media_input_loopback_per_lane_enable =
-                    match loopback_support.media_input {
+                    match perf.loopback_support.media_input {
                         true => Some(bool_per_lane(bytes[53])),
                         false => None,
                     };
 
                 // byte 182
                 perf.loopback_control.host_output_loopback_per_lane_enable =
-                    match loopback_support.host_output {
+                    match perf.loopback_support.host_output {
                         true => Some(bool_per_lane(bytes[54])),
                         false => None,
                     };
 
                 // byte 183
                 perf.loopback_control.host_input_loopback_per_lane_enable =
-                    match loopback_support.host_input {
+                    match perf.loopback_support.host_input {
                         true => Some(bool_per_lane(bytes[55])),
                         false => None,
                     };
