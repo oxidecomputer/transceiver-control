@@ -17,7 +17,7 @@ slog-term = "2"
 thiserror = "1"
 transceiver-decode = { path = "../decode", default-features = false }
 transceiver-messages = { path = "../messages" }
-usdt = "0.3.5"
+usdt = "0.4.1"
 
 [dependencies.clap]
 version = "4"
