@@ -1657,6 +1657,126 @@ fn print_performance(performance_result: &PerformanceResult) {
                     "Host PRBS checker post-FEC support",
                     cmis.gen_check_location.host_check_post_fec,
                 );
+                print_property(
+                    NAME_WIDTH,
+                    "Host PRBS generator pattern support",
+                    cmis.host_gen_support,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Media PRBS generator pattern support",
+                    cmis.media_gen_support,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Host PRBS checker pattern support",
+                    cmis.host_check_support,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Media PRBS checker pattern support",
+                    cmis.media_check_support,
+                );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Recovered clock for generator options",
+                //     cmis.recovered_clock_for_generator,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Ref clock for patterns support",
+                //     cmis.reference_clock_for_patterns_support,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "User pattern length supported",
+                //     cmis.user_length_support,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Media checker data swap support",
+                //     cmis.gen_check_data_support.media_check_swap,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Media checker data invert support",
+                //     cmis.gen_check_data_support.media_check_invert,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Media generator data swap support",
+                //     cmis.gen_check_data_support.media_gen_swap,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Media generator data invert support",
+                //     cmis.gen_check_data_support.media_gen_invert,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Host checker data swap support",
+                //     cmis.gen_check_data_support.host_check_swap,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Host checker data invert support",
+                //     cmis.gen_check_data_support.host_check_invert,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Host generator data swap support",
+                //     cmis.gen_check_data_support.host_gen_swap,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Host generator data invert support",
+                //     cmis.gen_check_data_support.host_gen_invert,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Media checker per lane enable support",
+                //     cmis.gen_check_per_lane_support.media_check_per_lane_enable,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Media checker per lane pattern support",
+                //     cmis.gen_check_per_lane_support.media_check_per_lane_pattern,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Media generator per lane enable support",
+                //     cmis.gen_check_per_lane_support.media_gen_per_lane_enable,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Media generator per lane pattern support",
+                //     cmis.gen_check_per_lane_support.media_gen_per_lane_pattern,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Host checker per lane enable support",
+                //     cmis.gen_check_per_lane_support.host_check_per_lane_enable,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Host checker per lane pattern support",
+                //     cmis.gen_check_per_lane_support.host_check_per_lane_pattern,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Host generator per lane enable support",
+                //     cmis.gen_check_per_lane_support.host_gen_per_lane_enable,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Host generator per lane pattern support",
+                //     cmis.gen_check_per_lane_support.host_gen_per_lane_pattern,
+                // );
+                print_property(
+                    NAME_WIDTH,
+                    "M",
+                    cmis.gen_check_per_lane_support.host_gen_per_lane_pattern,
+                );
             }
             None => (),
         }

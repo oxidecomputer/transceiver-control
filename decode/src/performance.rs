@@ -1353,8 +1353,6 @@ impl ParseFromModule for Performance {
 
                 // The reads used to created the bytes buffer now jump to byte
                 // 206.
-
-                // byte 206
                 let byte = bytes[56];
                 perf.diagnostics_masks.loss_of_ref_clk_mask = (byte & BIT7) != 0;
 
