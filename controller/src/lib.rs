@@ -62,6 +62,7 @@
 mod config;
 mod controller;
 mod ioloop;
+mod large_access;
 mod messages;
 mod results;
 
@@ -69,6 +70,7 @@ pub use crate::config::*;
 pub use crate::controller::Controller;
 pub use crate::messages::*;
 pub use crate::results::*;
+pub use large_access::LargeMemoryAccess;
 
 use std::net::IpAddr;
 pub use transceiver_decode::Error as DecodeError;

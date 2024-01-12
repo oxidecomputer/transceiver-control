@@ -10,3 +10,5 @@ default-members = [
     "decode",
     "messages",
 ]
+
+resolver = "2"

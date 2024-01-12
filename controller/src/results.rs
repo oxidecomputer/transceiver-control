@@ -25,6 +25,7 @@
 
 use crate::PowerMode;
 use crate::TransceiverError;
+use std::collections::BTreeMap;
 use transceiver_decode::Identifier;
 use transceiver_decode::MemoryModel;
 use transceiver_decode::Monitors;
@@ -327,6 +328,86 @@ impl<P: Clone> ModuleResult<P> {
     }
 }
 
+impl<P: Clone> ModuleResult<Vec<P>> {
+    /// Append all the successful items for each module in `other` into `self`.
+    ///
+    /// Some operations return an array of items. For example, a read returns
+    /// one byte array for each addressed module. This method can be used to
+    /// append multiple reads together, concatenating the corresponding byte
+    /// arrays from `other` into those in `self`.
+    ///
+    /// # Example
+    /// ```rust
+    /// use transceiver_controller::ModuleResult;
+    /// use transceiver_controller::FailedModules;
+    /// use transceiver_controller::ModuleId;
+    ///
+    /// let a = ModuleResult {
+    ///     modules: ModuleId(0b11),
+    ///     data: vec![vec![0, 1], vec![2, 3]],
+    ///     failures: FailedModules::success(),
+    /// };
+    /// let b = ModuleResult {
+    ///     modules: ModuleId(0b11),
+    ///     data: vec![vec![4, 5], vec![6, 7]],
+    ///     failures: FailedModules::success(),
+    /// };
+    /// let c = a.append(&b).unwrap();
+    /// assert_eq!(a.modules, c.modules);
+    /// assert_eq!(a.data.len(), c.data.len());
+    /// assert_eq!(c.data[0], [a.data[0].clone(), b.data[0].clone()].concat());
+    /// assert_eq!(c.data[1], [a.data[1].clone(), b.data[1].clone()].concat());
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// Note that the modules in other must be a subset of the _successful_
+    /// modules in `self`, meaning it does not address any new modules. Other
+    /// must not have any failures which also appear in `self` -- it's not clear
+    /// which one to take, in that case.
+    pub fn append(&self, other: &Self) -> Option<Self> {
+        // All errors in self must not appear in other's errors.
+        //
+        // This is to ensure that we know which error to correctly report.
+        if !(self.failures.modules & other.failures.modules).is_empty() {
+            return None;
+        }
+
+        // The set of all modules in other must be in our current successful
+        // modules.
+        //
+        // This checks that the other operation did not address any modules not
+        // contained in our own successful result.
+        if !self
+            .modules
+            .is_subset(&(other.modules | other.failures.modules))
+        {
+            return None;
+        }
+
+        // Remove any failures from other.
+        let (modules, data) =
+            remove_module_data(self.modules, self.data.iter(), other.failures.modules);
+
+        // Create a map of all values from `self`, and concatenate or remove all
+        // the values from other.
+        let mut out: BTreeMap<u8, Vec<P>> = modules.to_indices().zip(data).collect();
+        for (ix, mut other_data) in other.modules.to_indices().zip(other.data.iter().cloned()) {
+            // Concatenate any successful data in `other`.
+            if let Some(current) = out.get_mut(&ix) {
+                current.append(&mut other_data);
+            }
+        }
+
+        // Create a result back out of the set of data, merging the errors.
+        Some(Self {
+            modules: ModuleId::from_index_iter(out.keys().copied()).ok()?,
+            data: out.into_values().collect(),
+            failures: self.failures.merge(&other.failures),
+        })
+    }
+}
+
 impl<P> PartialEq for ModuleResult<P>
 where
     P: PartialEq,
@@ -455,5 +536,106 @@ mod tests {
         // Check that we still have the failure, and don't have the success.
         let c = a.merge(&b).unwrap();
         assert_eq!(c, a);
+    }
+
+    #[test]
+    fn test_append_module_results_no_errors() {
+        let a = ModuleResult {
+            modules: ModuleId(0b1),
+            data: vec![vec![0], vec![1]],
+            failures: FailedModules::success(),
+        };
+        let b = ModuleResult {
+            modules: ModuleId(0b1),
+            data: vec![vec![2], vec![3]],
+            failures: FailedModules::success(),
+        };
+        let c = a.append(&b).unwrap();
+        assert_eq!(c.modules, a.modules);
+        assert_eq!(c.modules, b.modules);
+        for i in 0..c.modules.selected_transceiver_count() {
+            assert_eq!(c.data[i], [a.data[i].clone(), b.data[i].clone()].concat());
+        }
+    }
+
+    #[test]
+    fn test_append_module_results_removes_failures() {
+        let a = ModuleResult {
+            modules: ModuleId(0b1),
+            data: vec![vec![0], vec![1]],
+            failures: FailedModules::success(),
+        };
+        let b = ModuleResult {
+            modules: ModuleId::empty(),
+            data: vec![],
+            failures: FailedModules {
+                modules: ModuleId(0b1),
+                errors: vec![TransceiverError::Port(InvalidPort(0))],
+            },
+        };
+        let c = a.append(&b).unwrap();
+        assert!(c.modules.is_empty());
+        assert!(c.data.is_empty());
+        assert_eq!(c.failures, b.failures);
+    }
+
+    // Test that we return `None` when the result we're appending in has
+    // successes that the original result does not have. These can't be
+    // appended, since there's nothing to append them to.
+    #[test]
+    fn test_append_module_results_returns_none_with_new_successes() {
+        let a = ModuleResult {
+            modules: ModuleId(0b1),
+            data: vec![vec![0]],
+            failures: FailedModules::success(),
+        };
+        let b = ModuleResult {
+            modules: ModuleId(0b11),
+            data: vec![vec![0]; 2],
+            failures: FailedModules::success(),
+        };
+        assert!(a.append(&b).is_none());
+    }
+
+    // Test that we return `None` when the result we're appending in has
+    // failures that the original result does not address. This indicates a
+    // logic error, since the other result addresses some different modules.
+    #[test]
+    fn test_append_module_results_returns_none_with_new_errors() {
+        let a = ModuleResult {
+            modules: ModuleId(0b1),
+            data: vec![vec![0]],
+            failures: FailedModules::success(),
+        };
+        let b = ModuleResult {
+            modules: ModuleId(0b1),
+            data: vec![vec![0]],
+            failures: FailedModules {
+                modules: ModuleId(0b10),
+                errors: vec![TransceiverError::Port(InvalidPort(1))],
+            },
+        };
+        assert!(a.append(&b).is_none());
+    }
+
+    // Test that we return `None` when the result we're appending _into_ has
+    // errors that are also in the one we're appending. In this case, it's not
+    // clear which error we can take.
+    #[test]
+    fn test_append_module_results_returns_none_with_overlapping_errors() {
+        let a = ModuleResult {
+            modules: ModuleId(0b1),
+            data: vec![vec![0]],
+            failures: FailedModules {
+                modules: ModuleId(0b1),
+                errors: vec![TransceiverError::Port(InvalidPort(0))],
+            },
+        };
+        let b = ModuleResult {
+            modules: ModuleId::empty(),
+            data: vec![],
+            failures: a.failures.clone(),
+        };
+        assert!(a.append(&b).is_none());
     }
 }

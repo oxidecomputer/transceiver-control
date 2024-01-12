@@ -161,6 +161,11 @@ impl ModuleId {
     pub const fn contains(&self, ix: u8) -> bool {
         (self.0 & (1 << ix)) != 0
     }
+
+    /// Return `true` if the other set of IDs is a subset of `self`.
+    pub const fn is_subset(&self, other: &Self) -> bool {
+        self.0 == (self.0 | other.0)
+    }
 }
 
 impl BitAnd for ModuleId {
@@ -488,5 +493,15 @@ mod tests {
 
         assert_eq!(a & 0b010_u64, ModuleId::empty());
         assert_eq!(a | 0b010_u64, ModuleId(0b111));
+    }
+
+    #[test]
+    fn test_is_subset() {
+        assert!(!ModuleId(0b101).is_subset(&ModuleId(0b010)));
+        assert!(!ModuleId(0b010).is_subset(&ModuleId(0b101)));
+
+        assert!(ModuleId(0b0).is_subset(&ModuleId(0b0)));
+        assert!(ModuleId(0b1).is_subset(&ModuleId(0b1)));
+        assert!(ModuleId(0b111).is_subset(&ModuleId(0b1)));
     }
 }
