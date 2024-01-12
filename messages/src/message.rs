@@ -120,7 +120,7 @@ pub enum ProtocolError {
 #[cfg_attr(any(test, feature = "std"), derive(thiserror::Error))]
 pub enum HwError {
     /// The FPGA reported an I2C error (deprecated)
-    /// 
+    ///
     /// This error has been deprecated in favor of the more explicit and
     /// informative errors below (NotPresent, NotPowered, PowerFault,
     /// NotInitialized, I2cAddressNack, I2cByteNack). It is being maintained
