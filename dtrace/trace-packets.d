@@ -47,7 +47,7 @@
 #define SP_RESPONSE_EXTENDED_STATUS 6
 #define SP_RESPONSE_ACK 3
 
-xcvr-ctl$target:::packet-sent
+xcvr_ctl$target:::packet-sent
 {
 	peer = json(copyinstr(arg0), "ok");
 	n_bytes = arg1;
@@ -63,7 +63,7 @@ xcvr-ctl$target:::packet-sent
 	printf("  msg kind: %d\n", message_kind);
 }
 
-xcvr-ctl$target:::packet-received
+xcvr_ctl$target:::packet-received
 {
 	peer = json(copyinstr(arg0), "ok");
 	n_bytes = arg1;

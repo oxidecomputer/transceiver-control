@@ -44,7 +44,7 @@
 //!
 //! There are several DTrace USDT probes in the `Controller`, mostly around the
 //! networking protocol for communicating with the SP. These are all under the
-//! DTrace provider `xcvr-ctl`, and the probes are:
+//! DTrace provider `xcvr_ctl`, and the probes are:
 //!
 //! - `bad-message` fires when a message is received that could not be
 //! deserialized or was unexpected, for example violating the protocol. It
@@ -86,7 +86,7 @@ use transceiver_messages::mgmt::ManagementInterface;
 pub use transceiver_messages::InvalidPort;
 pub use transceiver_messages::ModuleId;
 
-#[usdt::provider(provider = "xcvr__ctl")]
+#[usdt::provider(provider = "xcvr_ctl")]
 mod probes {
     /// Fires when a packet of any kind is received on the UDP socket.
     ///
