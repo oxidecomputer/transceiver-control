@@ -1,6 +1,6 @@
 #!/usr/sbin/dtrace -Zqs
 
-xcvr-ctl$target:::message-sent
+xcvr_ctl$target:::message-sent
 {
 	peer = json(copyinstr(arg0), "ok");
 	msg = json(copyinstr(arg1), "ok");
@@ -11,7 +11,7 @@ xcvr-ctl$target:::message-sent
     printf("  body: %s\n", body);
 }
 
-xcvr-ctl$target:::message-received
+xcvr_ctl$target:::message-received
 {
 	peer = json(copyinstr(arg0), "ok");
 	msg = json(copyinstr(arg1), "ok");
