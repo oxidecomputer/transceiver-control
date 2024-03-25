@@ -124,7 +124,8 @@ pub enum HwError {
     /// This error has been deprecated in favor of the more explicit and
     /// informative errors below (NotPresent, NotPowered, PowerFault,
     /// NotInitialized, I2cAddressNack, I2cByteNack). It is being maintained
-    /// for backwards compatability.
+    /// for backwards compatibility.
+    #[deprecated = "Use the more specific error variants instead"]
     #[cfg_attr(any(test, feature = "std"), error("FPGA reported an I2C error"))]
     I2cError,
 
