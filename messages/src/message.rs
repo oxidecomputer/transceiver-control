@@ -56,7 +56,12 @@ pub mod version {
 
         /// Includes `ExtendedStatus` and `clear_disabled_latch`
         pub const V3: u8 = 3;
-        pub const CURRENT: u8 = V3;
+
+        /// Additions to HwError: NoFrontIo, FrontIoNotReady, NotPresent,
+        /// NotPowered, PowerFault, NotInitialized, I2cAddressNack, I2cByteNack
+        pub const V4: u8 = 4;
+
+        pub const CURRENT: u8 = V4;
         pub const MIN: u8 = V1;
     }
     pub mod outer {
@@ -114,7 +119,13 @@ pub enum ProtocolError {
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq, Eq, Serialize, SerializedSize)]
 #[cfg_attr(any(test, feature = "std"), derive(thiserror::Error))]
 pub enum HwError {
-    /// The FPGA reported an I2C error
+    /// The FPGA reported an I2C error (deprecated)
+    ///
+    /// This error has been deprecated in favor of the more explicit and
+    /// informative errors below (NotPresent, NotPowered, PowerFault,
+    /// NotInitialized, I2cAddressNack, I2cByteNack). It is being maintained
+    /// for backwards compatibility.
+    #[deprecated = "Use the more specific error variants instead"]
     #[cfg_attr(any(test, feature = "std"), error("FPGA reported an I2C error"))]
     I2cError,
 
@@ -133,6 +144,52 @@ pub enum HwError {
     /// The module has been disabled by the SP due to a policy violation
     #[cfg_attr(any(test, feature = "std"), error("Port is disabled by the SP"))]
     DisabledBySp,
+
+    /// The Front IO board is not present
+    #[cfg_attr(any(test, feature = "std"), error("Front IO board not present"))]
+    NoFrontIo,
+
+    /// The Front IO board is present but not yet ready for communication
+    #[cfg_attr(any(test, feature = "std"), error("Front IO board not ready"))]
+    FrontIoNotReady,
+
+    /// The module is not present
+    ///
+    /// ModPrsL is not asserted.
+    #[cfg_attr(any(test, feature = "std"), error("The module is not present"))]
+    NotPresent,
+
+    /// The module is not powered
+    ///
+    /// A module is present but has not had power enabled.
+    #[cfg_attr(any(test, feature = "std"), error("The module is not powered"))]
+    NotPowered,
+
+    /// The module has experienced a power fault
+    ///
+    /// This could mean the power supply did not come up in time after it was
+    /// enabled or the power good signal was deasserted during normal operation.
+    #[cfg_attr(any(test, feature = "std"), error("The module's power faulted"))]
+    PowerFault,
+
+    /// The module is not yet initialzed
+    ///
+    /// It can take modules on the order of seconds to be ready for action after
+    /// they come out of reset (per SFF-8679, t_init is 2 seconds). We reject
+    /// interactions with modules that are not yet considered initialized.
+    #[cfg_attr(any(test, feature = "std"), error("The module is not initialized"))]
+    NotInitialized,
+
+    /// The module has nack'd the address byte of an I2C transaction
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("The module nack'd an I2C address byte")
+    )]
+    I2cAddressNack,
+
+    /// The module has nack'd a byte of an I2C transaction.
+    #[cfg_attr(any(test, feature = "std"), error("The module nack'd an I2C byte"))]
+    I2cByteNack,
 }
 
 /// Deserialize the [`HwError`]s from a packet buffer that are expected, given
@@ -979,11 +1036,19 @@ mod test {
     #[test]
     fn test_hardware_error_encoding_unchanged() {
         let mut buf = [0u8; HwError::MAX_SIZE];
-        const TEST_DATA: [HwError; 4] = [
+        const TEST_DATA: [HwError; 12] = [
             HwError::I2cError,
             HwError::InvalidModuleIndex,
             HwError::FpgaError,
             HwError::DisabledBySp,
+            HwError::NoFrontIo,
+            HwError::FrontIoNotReady,
+            HwError::NotPresent,
+            HwError::NotPowered,
+            HwError::PowerFault,
+            HwError::NotInitialized,
+            HwError::I2cAddressNack,
+            HwError::I2cByteNack,
         ];
 
         for (variant_id, variant) in TEST_DATA.iter().enumerate() {
