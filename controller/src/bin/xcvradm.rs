@@ -26,6 +26,7 @@ use transceiver_controller::Controller;
 use transceiver_controller::ExtendedStatusResult;
 use transceiver_controller::FailedModules;
 use transceiver_controller::IdentifierResult;
+use transceiver_controller::LargeMemoryAccess;
 use transceiver_controller::LedStateResult;
 use transceiver_controller::MemoryModelResult;
 use transceiver_controller::MonitorResult;
@@ -556,9 +557,7 @@ fn load_known_write_data<R: Read>(rdr: &mut R, kind: InputKind) -> anyhow::Resul
         }
         text => {
             let conv = match text {
-                InputKind::Decimal => {
-                    |x: &str| u8::from_str_radix(x, 10).map_err(anyhow::Error::from)
-                }
+                InputKind::Decimal => |x: &str| x.parse::<u8>().map_err(anyhow::Error::from),
                 InputKind::Hex => |x: &str| {
                     u8::from_str_radix(x.trim_start_matches("0x"), 16).map_err(anyhow::Error::from)
                 },
@@ -841,17 +840,26 @@ async fn main() -> anyhow::Result<()> {
             offset,
             len,
         } => {
-            let read = match (sff, cmis) {
-                (true, false) => MemoryRead::new(sff8636::Page::Lower, offset, len)
+            if len == 0 {
+                return Ok(());
+            }
+            let reads = match (sff, cmis) {
+                (true, false) => MemoryRead::build_many(sff8636::Page::Lower, offset, len)
                     .context("Failed to setup lower page memory read")?,
-                (false, true) => MemoryRead::new(cmis::Page::Lower, offset, len)
+                (false, true) => MemoryRead::build_many(cmis::Page::Lower, offset, len)
                     .context("Failed to setup lower page memory read")?,
                 (_, _) => unreachable!("clap didn't do its job"),
             };
-            let read_result = controller
-                .read(modules, read)
-                .await
-                .context("Failed to read transceiver modules")?;
+            let mut read_result =
+                ReadResult::success(modules, vec![vec![]; modules.selected_transceiver_count()])
+                    .unwrap();
+            for read in reads.into_iter() {
+                let res = controller
+                    .read(modules, read)
+                    .await
+                    .context("Failed to read transceiver modules")?;
+                read_result = read_result.append(&res).unwrap();
+            }
             print_read_data(&read_result, binary);
             if !args.ignore_errors {
                 print_failures(&read_result.failures);
@@ -892,11 +900,14 @@ async fn main() -> anyhow::Result<()> {
             offset,
             len,
         } => {
-            let read = match (sff, cmis) {
+            if len == 0 {
+                return Ok(());
+            }
+            let reads = match (sff, cmis) {
                 (true, false) => {
                     let page =
                         sff8636::UpperPage::new(page).context("Invalid SFF-8636 upper page")?;
-                    MemoryRead::new(sff8636::Page::Upper(page), offset, len)
+                    MemoryRead::build_many(sff8636::Page::Upper(page), offset, len)
                         .context("Failed to setup upper page memory read")?
                 }
                 (false, true) => {
@@ -906,15 +917,21 @@ async fn main() -> anyhow::Result<()> {
                         cmis::UpperPage::new_unbanked(page)
                     }
                     .context("Invalid CMIS upper page")?;
-                    MemoryRead::new(cmis::Page::Upper(page), offset, len)
+                    MemoryRead::build_many(cmis::Page::Upper(page), offset, len)
                         .context("Failed to setup upper page memory read")?
                 }
                 (_, _) => unreachable!("clap didn't do its job"),
             };
-            let read_result = controller
-                .read(modules, read)
-                .await
-                .context("Failed to read transceiver modules")?;
+            let mut read_result =
+                ReadResult::success(modules, vec![vec![]; modules.selected_transceiver_count()])
+                    .unwrap();
+            for read in reads.into_iter() {
+                let res = controller
+                    .read(modules, read)
+                    .await
+                    .context("Failed to read transceiver modules")?;
+                read_result = read_result.append(&res).unwrap();
+            }
             print_read_data(&read_result, binary);
             if !args.ignore_errors {
                 print_failures(&read_result.failures);
@@ -1305,14 +1322,14 @@ fn print_monitors(monitor_result: &MonitorResult) {
     let mut need_newline = false;
     for (port, monitor) in monitor_result.iter() {
         if need_newline {
-            println!("");
+            println!();
         }
 
         // Start by printing the module address.
         println!("Port {port}");
 
         // Print module temperature, if supported.
-        print!("  {}: ", format!("{:>NAME_WIDTH$}", "Temperature (C)"));
+        print!("  {:>NAME_WIDTH$}: ", "Temperature (C)");
         if let Some(temp) = monitor.temperature {
             println!("{temp}");
         } else {
@@ -1320,7 +1337,7 @@ fn print_monitors(monitor_result: &MonitorResult) {
         }
 
         // Print supply voltage, if supported.
-        print!("  {}: ", format!("{:>NAME_WIDTH$}", "Supply voltage (V)"));
+        print!("  {:>NAME_WIDTH$}: ", "Supply voltage (V)");
         if let Some(volt) = monitor.supply_voltage {
             println!("{volt}");
         } else {
@@ -1341,12 +1358,12 @@ fn print_monitors(monitor_result: &MonitorResult) {
             let values = rx_pow.iter().map(|x| x.value());
             println!("  {:>NAME_WIDTH$}: [{}]", name, display_list(values),);
         } else {
-            print!("  {}: ", format!("{:>NAME_WIDTH$}", "Rx power (mW)"));
+            print!("  {:>NAME_WIDTH$}: ", "Rx power (mW)");
             println!("{unsupported}");
         }
 
         // Print the Tx bias current.
-        print!("  {}: ", format!("{:>NAME_WIDTH$}", "Tx bias (mA)"));
+        print!("  {:>NAME_WIDTH$}: ", "Tx bias (mA)");
         if let Some(tx_bias) = &monitor.transmitter_bias_current {
             println!("[{}]", display_list(tx_bias.iter()));
         } else {
@@ -1354,7 +1371,7 @@ fn print_monitors(monitor_result: &MonitorResult) {
         }
 
         // Print the Tx output power.
-        print!("  {}: ", format!("{:>NAME_WIDTH$}", "Tx power (mW)"));
+        print!("  {:>NAME_WIDTH$}: ", "Tx power (mW)");
         if let Some(tx_pow) = &monitor.transmitter_power {
             println!("[{}]", display_list(tx_pow.iter()));
         } else {
