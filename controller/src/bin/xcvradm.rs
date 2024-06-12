@@ -14,6 +14,7 @@ use clap::Subcommand;
 use clap::ValueEnum;
 use slog::Drain;
 use slog::Level;
+use std::fmt::Display;
 use std::fs::File;
 use std::io::stdin;
 use std::io::Read;
@@ -30,6 +31,7 @@ use transceiver_controller::LargeMemoryAccess;
 use transceiver_controller::LedStateResult;
 use transceiver_controller::MemoryModelResult;
 use transceiver_controller::MonitorResult;
+use transceiver_controller::PerformanceResult;
 use transceiver_controller::PowerModeResult;
 use transceiver_controller::PowerState;
 use transceiver_controller::ReadResult;
@@ -38,6 +40,7 @@ use transceiver_controller::VendorInfoResult;
 use transceiver_decode::Aux1Monitor;
 use transceiver_decode::Aux2Monitor;
 use transceiver_decode::Aux3Monitor;
+use transceiver_decode::Performance;
 use transceiver_decode::ReceiverPower;
 use transceiver_decode::VendorInfo;
 use transceiver_messages::filter_module_data;
@@ -541,6 +544,9 @@ enum Cmd {
     /// near zero should be treated with caution, and the datasheet should be
     /// consulted for details.
     Monitors,
+
+    /// Read the performance information for a set of modules
+    Performance,
 }
 
 // Maximum number of bytes to read from input source for writing to module.
@@ -1040,6 +1046,17 @@ async fn main() -> anyhow::Result<()> {
                 print_failures(&monitor_result.failures);
             }
         }
+
+        Cmd::Performance => {
+            let performance_result = controller
+                .performance(modules)
+                .await
+                .context("Failued to get performance data")?;
+            print_performance(&performance_result);
+            if !args.ignore_errors {
+                print_failures(&performance_result.failures);
+            }
+        }
     }
     Ok(())
 }
@@ -1420,6 +1437,421 @@ fn print_monitors(monitor_result: &MonitorResult) {
         // Print additional newline between each port for clarity.
         need_newline = true;
     }
+}
+
+fn print_performance(performance_result: &PerformanceResult) {
+    const NAME_WIDTH: usize = 35;
+    let unsupported = String::from("--");
+    let mut need_newline = false;
+    for (port, perf) in performance_result.iter() {
+        match &perf.sff {
+            Some(sff) => {
+                if need_newline {
+                    println!("");
+                }
+
+                println!("Port {port}");
+
+                print_property(NAME_WIDTH, "Max Tx Eq", sff.max_tx_input_eq);
+                print_property(NAME_WIDTH, "Max Rx emphasis", sff.max_rx_output_emphasis);
+                print_array_of_option_property(
+                    NAME_WIDTH,
+                    "Rx amplitudes supported",
+                    sff.rx_output_ampl_support.as_slice(),
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "RxLOSL fast mode supported",
+                    sff.rxlosl_fast_mode_support,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "TxDis fast mode supported",
+                    sff.txdis_fast_mode_support,
+                );
+                print_optional_property(
+                    NAME_WIDTH,
+                    "Max TC stabilization time (s)",
+                    sff.max_tc_stable_time, // LSB = 1 s, so no math here
+                );
+                if let Some(byte) = sff.max_ctle_settle_time {
+                    // LSB = 100 milliseconds
+                    let time = byte * 100;
+                    print_property(NAME_WIDTH, "Max CTLE settling time (ms)", time);
+                } else {
+                    print_property(NAME_WIDTH, "Max CTLE settling time (ms)", &unsupported);
+                }
+                print_optional_property(NAME_WIDTH, "Host-side FEC enabled", sff.host_fec_enabled);
+                print_optional_property(
+                    NAME_WIDTH,
+                    "Media-side FEC enabled",
+                    sff.media_fec_enabled,
+                );
+                print_optional_array_property(
+                    NAME_WIDTH,
+                    "Tx force squelched (lanes 0-3)",
+                    sff.tx_force_squelches.as_ref().map(|x| x.as_slice()),
+                );
+                print_optional_array_property(
+                    NAME_WIDTH,
+                    "Tx adaptive EQ frozen (lanes 0-3)",
+                    sff.tx_ae_freezes.as_ref().map(|x| x.as_slice()),
+                );
+                print_array_property(
+                    NAME_WIDTH,
+                    "Tx EQ control (lanes 0-3)",
+                    sff.tx_input_eqs.as_slice(),
+                );
+                print_array_property(
+                    NAME_WIDTH,
+                    "Rx emphasis control (lanes 0-3)",
+                    sff.rx_output_emphases.as_slice(),
+                );
+                print_array_property(
+                    NAME_WIDTH,
+                    "Rx amplitude control (lanes 0-3)",
+                    sff.rx_output_ampls.as_slice(),
+                );
+                print_array_property(
+                    NAME_WIDTH,
+                    "Rx squelch disabled (lanes 0-3)",
+                    sff.rx_squelch_disables.as_slice(),
+                );
+                print_array_property(
+                    NAME_WIDTH,
+                    "Tx squelch disabled (lanes 0-3)",
+                    sff.tx_squelch_disables.as_slice(),
+                );
+                print_array_property(
+                    NAME_WIDTH,
+                    "Rx output disabled (lanes 0-3)",
+                    sff.rx_output_disables.as_slice(),
+                );
+                print_optional_array_property(
+                    NAME_WIDTH,
+                    "Tx adaptive EQ enabled (lanes 0-3)",
+                    sff.tx_adaptive_eq_enables.as_ref().map(|x| x.as_slice()),
+                );
+            }
+            None => (),
+        }
+
+        match &perf.cmis {
+            Some(cmis) => {
+                if need_newline {
+                    println!("");
+                }
+
+                println!("Port {port}");
+
+                print_property(
+                    NAME_WIDTH,
+                    "Media output loopback",
+                    cmis.loopback_support.media_output,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Media input loopback",
+                    cmis.loopback_support.media_input,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Media per lane loopback",
+                    cmis.loopback_support.media_per_lane,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Host output loopback",
+                    cmis.loopback_support.host_output,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Host input loopback",
+                    cmis.loopback_support.host_input,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Host per lane loopback",
+                    cmis.loopback_support.host_per_lane,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Simultaneous host/media loopback",
+                    cmis.loopback_support.simultaneous,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Gating support",
+                    cmis.diag_meas_capability.gating_support,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Gating results support",
+                    cmis.diag_meas_capability.gating_results,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Periodic updates support",
+                    cmis.diag_meas_capability.periodic_updates,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Per lane gating timers support",
+                    cmis.diag_meas_capability.per_lane_gating,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Auto restart gating support",
+                    cmis.diag_meas_capability.auto_restart_gating,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Media FEC support",
+                    cmis.diag_report_capability.media_fec,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Host FEC support",
+                    cmis.diag_report_capability.host_fec,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Media input SNR measurement support",
+                    cmis.diag_report_capability.media_input_snr,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Host input SNR measurement support",
+                    cmis.diag_report_capability.host_input_snr,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Bits and error counting support",
+                    cmis.diag_report_capability.bits_and_errors_counting,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Bit error ratio results support",
+                    cmis.diag_report_capability.bit_err_ratio_results,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Media PRBS generator pre-FEC support",
+                    cmis.gen_check_location.media_gen_pre_fec,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Media PRBS generator post-FEC support",
+                    cmis.gen_check_location.media_gen_post_fec,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Media PRBS checker pre-FEC support",
+                    cmis.gen_check_location.media_check_pre_fec,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Media PRBS checker post-FEC support",
+                    cmis.gen_check_location.media_check_post_fec,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Host PRBS generator pre-FEC support",
+                    cmis.gen_check_location.host_gen_pre_fec,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Host PRBS generator post-FEC support",
+                    cmis.gen_check_location.host_gen_post_fec,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Host PRBS checker pre-FEC support",
+                    cmis.gen_check_location.host_check_pre_fec,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Host PRBS checker post-FEC support",
+                    cmis.gen_check_location.host_check_post_fec,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Host PRBS generator pattern support",
+                    cmis.host_gen_support,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Media PRBS generator pattern support",
+                    cmis.media_gen_support,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Host PRBS checker pattern support",
+                    cmis.host_check_support,
+                );
+                print_property(
+                    NAME_WIDTH,
+                    "Media PRBS checker pattern support",
+                    cmis.media_check_support,
+                );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Recovered clock for generator options",
+                //     cmis.recovered_clock_for_generator,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Ref clock for patterns support",
+                //     cmis.reference_clock_for_patterns_support,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "User pattern length supported",
+                //     cmis.user_length_support,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Media checker data swap support",
+                //     cmis.gen_check_data_support.media_check_swap,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Media checker data invert support",
+                //     cmis.gen_check_data_support.media_check_invert,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Media generator data swap support",
+                //     cmis.gen_check_data_support.media_gen_swap,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Media generator data invert support",
+                //     cmis.gen_check_data_support.media_gen_invert,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Host checker data swap support",
+                //     cmis.gen_check_data_support.host_check_swap,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Host checker data invert support",
+                //     cmis.gen_check_data_support.host_check_invert,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Host generator data swap support",
+                //     cmis.gen_check_data_support.host_gen_swap,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Host generator data invert support",
+                //     cmis.gen_check_data_support.host_gen_invert,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Media checker per lane enable support",
+                //     cmis.gen_check_per_lane_support.media_check_per_lane_enable,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Media checker per lane pattern support",
+                //     cmis.gen_check_per_lane_support.media_check_per_lane_pattern,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Media generator per lane enable support",
+                //     cmis.gen_check_per_lane_support.media_gen_per_lane_enable,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Media generator per lane pattern support",
+                //     cmis.gen_check_per_lane_support.media_gen_per_lane_pattern,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Host checker per lane enable support",
+                //     cmis.gen_check_per_lane_support.host_check_per_lane_enable,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Host checker per lane pattern support",
+                //     cmis.gen_check_per_lane_support.host_check_per_lane_pattern,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Host generator per lane enable support",
+                //     cmis.gen_check_per_lane_support.host_gen_per_lane_enable,
+                // );
+                // print_property(
+                //     NAME_WIDTH,
+                //     "Host generator per lane pattern support",
+                //     cmis.gen_check_per_lane_support.host_gen_per_lane_pattern,
+                // );
+                print_property(
+                    NAME_WIDTH,
+                    "M",
+                    cmis.gen_check_per_lane_support.host_gen_per_lane_pattern,
+                );
+            }
+            None => (),
+        }
+    }
+}
+
+fn print_property<T: Display>(name_width: usize, name: &str, value: T) {
+    println!("  {}: {}", format!("{:>name_width$}", name), value);
+}
+
+fn print_optional_property<T: Display>(name_width: usize, name: &str, value: Option<T>) {
+    if let Some(v) = value {
+        print_property(name_width, name, v);
+    } else {
+        print_property(name_width, name, "--");
+    }
+}
+
+fn print_array_property<T: Display + Sized>(name_width: usize, name: &str, values: &[T]) {
+    print!("  {}: [ ", format!("{:>name_width$}", name));
+    for (i, val) in values.into_iter().enumerate() {
+        print!("{}", val);
+        if i < values.len() - 1 {
+            print!(", ")
+        }
+    }
+    println!(" ]");
+}
+
+fn print_optional_array_property<T: Display + Sized>(
+    name_width: usize,
+    name: &str,
+    values: Option<&[T]>,
+) {
+    match values {
+        Some(array) => print_array_property(name_width, name, array),
+        None => print_property(name_width, name, "--"),
+    }
+}
+
+fn print_array_of_option_property<T: Display + Sized>(
+    name_width: usize,
+    name: &str,
+    values: &[Option<T>],
+) {
+    print!("  {}: [ ", format!("{:>name_width$}", name));
+    for (i, val) in values.into_iter().enumerate() {
+        match val {
+            Some(v) => {
+                print!("{}", v);
+                if i < values.len() - 1 {
+                    print!(", ");
+                }
+            }
+            None => (),
+        }
+    }
+    println!(" ]");
 }
 
 #[cfg(test)]
