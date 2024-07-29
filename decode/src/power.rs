@@ -11,7 +11,6 @@ use crate::Identifier;
 use crate::ParseFromModule;
 use transceiver_messages::mgmt::cmis;
 use transceiver_messages::mgmt::sff8636;
-pub use transceiver_messages::mgmt::ManagementInterface;
 use transceiver_messages::mgmt::MemoryRead;
 
 /// Description of software power control override status for a module.
