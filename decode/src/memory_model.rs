@@ -12,7 +12,6 @@ use crate::ParseFromModule;
 use std::fmt;
 use transceiver_messages::mgmt::cmis;
 use transceiver_messages::mgmt::sff8636;
-pub use transceiver_messages::mgmt::ManagementInterface;
 use transceiver_messages::mgmt::MemoryRead;
 use transceiver_messages::mgmt::Page;
 
