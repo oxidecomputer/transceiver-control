@@ -198,7 +198,7 @@ pub enum HwError {
     /// 
     /// A module can stretch the clock by holding it low. Per SFF-8636 section
     /// 5.4.2 T_clock_hold is 500 microseconds. This value is the same in
-    /// CMIS 5.0 section B.2.7.3 but referred to as tRD. 
+    /// CMIS 5.0 section B.2.7.3 but referred to as tRD.
     #[cfg_attr(any(test, feature = "std"), error("The module stretched SCL too long"))]
     I2cSclStretchTimeout,
 }
