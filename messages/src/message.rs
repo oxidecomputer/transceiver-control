@@ -61,7 +61,10 @@ pub mod version {
         /// NotPowered, PowerFault, NotInitialized, I2cAddressNack, I2cByteNack
         pub const V4: u8 = 4;
 
-        pub const CURRENT: u8 = V4;
+        /// Addition to HwError: I2cSclStretchTimeout
+        pub const V5: u8 = 5;
+
+        pub const CURRENT: u8 = V5;
         pub const MIN: u8 = V1;
     }
     pub mod outer {
@@ -172,7 +175,7 @@ pub enum HwError {
     #[cfg_attr(any(test, feature = "std"), error("The module's power faulted"))]
     PowerFault,
 
-    /// The module is not yet initialzed
+    /// The module is not yet initialized
     ///
     /// It can take modules on the order of seconds to be ready for action after
     /// they come out of reset (per SFF-8679, t_init is 2 seconds). We reject
@@ -190,6 +193,14 @@ pub enum HwError {
     /// The module has nack'd a byte of an I2C transaction.
     #[cfg_attr(any(test, feature = "std"), error("The module nack'd an I2C byte"))]
     I2cByteNack,
+
+    /// The module has stretched SCL for too long.
+    ///
+    /// A module can stretch the clock by holding it low. Per SFF-8636 section
+    /// 5.4.2 T_clock_hold is 500 microseconds. This value is the same in
+    /// CMIS 5.0 section B.2.7.3 but referred to as tRD.
+    #[cfg_attr(any(test, feature = "std"), error("The module stretched SCL too long"))]
+    I2cSclStretchTimeout,
 }
 
 /// Deserialize the [`HwError`]s from a packet buffer that are expected, given
@@ -198,7 +209,7 @@ pub enum HwError {
 /// When issue certain requests to the SP, such as `HostRequest::Read`, the SP
 /// responds with two `ModuleId`s: one for the successful modules and one for
 /// the failed modules. The trailing data in a UDP packet, after the message
-/// itself, contains all the data for the succesfully-read modules, followed by
+/// itself, contains all the data for the successfully-read modules, followed by
 /// one `HwError` for each failed module. This method can be used to decode
 /// those errors.
 ///
@@ -1036,7 +1047,7 @@ mod test {
     #[test]
     fn test_hardware_error_encoding_unchanged() {
         let mut buf = [0u8; HwError::MAX_SIZE];
-        const TEST_DATA: [HwError; 12] = [
+        const TEST_DATA: [HwError; 13] = [
             HwError::I2cError,
             HwError::InvalidModuleIndex,
             HwError::FpgaError,
@@ -1049,6 +1060,7 @@ mod test {
             HwError::NotInitialized,
             HwError::I2cAddressNack,
             HwError::I2cByteNack,
+            HwError::I2cSclStretchTimeout,
         ];
 
         for (variant_id, variant) in TEST_DATA.iter().enumerate() {
