@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
+// Copyright 2024 Oxide Computer Company
 
 //! Decode module datapath state.
 
@@ -18,7 +18,6 @@ use std::collections::BTreeMap;
 use std::fmt;
 use transceiver_messages::mgmt::cmis;
 use transceiver_messages::mgmt::sff8636;
-pub use transceiver_messages::mgmt::ManagementInterface;
 use transceiver_messages::mgmt::MemoryRead;
 
 /// Information about a transceiver's datapath.
@@ -45,14 +44,83 @@ pub enum Datapath {
     /// exist in at most one application at a time. These active applications,
     /// of which there may be more than one, are keyed by their codes in the
     /// contained mapping.
-    Cmis(BTreeMap<u8, CmisDatapath>),
+    Cmis {
+        connector: ConnectorType,
+        supported_lanes: Vec<bool>,
+        datapaths: BTreeMap<u8, CmisDatapath>,
+    },
     /// Datapath state about each lane in an SFF-8636 module.
     Sff8636 {
+        connector: ConnectorType,
         specification: SffComplianceCode,
         lanes: [Sff8636Datapath; 4],
     },
 }
 
+/// The type of a media-side connector.
+///
+/// These values come from SFF-8024 Rev 4.10 Table 4-3
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(
+    any(feature = "api-traits", test),
+    derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)
+)]
+#[cfg_attr(any(feature = "api-traits", test), serde(rename_all = "snake_case"))]
+pub enum ConnectorType {
+    Unknown,
+    SubscriberConnector,
+    LucentConnector,
+    Mpo1x12,
+    Mpo2x16,
+    Rj45,
+    Mpo2x12,
+    Mpo1x16,
+    Other(u8),
+    Reserved(u8),
+    VendorSpecific(u8),
+}
+
+impl From<u8> for ConnectorType {
+    fn from(value: u8) -> Self {
+        use ConnectorType::*;
+        match value {
+            0x00 => Unknown,
+            0x01 => SubscriberConnector,
+            0x07 => LucentConnector,
+            0x0c => Mpo1x12,
+            0x0d => Mpo2x16,
+            0x22 => Rj45,
+            0x27 => Mpo2x12,
+            0x28 => Mpo1x16,
+            0x0e..=0x1f | 0x29..=0x7f => Reserved(value),
+            0x80..=0xff => VendorSpecific(value),
+            x => Other(x),
+        }
+    }
+}
+
+impl fmt::Display for ConnectorType {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ConnectorType::Unknown => write!(f, "Unknown"),
+            ConnectorType::SubscriberConnector => write!(f, "Subscriber Connector"),
+            ConnectorType::LucentConnector => write!(f, "Lucent Connector (LC)"),
+            ConnectorType::Mpo1x12 => write!(f, "MPO 1x12"),
+            ConnectorType::Mpo2x16 => write!(f, "MPO 2x16"),
+            ConnectorType::Rj45 => write!(f, "RJ-45"),
+            ConnectorType::Mpo2x12 => write!(f, "MPO-2x12"),
+            ConnectorType::Mpo1x16 => write!(f, "MPO-1x16"),
+            ConnectorType::Other(x) => write!(f, "Other ({x:02x})"),
+            ConnectorType::Reserved(x) => write!(f, "Reserved ({x:02x})"),
+            ConnectorType::VendorSpecific(x) => write!(f, "Vendor-specific ({x:02x})"),
+        }
+    }
+}
+
+/// The compliance code for an SFF-8636 module.
+///
+/// These values record a specification compliance code, from SFF-8636 Table
+/// 6-17, or an extended specification compliance code, from SFF-8024 Table 4-4.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(
     any(feature = "api-traits", test),
@@ -104,7 +172,7 @@ impl ParseFromModule for Datapath {
                 let los = MemoryRead::new(sff8636::Page::Lower, 3, 3)?;
                 let cdr = MemoryRead::new(sff8636::Page::Lower, 98, 1)?;
                 let compliance =
-                    MemoryRead::new(sff8636::Page::Upper(sff8636::UpperPage::new(0)?), 131, 1)?;
+                    MemoryRead::new(sff8636::Page::Upper(sff8636::UpperPage::new(0)?), 130, 2)?;
                 let extended_compliance =
                     MemoryRead::new(sff8636::Page::Upper(sff8636::UpperPage::new(0)?), 192, 1)?;
                 Ok(vec![tx_enable, los, cdr, compliance, extended_compliance])
@@ -117,7 +185,16 @@ impl ParseFromModule for Datapath {
                 // `ApplicationDescriptor`, which defines the host / media
                 // interfaces; lane assignments; and number of lanes.
                 //
-                // We'll start by reading the current configuration of each
+                // We'll start by reading the connector type, which is the same
+                // for all lanes, and the list of supported lanes. These fit in
+                // one read.
+                let connector_type = MemoryRead::new(
+                    cmis::Page::Upper(cmis::UpperPage::new_unbanked(0x00)?),
+                    203,
+                    7,
+                )?;
+
+                // We'll continue by reading the current configuration of each
                 // lane. This maps it to at most one datapath. (It may be
                 // unmapped if it's not used.) From there, we'll read the
                 // application descriptors. Note that we can't restrict the read
@@ -198,6 +275,7 @@ impl ParseFromModule for Datapath {
                 )?;
 
                 let mut reads = Vec::with_capacity(15);
+                reads.push(connector_type);
                 reads.push(lane_config);
                 reads.push(media_type);
                 reads.push(media_assignments);
@@ -225,12 +303,15 @@ impl ParseFromModule for Datapath {
                 let cdr = reads.next().unwrap();
                 assert_eq!(cdr.len(), 1);
                 let compliance = reads.next().unwrap();
-                assert_eq!(compliance.len(), 1);
+                assert_eq!(compliance.len(), 2);
                 let extended_compliance = reads.next().unwrap();
-                assert_eq!(compliance.len(), 1);
+                assert_eq!(extended_compliance.len(), 1);
+
+                // Extract connector type.
+                let connector = ConnectorType::from(compliance[0]);
 
                 // Extract specification compliance code.
-                let specification = SffComplianceCode::new(compliance[0], extended_compliance[0]);
+                let specification = SffComplianceCode::new(compliance[1], extended_compliance[0]);
 
                 // Extract data for all four lanes.
                 //
@@ -277,12 +358,27 @@ impl ParseFromModule for Datapath {
                     .try_into()
                     .unwrap();
                 Ok(Datapath::Sff8636 {
+                    connector,
                     specification,
                     lanes,
                 })
             }
             Identifier::QsfpPlusCmis | Identifier::QsfpDD => {
-                // We first read the lane configuration, which tells us which
+                // First, read the connector type and which lanes are
+                // _unsupported_.
+                let connector_type = reads.next().expect("No connector type read");
+                assert_eq!(connector_type.len(), 7);
+                let connector = ConnectorType::from(connector_type[0]);
+                let unsupported_lanes = connector_type[7];
+                let mut supported_lanes = Vec::with_capacity(8);
+                for i in 0..supported_lanes.len() {
+                    // A 1-bit means the lane is unsupported, so if the bit is
+                    // clear, then it's supported.
+                    let is_supported = unsupported_lanes & (0b01 << i) == 0b0;
+                    supported_lanes.push(is_supported);
+                }
+
+                // We next read the lane configuration, which tells us which
                 // application (if any) each lane is assigned to. These are the
                 // lanes _in use_, and the set of all applications in use is the
                 // union of those any lane is assigned to.
@@ -472,7 +568,11 @@ impl ParseFromModule for Datapath {
                             .insert(lane, st);
                     }
                 }
-                Ok(Datapath::Cmis(datapaths))
+                Ok(Datapath::Cmis {
+                    datapaths,
+                    connector,
+                    supported_lanes,
+                })
             }
             _ => Err(Error::UnsupportedIdentifier(id)),
         }
@@ -824,6 +924,9 @@ mod tests {
     use super::ParseFromModule;
     use super::Sff8636Datapath;
     use crate::ident::SmfMediaInterfaceId;
+    use crate::ConnectorType;
+    use crate::ExtendedSpecificationComplianceCode;
+    use crate::SffComplianceCode;
 
     #[test]
     fn test_application_descriptor_from_bytes() {
@@ -849,8 +952,9 @@ mod tests {
 
     #[test]
     fn test_parse_sff8636_datapath() {
-        let expected = Datapath::Sff8636(
-            [Sff8636Datapath {
+        let expected = Datapath::Sff8636 {
+            connector: ConnectorType::LucentConnector,
+            lanes: [Sff8636Datapath {
                 tx_enabled: true,
                 tx_los: false,
                 rx_los: false,
@@ -861,11 +965,22 @@ mod tests {
                 tx_cdr_enabled: true,
                 rx_cdr_enabled: true,
             }; 4],
-        );
+            specification: SffComplianceCode::Extended(
+                ExtendedSpecificationComplianceCode::Id100GBCwdm4,
+            ),
+        };
         let bytes = [
+            // Tx-enable: all 4 lanes enabled
             vec![0b0000],
+            // LOS: No LOS, no faults, yes LOL
             vec![0b0000_0000, 0b0000_0000, 0b1111_1111],
+            // CDR: All channels have CDR on
             vec![0b1111_1111],
+            // Connector type: LC
+            // Compliance: Extended
+            vec![0x07, 0x80],
+            // Extended compliance: 100G CWDM4
+            vec![0x06],
         ];
         let parsed = Datapath::parse(
             Identifier::QsfpPlusSff8636,

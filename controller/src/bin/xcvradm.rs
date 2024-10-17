@@ -39,6 +39,7 @@ use transceiver_controller::VendorInfoResult;
 use transceiver_decode::Aux1Monitor;
 use transceiver_decode::Aux2Monitor;
 use transceiver_decode::Aux3Monitor;
+use transceiver_decode::ConnectorType;
 use transceiver_decode::Datapath;
 use transceiver_decode::ReceiverPower;
 use transceiver_decode::Sff8636Datapath;
@@ -1459,7 +1460,8 @@ fn print_datapath(datapath: &DatapathResult) {
             Datapath::Sff8636 {
                 specification,
                 lanes,
-            } => print_sff8636_datapath(port, specification, lanes),
+                connector,
+            } => print_sff8636_datapath(port, connector, specification, lanes),
             _ => todo!(),
         }
 
@@ -1469,12 +1471,15 @@ fn print_datapath(datapath: &DatapathResult) {
 
 fn print_sff8636_datapath(
     port: u8,
+    connector: &ConnectorType,
     specification: &SffComplianceCode,
     lanes: &[Sff8636Datapath; 4],
 ) {
     const WIDTH: usize = 18;
     const LANE_WIDTH: usize = 6;
-    println!("Port {port} ({specification})");
+    println!("Port {port}");
+    println!(" Connector: {connector}");
+    println!(" Specification: {specification}");
     print!("{:WIDTH$}", "");
     for lane in 0..lanes.len() {
         print!("  Lane {lane}");
