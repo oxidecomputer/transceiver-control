@@ -45,8 +45,14 @@ pub enum Datapath {
     /// of which there may be more than one, are keyed by their codes in the
     /// contained mapping.
     Cmis {
+        /// The type of free-side connector
         connector: ConnectorType,
-        supported_lanes: Vec<bool>,
+        /// A bit mask with a 1 in bit `i` if the `i`th lane is supported.
+        supported_lanes: u8,
+        /// Mapping from "application selector" ID to its datapath information.
+        ///
+        /// The datapath inclues the lanes used; host electrical interface;
+        /// media interface; and a lot more about the state of the path.
         datapaths: BTreeMap<u8, CmisDatapath>,
     },
     /// Datapath state about each lane in an SFF-8636 module.
@@ -369,14 +375,12 @@ impl ParseFromModule for Datapath {
                 let connector_type = reads.next().expect("No connector type read");
                 assert_eq!(connector_type.len(), 7);
                 let connector = ConnectorType::from(connector_type[0]);
-                let unsupported_lanes = connector_type[7];
-                let mut supported_lanes = Vec::with_capacity(8);
-                for i in 0..supported_lanes.len() {
-                    // A 1-bit means the lane is unsupported, so if the bit is
-                    // clear, then it's supported.
-                    let is_supported = unsupported_lanes & (0b01 << i) == 0b0;
-                    supported_lanes.push(is_supported);
-                }
+
+                // See CMIS 5.0 Table 8-31.
+                //
+                // Each bit is 1 when the lane is _unsupported_. We invert that
+                // to be sane.
+                let supported_lanes = !connector_type[7];
 
                 // We next read the lane configuration, which tells us which
                 // application (if any) each lane is assigned to. These are the
@@ -646,11 +650,9 @@ pub struct Sff8636Datapath {
 /// - The "application descriptor" which is the host and media interfaces, and
 /// the lanes on each side used to transfer data;
 /// - The state of the datapath in a well-defined finite state machine (see CMIS
-/// 5.0 section 6.3.3.);
+/// 5.0 section 6.3.3);
 /// - The flags indicating how the datapath components are operating, such as
 /// receiving an input Rx signal or whether the transmitter is disabled.
-///
-///
 #[derive(Clone, Debug, PartialEq)]
 #[cfg_attr(
     any(feature = "api-traits", test),

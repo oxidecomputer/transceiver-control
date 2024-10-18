@@ -14,6 +14,7 @@ use clap::Subcommand;
 use clap::ValueEnum;
 use slog::Drain;
 use slog::Level;
+use std::collections::BTreeMap;
 use std::fs::File;
 use std::io::stdin;
 use std::io::Read;
@@ -1462,11 +1463,24 @@ fn print_datapath(datapath: &DatapathResult) {
                 lanes,
                 connector,
             } => print_sff8636_datapath(port, connector, specification, lanes),
-            _ => todo!(),
+            Datapath::Cmis {
+                connector,
+                supported_lanes,
+                datapaths,
+            } => print_cmis_datapath(port, connector, *supported_lanes, datapaths),
         }
 
         need_newline = true;
     }
+}
+
+fn print_cmis_datapath(
+    port: u8,
+    connector: &ConnectorType,
+    supported_lanes: u8,
+    datapaths: &BTreeMap<u8, transceiver_decode::CmisDatapath>,
+) {
+    println!("Port {port}");
 }
 
 fn print_sff8636_datapath(
@@ -1478,8 +1492,9 @@ fn print_sff8636_datapath(
     const WIDTH: usize = 18;
     const LANE_WIDTH: usize = 6;
     println!("Port {port}");
-    println!(" Connector: {connector}");
-    println!(" Specification: {specification}");
+    println!("{:>WIDTH$}: {}", "Connector", connector);
+    println!("{:>WIDTH$}: {}", "Specification", specification);
+    println!();
     print!("{:WIDTH$}", "");
     for lane in 0..lanes.len() {
         print!("  Lane {lane}");
