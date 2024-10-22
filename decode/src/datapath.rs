@@ -200,40 +200,69 @@ impl ParseFromModule for Datapath {
                     7,
                 )?;
 
-                // We'll continue by reading the current configuration of each
-                // lane. This maps it to at most one datapath. (It may be
-                // unmapped if it's not used.) From there, we'll read the
-                // application descriptors. Note that we can't restrict the read
-                // to just the _active_ ones, since we need to issue all reads
-                // first.
+                // Ready the configuration for each lane. Table 8-83.
                 //
-                // Using the active lanes, we'll also read out the main bits we
-                // actually care about, like TX enable, CDR enable, etc.
+                // For each lane, this gives indices for the datapath that uses
+                // that lane, if any. The bits of each byte are intepreted as:
+                //
+                // The upper 4 bits give the the index of the Application that
+                // this lane is part of. E.g., if this is `0b0001`, then this is
+                // part of the application with index 1. If this is all zero,
+                // the lane is unused.
+                //
+                // The next 3 bits give the index of the first lane in the
+                // datapath that contains this lane.
+                //
+                // The last bit is 1 if the SI settings for the lane can be
+                // controlled by the host, or 0 if the application defines them
+                // entirely.
+                //
+                // The lane is "active" if the index is _not_ all zeros, i.e.,
+                // this lane is in use in _some_ application.
                 let lane_config = MemoryRead::new(
                     cmis::Page::Upper(cmis::UpperPage::new_banked(0x11, 0)?),
                     206,
                     8,
                 )?;
 
-                // Annoyingly, the application descriptors really consist of 5
-                // bytes, only the first _four_ of which are contiguous. The
-                // last byte is the media assignment options, which is stored
-                // elsewhere. We also put the read of the media assignment
-                // options first, only so that we can extract them all and then
-                // construct the `ApplicationDescriptor` from each read after
-                // that.
+                // Read the media type. CMIS Table 8-17.
                 let media_type = MemoryRead::new(cmis::Page::Lower, 85, 1)?;
+
+                // Read the assignments of media lanes to applications. Table
+                // 8-51.
+                //
+                // Note that we _first_ read the media assignments, which are
+                // bit-masks that are a 1 when the corresponding lane is used in
+                // the application. We read these first because they're required
+                // to understand how to decode the application descriptors,
+                // which we read next.
                 let media_assignments = MemoryRead::new(
                     cmis::Page::Upper(cmis::UpperPage::new_unbanked(0x01)?),
                     176,
                     8,
                 )?;
+
+                // Read the application descriptors. Table 8-19.
+                //
+                // An application descriptor describes everything about an
+                // "application", which is the set of lanes and their metadata
+                // that goes into a single datapath. These values include:
+                //
+                // - Host interface ID
+                // - Media interface ID
+                // - Host lane count
+                // - Media lane count
+                // - Host lane assignment options
+                //
+                // There is always at least one application descriptor, and the
+                // end of the list is indicated by a Host interface ID of 0xFF.
                 let descriptors = (86..118)
                     .step_by(8)
                     .map(|start| MemoryRead::new(cmis::Page::Lower, start, 8))
                     .collect::<Result<Vec<_>, _>>()?;
 
-                // Read the support for various lane-specific controls.
+                // Read the support for various lane-specific controls. Table
+                // 8-44.
                 let control_support = MemoryRead::new(
                     cmis::Page::Upper(cmis::UpperPage::new_unbanked(0x01)?),
                     155,
@@ -243,6 +272,8 @@ impl ParseFromModule for Datapath {
                 // Next, read the lane-specific control bits, indicating how the
                 // host can manipulate each lane, such as disabling the
                 // transmitter.
+                //
+                // Table 8-61.
                 let controls0 = MemoryRead::new(
                     cmis::Page::Upper(cmis::UpperPage::new_banked(0x10, 0)?),
                     129,
@@ -254,26 +285,27 @@ impl ParseFromModule for Datapath {
                     6,
                 )?;
 
-                // Read the state in the DPSM for each datapath.
+                // Read datapath state for each datapath. Table 8-73.
                 let datapath_state = MemoryRead::new(
                     cmis::Page::Upper(cmis::UpperPage::new_banked(0x11, 0)?),
                     128,
                     4,
                 )?;
 
-                // Read the lane-specific output status bits.
+                // Read the lane-specific output status bits. Table 8-75.
                 let lane_status = MemoryRead::new(
                     cmis::Page::Upper(cmis::UpperPage::new_banked(0x11, 0)?),
                     132,
                     2,
                 )?;
 
-                // And finally the lane-specific flags
+                // And finally the lane-specific flags. Table 8-77.
                 let tx_lane_flags = MemoryRead::new(
                     cmis::Page::Upper(cmis::UpperPage::new_banked(0x11, 0)?),
                     135,
                     4,
                 )?;
+                // Table 8-78.
                 let rx_lane_flags = MemoryRead::new(
                     cmis::Page::Upper(cmis::UpperPage::new_banked(0x11, 0)?),
                     147,
@@ -380,7 +412,7 @@ impl ParseFromModule for Datapath {
                 //
                 // Each bit is 1 when the lane is _unsupported_. We invert that
                 // to be sane.
-                let supported_lanes = !connector_type[7];
+                let supported_lanes = !connector_type[6];
 
                 // We next read the lane configuration, which tells us which
                 // application (if any) each lane is assigned to. These are the
@@ -406,24 +438,33 @@ impl ParseFromModule for Datapath {
                 // defined by the application selectors that the lanes are
                 // assigned to, in each entry of `lane_configs` above.
                 //
-                // We've split the reads into the max of 8-bytes each, so parse
-                // out two at a time.
+                // Pull out all 8 descriptors. These are 4 bytes each, which
+                // we've packed into 4 reads of 2 descriptors.
                 let mut supported_applications = Vec::with_capacity(8);
+                let mut descriptors = Vec::with_capacity(8);
                 for read in 0..4 {
-                    let bytes = reads
+                    let descriptor = reads
                         .next()
                         .expect(format!("Missing application descriptor read {read}").as_str());
-                    for (i, chunk) in bytes.chunks_exact(4).enumerate() {
-                        let lane = 2 * read + i;
-                        let assignment = media_assignments[lane];
-                        let app = ApplicationDescriptor::from_bytes(
-                            media_type,
-                            chunk.try_into().unwrap(),
-                            assignment,
-                        )
-                        .unwrap();
-                        supported_applications.push(app);
+                    descriptors.extend(descriptor.chunks_exact(4));
+                }
+                for (i, descriptor) in descriptors.into_iter().enumerate() {
+                    // Fetch the assignment of each lane for this application
+                    // ID.
+                    let assignment = media_assignments[i];
+                    let app = ApplicationDescriptor::from_bytes(
+                        media_type,
+                        descriptor.try_into().unwrap(),
+                        assignment,
+                    )
+                    .unwrap();
+
+                    // If this is the end of list, break out, otherwise push
+                    // this descriptor and continue.
+                    if app.host_id == HostElectricalInterfaceId::EndOfList {
+                        break;
                     }
+                    supported_applications.push(app);
                 }
 
                 // Pull out the set of _active_ applications, using the lane
@@ -439,7 +480,7 @@ impl ParseFromModule for Datapath {
                     if lane_config.is_assigned() {
                         let app_sel = lane_config.app_select_code;
                         let app = supported_applications
-                            .get(usize::from(app_sel))
+                            .get(usize::from(app_sel - 1))
                             .expect("Up to 8 applications are currently supported");
                         active_applications
                             .entry(app_sel)
@@ -521,12 +562,12 @@ impl ParseFromModule for Datapath {
                         };
 
                         let tx_failure =
-                            supported_bit_is_set(support[3], 0, tx_lane_flags[0], lane);
-                        let tx_los = supported_bit_is_set(support[3], 1, tx_lane_flags[1], lane);
-                        let tx_lol = supported_bit_is_set(support[3], 2, tx_lane_flags[2], lane);
+                            supported_bit_is_set(support[2], 0, tx_lane_flags[0], lane);
+                        let tx_los = supported_bit_is_set(support[2], 1, tx_lane_flags[1], lane);
+                        let tx_lol = supported_bit_is_set(support[2], 2, tx_lane_flags[2], lane);
                         let tx_adaptive_eq_fail =
-                            supported_bit_is_set(support[3], 3, tx_lane_flags[3], lane);
-                        let rx_los = supported_bit_is_set(support[4], 1, rx_lane_flags[0], lane);
+                            supported_bit_is_set(support[2], 3, tx_lane_flags[3], lane);
+                        let rx_los = supported_bit_is_set(support[3], 1, rx_lane_flags[0], lane);
 
                         // The datapath state is stored in a nibble within the
                         // bytes read in `datapath_state`. The lower-order
@@ -539,7 +580,7 @@ impl ParseFromModule for Datapath {
                         let shift = if lane % 2 == 1 { 0 } else { 4 };
                         let nibble = (datapath_state[index] & (0x0f << shift)) >> shift;
                         let state = CmisDatapathState::try_from(nibble)?;
-                        let rx_lol = supported_bit_is_set(support[4], 2, rx_lane_flags[1], lane);
+                        let rx_lol = supported_bit_is_set(support[3], 2, rx_lane_flags[1], lane);
 
                         let st = LaneStatus {
                             state,

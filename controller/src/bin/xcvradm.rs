@@ -1481,6 +1481,9 @@ fn print_cmis_datapath(
     datapaths: &BTreeMap<u8, transceiver_decode::CmisDatapath>,
 ) {
     println!("Port {port}");
+    println!("{connector:#?}");
+    println!("{supported_lanes:0b}");
+    println!("{datapaths:#?}");
 }
 
 fn print_sff8636_datapath(
