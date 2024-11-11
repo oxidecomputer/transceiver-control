@@ -14,7 +14,7 @@ itertools = "0.13.0"
 serde = "1"
 slog-async = "2"
 slog-term = "2"
-thiserror = "1"
+thiserror = "2"
 transceiver-decode = { path = "../decode", default-features = false }
 transceiver-messages = { path = "../messages" }
 usdt = "0.5.0"
