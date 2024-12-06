@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
+// Copyright 2024 Oxide Computer Company
 
 //! Specifications for transceiver management interfaces.
 
@@ -129,12 +129,12 @@ pub enum ManagementInterface {
 /// client(s).
 ///
 /// > Important! It's the responsibility of the _host_ to determine if a given
-/// page or bank is supported by any particular module. We'd like to keep as
-/// much intelligence about parsing the memory maps in the host as possible,
-/// including identifying the management specification, and which pages if any
-/// are supported for a module. The intention is for the SP to only interpret
-/// sections of the map insofar as required for temperature and power
-/// monitoring.
+/// > page or bank is supported by any particular module. We'd like to keep as
+/// > much intelligence about parsing the memory maps in the host as possible,
+/// > including identifying the management specification, and which pages if any
+/// > are supported for a module. The intention is for the SP to only interpret
+/// > sections of the map insofar as required for temperature and power
+/// > monitoring.
 ///
 /// Note that modules generally don't _fail_ a memory access to an unsupported
 /// page. Instead, modules generally just revert the page- or bank-select bytes

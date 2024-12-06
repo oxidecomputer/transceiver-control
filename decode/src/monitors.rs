@@ -2,10 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
+// Copyright 2024 Oxide Computer Company
 
 //! Decode transceiver health and monitoring data.
 
+use crate::utils::decode_with_scale;
 use crate::Error;
 use crate::Identifier;
 use crate::ParseFromModule;
@@ -228,8 +229,7 @@ const WATT_TO_MW: f32 = 1e3;
 const AMP_TO_MA: f32 = 1e3;
 
 fn decode_temperature(bytes: [u8; 2]) -> f32 {
-    let unscaled = i16::from_be_bytes(bytes);
-    f32::from(unscaled) * TEMP_RESOLUTION
+    decode_with_scale::<i16>(bytes, TEMP_RESOLUTION)
 }
 
 fn decode_supply_voltage(bytes: [u8; 2]) -> f32 {
@@ -491,7 +491,7 @@ impl ParseFromModule for Monitors {
                 // First read of 2 bytes indicates support for module level
                 // monitors.
                 let support = reads.next().ok_or(Error::ParseFailed)?;
-                let byte = support.get(0).ok_or(Error::ParseFailed)?;
+                let byte = support.first().ok_or(Error::ParseFailed)?;
                 let custom_supported = (byte & 0b0010_0000) != 0;
                 let aux3_supported = (byte & 0b0001_0000) != 0;
                 let aux2_supported = (byte & 0b0000_1000) != 0;
@@ -514,7 +514,7 @@ impl ParseFromModule for Monitors {
                 // The next read describes what's actually being measured by the
                 // auxiliary monitors and Rx optical output power.
                 let description = reads.next().ok_or(Error::ParseFailed)?;
-                let observable = description.get(0).ok_or(Error::ParseFailed)?;
+                let observable = description.first().ok_or(Error::ParseFailed)?;
                 let aux3_is_vcc2 = (observable & 0b100) != 0;
                 let aux2_is_tec = (observable & 0b010) != 0;
                 let aux1_is_tec = (observable & 0b001) != 0;
