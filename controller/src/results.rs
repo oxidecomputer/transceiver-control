@@ -29,6 +29,7 @@ use std::collections::BTreeMap;
 use transceiver_decode::Identifier;
 use transceiver_decode::MemoryModel;
 use transceiver_decode::Monitors;
+use transceiver_decode::Performance;
 use transceiver_decode::PowerControl;
 use transceiver_decode::VendorInfo;
 use transceiver_messages::merge_module_data;
@@ -202,6 +203,9 @@ pub type LedStateResult = ModuleResult<LedState>;
 
 /// The result of reading the monitoring data of a set of transceivers.
 pub type MonitorResult = ModuleResult<Monitors>;
+
+/// The result of reading the performance data of a set of transceivers.
+pub type PerformanceResult = ModuleResult<Performance>;
 
 /// A generic type for accessing module-specific data and failures.
 ///
