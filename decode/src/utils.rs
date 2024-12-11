@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
+// Copyright 2024 Oxide Computer Company
 
 //! Utilities to make decoding various map data less terrible.
 
@@ -224,7 +224,7 @@ mod tests {
             }
         }
 
-        for shift in 8..=255 {
+        for shift in 8.. {
             assert!(extract_bit(0, shift).is_err());
         }
     }

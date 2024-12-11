@@ -1554,8 +1554,8 @@ fn print_cmis_datapath(
                     .map(|p| p.to_string())
                     .unwrap_or_else(|| String::from("Unsupported"))
             }),
-            ("Rx input polarity", |st| {
-                st.tx_input_polarity
+            ("Rx output polarity", |st| {
+                st.rx_output_polarity
                     .map(|p| p.to_string())
                     .unwrap_or_else(|| String::from("Unsupported"))
             }),
