@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
+// Copyright 2024 Oxide Computer Company
 
 //! A host-side control interface to the SP for managing Sidecar transceivers.
 //!
@@ -47,17 +47,14 @@
 //! DTrace provider `xcvr_ctl`, and the probes are:
 //!
 //! - `bad-message` fires when a message is received that could not be
-//! deserialized or was unexpected, for example violating the protocol. It
-//! contains the peer and reason for the failure.
+//!   deserialized or was unexpected, for example violating the protocol. It
+//!   contains the peer and reason for the failure.
 //! - `message-received` fires when a valid message is received, with the peer
-//! and actual message as data.
+//!   and actual message as data.
 //! - `message-sent` fires when a message is sent, with the peer it's sent to
-//! and the actual message as data.
+//!   and the actual message as data.
 //! - `packet-sent` and `packet-received` fire when any UDP packet is sent and
-//! received, with the address and a pointer to the raw data.
-
-#![cfg_attr(not(usdt_stable_asm), feature(asm))]
-#![cfg_attr(all(target_os = "macos", not(usdt_stable_asm_sym)), feature(asm_sym))]
+//!   received, with the address and a pointer to the raw data.
 
 mod config;
 mod controller;

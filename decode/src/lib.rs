@@ -6,11 +6,14 @@
 
 //! Decode various transceiver module memory maps and data.
 
+mod datapath;
 mod ident;
 mod memory_model;
 mod monitors;
 mod power;
+mod utils;
 
+pub use datapath::*;
 pub use ident::*;
 pub use memory_model::*;
 pub use monitors::*;
@@ -34,6 +37,12 @@ pub enum Error {
 
     #[error("Invalid OUI")]
     InvalidOui,
+
+    #[error("Invalid bitfield pattern")]
+    InvalidBitField,
+
+    #[error("Bit out of range")]
+    BitOutOfRange,
 }
 
 /// A trait used to read and parse data from a transceiver memory map.

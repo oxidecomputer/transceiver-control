@@ -31,6 +31,7 @@ use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tokio::time::sleep;
+use transceiver_decode::Datapath;
 use transceiver_decode::Error as DecodeError;
 use transceiver_decode::Identifier;
 use transceiver_decode::MemoryModel;
@@ -45,23 +46,19 @@ use transceiver_messages::merge_module_data;
 use transceiver_messages::message;
 use transceiver_messages::message::Header;
 use transceiver_messages::message::HostRequest;
-pub use transceiver_messages::message::HwError;
 pub use transceiver_messages::message::LedState;
 use transceiver_messages::message::MacAddrResponse;
 use transceiver_messages::message::Message;
 use transceiver_messages::message::MessageBody;
 use transceiver_messages::message::MessageKind;
-pub use transceiver_messages::message::ProtocolError;
 use transceiver_messages::message::SpResponse;
 pub use transceiver_messages::message::Status;
-pub use transceiver_messages::mgmt;
 use transceiver_messages::mgmt::sff8636;
 use transceiver_messages::mgmt::ManagementInterface;
 use transceiver_messages::mgmt::MemoryRead;
 use transceiver_messages::mgmt::MemoryWrite;
 use transceiver_messages::mgmt::Page;
 use transceiver_messages::remove_module_data;
-pub use transceiver_messages::InvalidPort;
 pub use transceiver_messages::ModuleId;
 use transceiver_messages::MAX_PAYLOAD_SIZE;
 
@@ -1157,6 +1154,11 @@ impl Controller {
     /// Return the monitoring information of a set of modules.
     pub async fn monitors(&self, modules: ModuleId) -> Result<MonitorResult, Error> {
         self.parse_modules_by_identifier::<Monitors>(modules).await
+    }
+
+    /// Return the datapath state for a set of modules.
+    pub async fn datapath(&self, modules: ModuleId) -> Result<DatapathResult, Error> {
+        self.parse_modules_by_identifier::<Datapath>(modules).await
     }
 
     // Parse a decodable piece of data from each module.
