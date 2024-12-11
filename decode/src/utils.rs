@@ -224,7 +224,7 @@ mod tests {
             }
         }
 
-        for shift in 8.. {
+        for shift in 8..=255 {
             assert!(extract_bit(0, shift).is_err());
         }
     }
