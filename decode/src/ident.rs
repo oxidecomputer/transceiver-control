@@ -54,7 +54,7 @@ crate::bitfield_enum! {
         0x1c, X4MultiLink, "x4 MiniLink/OcuLink",
         0x1d, X8MiniLink, "x8 MiniLink",
         0x1e, QsfpPlusCmis, "QSFP+ or later with Common Management Interface Specification",
-        0x21, OsfpXd, "OSFP-XD with with Common Management interface Specification"
+        0x21, OsfpXd, "OSFP-XD with Common Management Interface Specification"
     },
     other_variants = {
         Reserved : 0x21..=0x7f,
