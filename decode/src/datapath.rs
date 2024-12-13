@@ -81,6 +81,7 @@ pub enum ConnectorType {
     Rj45,
     Mpo2x12,
     Mpo1x16,
+    NoSeperableConnector,
     Other(u8),
     Reserved(u8),
     VendorSpecific(u8),
@@ -96,6 +97,7 @@ impl From<u8> for ConnectorType {
             0x0c => Mpo1x12,
             0x0d => Mpo2x16,
             0x22 => Rj45,
+            0x23 => NoSeperableConnector,
             0x27 => Mpo2x12,
             0x28 => Mpo1x16,
             0x0e..=0x1f | 0x29..=0x7f => Reserved(value),
@@ -116,6 +118,7 @@ impl fmt::Display for ConnectorType {
             ConnectorType::Rj45 => write!(f, "RJ-45"),
             ConnectorType::Mpo2x12 => write!(f, "MPO-2x12"),
             ConnectorType::Mpo1x16 => write!(f, "MPO-1x16"),
+            ConnectorType::NoSeperableConnector => write!(f, "No seperable connector"),
             ConnectorType::Other(x) => write!(f, "Other ({x:02x})"),
             ConnectorType::Reserved(x) => write!(f, "Reserved ({x:02x})"),
             ConnectorType::VendorSpecific(x) => write!(f, "Vendor-specific ({x:02x})"),
@@ -183,7 +186,10 @@ impl ParseFromModule for Datapath {
                     MemoryRead::new(sff8636::Page::Upper(sff8636::UpperPage::new(0)?), 192, 1)?;
                 Ok(vec![tx_enable, los, cdr, compliance, extended_compliance])
             }
-            Identifier::QsfpPlusCmis | Identifier::QsfpDD => {
+            Identifier::QsfpPlusCmis
+            | Identifier::QsfpDD
+            | Identifier::Osfp8
+            | Identifier::OsfpXd => {
                 // As with most module data, CMIS is _far_ more complicated than
                 // SFF-8636. Lanes can be assigned to different datapaths,
                 // though only one at a time, and modules can have a large
@@ -401,7 +407,10 @@ impl ParseFromModule for Datapath {
                     lanes,
                 })
             }
-            Identifier::QsfpPlusCmis | Identifier::QsfpDD => {
+            Identifier::QsfpPlusCmis
+            | Identifier::QsfpDD
+            | Identifier::Osfp8
+            | Identifier::OsfpXd => {
                 // First, read the connector type and which lanes are
                 // _unsupported_.
                 let connector_type = reads.next().expect("No connector type read");
