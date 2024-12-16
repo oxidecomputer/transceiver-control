@@ -57,4 +57,14 @@ pub trait ParseFromModule: Sized {
 
     /// Parse the result of the above reads into `Self`.
     fn parse<'a>(id: Identifier, reads: impl Iterator<Item = &'a [u8]>) -> Result<Self, Error>;
+
+    /// Use `reads` and `parse` together to collect data from a buffer.
+    fn from_buf(id: Identifier, data: &[u8]) -> Result<Self, Error> {
+        let chunks = Self::reads(id)?.into_iter().map(|r| {
+            let begin = r.offset() as usize;
+            let end = (r.offset() + r.len()) as usize;
+            &data[begin..end]
+        });
+        Ok(Self::parse(id, chunks.into_iter())?)
+    }
 }

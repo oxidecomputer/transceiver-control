@@ -48,12 +48,13 @@ crate::bitfield_enum! {
         0x16, Cdfp3, "CDFP (Style 3)",
         0x17, MicroQsfp, "MicroQSFP",
         0x18, QsfpDD, "QSFP-DD Double Density 8X Pluggable Transceiver",
-        0x19, Qsfp8, "QSFP 8X Pluggable Transceiver",
+        0x19, Osfp8, "OSFP 8X Pluggable Transceiver",
         0x1a, SfpDD, "SFP-DD 2X Double Density Pluggable Transceiver",
         0x1b, Dsfp, "DSFP Dual Small Form Factor Pluggable Transceiver",
         0x1c, X4MultiLink, "x4 MiniLink/OcuLink",
         0x1d, X8MiniLink, "x8 MiniLink",
         0x1e, QsfpPlusCmis, "QSFP+ or later with Common Management Interface Specification",
+        0x21, OsfpXd, "OSFP-XD with Common Management Interface Specification"
     },
     other_variants = {
         Reserved : 0x21..=0x7f,
@@ -67,7 +68,7 @@ impl Identifier {
         use Identifier::*;
         match self {
             QsfpPlusSff8636 | Qsfp28 => Ok(ManagementInterface::Sff8636),
-            QsfpPlusCmis | QsfpDD => Ok(ManagementInterface::Cmis),
+            QsfpPlusCmis | QsfpDD | Osfp8 | OsfpXd => Ok(ManagementInterface::Cmis),
             _ => Err(Error::UnsupportedIdentifier(*self)),
         }
     }
@@ -189,7 +190,10 @@ impl ParseFromModule for VendorInfo {
                 const END: u8 = 220;
                 Ok(vec![MemoryRead::new(page, START, END - START)?])
             }
-            Identifier::QsfpPlusCmis | Identifier::QsfpDD => {
+            Identifier::QsfpPlusCmis
+            | Identifier::QsfpDD
+            | Identifier::Osfp8
+            | Identifier::OsfpXd => {
                 // See CMIS rev 5.0 Table 8-24.
                 //
                 // In contrast to SFF-8636, these bytes are all contiguous.
@@ -256,7 +260,10 @@ impl ParseFromModule for VendorInfo {
                     vendor,
                 })
             }
-            Identifier::QsfpPlusCmis | Identifier::QsfpDD => {
+            Identifier::QsfpPlusCmis
+            | Identifier::QsfpDD
+            | Identifier::Osfp8
+            | Identifier::OsfpXd => {
                 // The byte offsets in the `reads` data, offset by first byte.
                 const NAME: Range<usize> = 0..16; // 16 bytes
                 const OUI: Range<usize> = 16..19; // 3 bytes

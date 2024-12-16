@@ -39,7 +39,10 @@ impl ParseFromModule for PowerControl {
                 let power = MemoryRead::new(page, 93, 1).unwrap();
                 Ok(vec![power])
             }
-            Identifier::QsfpPlusCmis | Identifier::QsfpDD => {
+            Identifier::QsfpPlusCmis
+            | Identifier::QsfpDD
+            | Identifier::Osfp8
+            | Identifier::OsfpXd => {
                 // See CMIS 5.0 table 8-10.
                 //
                 // Byte 26, bit 6 contains the software override bit, and bit 4
@@ -73,7 +76,10 @@ impl ParseFromModule for PowerControl {
                         }
                     })
             }
-            Identifier::QsfpPlusCmis | Identifier::QsfpDD => {
+            Identifier::QsfpPlusCmis
+            | Identifier::QsfpDD
+            | Identifier::Osfp8
+            | Identifier::OsfpXd => {
                 // Bit 6 -> override (but see above), bit 4 -> force low-power.
                 reads
                     .next()
