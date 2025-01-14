@@ -316,7 +316,10 @@ impl ParseFromModule for Monitors {
                 reads.extend(per_lane);
                 Ok(reads)
             }
-            Identifier::QsfpPlusCmis | Identifier::QsfpDD => {
+            Identifier::QsfpPlusCmis
+            | Identifier::QsfpDD
+            | Identifier::Osfp8
+            | Identifier::OsfpXd => {
                 // TODO-completeness: There are two additional complexities
                 // here. First, this data is technically only available when the
                 // MemoryModel of the module indicates it is paged. Nearly all
@@ -487,7 +490,10 @@ impl ParseFromModule for Monitors {
                     aux_monitors: None,
                 })
             }
-            Identifier::QsfpPlusCmis | Identifier::QsfpDD => {
+            Identifier::QsfpPlusCmis
+            | Identifier::QsfpDD
+            | Identifier::Osfp8
+            | Identifier::OsfpXd => {
                 // First read of 2 bytes indicates support for module level
                 // monitors.
                 let support = reads.next().ok_or(Error::ParseFailed)?;
