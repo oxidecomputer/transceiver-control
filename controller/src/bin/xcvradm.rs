@@ -42,9 +42,9 @@ use transceiver_controller::VendorInfoResult;
 use transceiver_decode::Aux1Monitor;
 use transceiver_decode::Aux2Monitor;
 use transceiver_decode::Aux3Monitor;
+use transceiver_decode::CmisLaneStatus;
 use transceiver_decode::ConnectorType;
 use transceiver_decode::Datapath;
-use transceiver_decode::LaneStatus;
 use transceiver_decode::ReceiverPower;
 use transceiver_decode::Sff8636Datapath;
 use transceiver_decode::SffComplianceCode;
@@ -1477,7 +1477,7 @@ fn print_datapath(datapath: &DatapathResult) {
     }
 }
 
-type CmisLaneStatusPrinter = fn(&LaneStatus) -> String;
+type CmisLaneStatusPrinter = fn(&CmisLaneStatus) -> String;
 type CmisRowPrinter<'a> = (&'a str, CmisLaneStatusPrinter);
 
 fn print_cmis_datapath(

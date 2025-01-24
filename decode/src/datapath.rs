@@ -580,7 +580,7 @@ impl ParseFromModule for Datapath {
                         let state = CmisDatapathState::try_from(nibble)?;
                         let rx_lol = supported_bit_is_set(support[3], 2, rx_lane_flags[1], lane);
 
-                        let st = LaneStatus {
+                        let st = CmisLaneStatus {
                             state,
                             tx_input_polarity,
                             tx_output_enabled,
@@ -702,7 +702,7 @@ pub struct CmisDatapath {
     pub application: ApplicationDescriptor,
 
     /// The status bits for each lane in the datapath.
-    pub lane_status: BTreeMap<u8, LaneStatus>,
+    pub lane_status: BTreeMap<u8, CmisLaneStatus>,
 }
 
 /// The status of a single CMIS lane.
@@ -714,7 +714,7 @@ pub struct CmisDatapath {
     any(feature = "api-traits", test),
     derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)
 )]
-pub struct LaneStatus {
+pub struct CmisLaneStatus {
     /// The datapath state of this lane.
     ///
     /// See CMIS 5.0 section 8.9.1 for details.
