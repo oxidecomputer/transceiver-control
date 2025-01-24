@@ -17,11 +17,11 @@ use transceiver_messages::mgmt::MemoryRead;
 
 crate::bitfield_enum! {
     name = Identifier,
-    description = "The SFF-8024 Identifier for a transceiver module.\
-    \
-    This identifier is used as the main description of the kind of moduel, and
+    description = "The SFF-8024 Identifier for a transceiver module.\n\
+    \n\
+    This identifier is used as the main description of the kind of module, and
     indicates the spec that it should conform to. It is requried to interpret
-    the remainder of the memory map.",
+    the remainder of the module's memory map.",
     variants = {
         0x00, Unknown, "Unknown or unspecified",
         0x01, Gbic, "GBIC",

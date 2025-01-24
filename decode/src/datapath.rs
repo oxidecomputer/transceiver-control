@@ -523,9 +523,9 @@ impl ParseFromModule for Datapath {
                         let tx_input_polarity =
                             supported_bit_is_set(support[0], 0, controls0[0], lane).map(|x| {
                                 if x {
-                                    Polarity::Flipped
+                                    LanePolarity::Flipped
                                 } else {
-                                    Polarity::Normal
+                                    LanePolarity::Normal
                                 }
                             });
                         let tx_output_enabled =
@@ -537,9 +537,9 @@ impl ParseFromModule for Datapath {
                         let rx_output_polarity =
                             supported_bit_is_set(support[1], 0, controls1[3], lane).map(|x| {
                                 if x {
-                                    Polarity::Flipped
+                                    LanePolarity::Flipped
                                 } else {
-                                    Polarity::Normal
+                                    LanePolarity::Normal
                                 }
                             });
                         let rx_output_enabled =
@@ -682,7 +682,7 @@ pub struct Sff8636Datapath {
 
 /// A datapath in a CMIS module.
 ///
-/// In contrast to SFF-8636, CMIS makes first-class the concept of a datpath: a
+/// In contrast to SFF-8636, CMIS makes first-class the concept of a datapath: a
 /// set of lanes and all the associated machinery involved in the transfer of
 /// data. This includes:
 ///
@@ -724,7 +724,7 @@ pub struct CmisLaneStatus {
     ///
     /// This indicates a host-side control that flips the polarity of the
     /// host-side input signal.
-    pub tx_input_polarity: Option<Polarity>,
+    pub tx_input_polarity: Option<LanePolarity>,
 
     /// Whether the Tx output is enabled.
     pub tx_output_enabled: Option<bool>,
@@ -746,7 +746,7 @@ pub struct CmisLaneStatus {
     ///
     /// This indicates a host-side control that flips the polarity of the
     /// host-side output signal.
-    pub rx_output_polarity: Option<Polarity>,
+    pub rx_output_polarity: Option<LanePolarity>,
 
     /// Whether the Rx output is enabled.
     ///
@@ -844,22 +844,23 @@ impl fmt::Display for OutputStatus {
     }
 }
 
+/// The polarity of a transceiver lane.
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(
     any(feature = "api-traits", test),
     derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)
 )]
 #[cfg_attr(any(feature = "api-traits", test), serde(rename_all = "snake_case"))]
-pub enum Polarity {
+pub enum LanePolarity {
     Normal,
     Flipped,
 }
 
-impl fmt::Display for Polarity {
+impl fmt::Display for LanePolarity {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Polarity::Normal => write!(f, "Normal"),
-            Polarity::Flipped => write!(f, "Flipped"),
+            LanePolarity::Normal => write!(f, "Normal"),
+            LanePolarity::Flipped => write!(f, "Flipped"),
         }
     }
 }
