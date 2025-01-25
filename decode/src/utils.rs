@@ -69,7 +69,7 @@ pub fn decode_with_scale<T: Scalable>(buf: [u8; 2], scale: f32) -> f32 {
 ///
 /// transceiver_decode::utils::bitfield_enum! {
 ///     Foo,
-///     "An bit pattern representing foo",
+///     "A bit pattern representing foo",
 ///     3:2,
 ///     0b00, First, "The first value",
 ///     0b01, Second, "The second value",
@@ -97,7 +97,13 @@ macro_rules! bitfield_enum {
             serde(rename_all = "snake_case"),
         )]
         pub enum $name {
-            $($variant),+,
+            $(
+                #[cfg_attr(
+                    any(feature = "api-traits", test),
+                    serde(rename = $display)
+                )]
+                $variant
+            ),+,
             $($other_variant(u8)),+
         }
 
