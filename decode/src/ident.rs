@@ -23,10 +23,10 @@ crate::bitfield_enum! {
     indicates the spec that it should conform to. It is requried to interpret
     the remainder of the module's memory map.",
     variants = {
-        0x00, Unknown, "Unknown or unspecified",
+        0x00, Unknown, "Unknown",
         0x01, Gbic, "GBIC",
-        0x02, Soldered, "Module/connector soldered to motherboard",
-        0x03, Sfp, "SFP/SFP+/SFP28",
+        0x02, Soldered, "Soldered",
+        0x03, Sfp, "SFP/SFP+/SFP28 (SFF-8472)",
         0x04, Xbi, "XBI",
         0x05, Xenpak, "XENPAK",
         0x06, Xfp, "XFP",
@@ -35,25 +35,25 @@ crate::bitfield_enum! {
         0x09, Xpak, "XPAK",
         0x0a, X2, "X2",
         0x0b, DwdmSfp, "DWDM-SFP/SFP+",
-        0x0c, Qsfp, "QSFP",
-        0x0d, QsfpPlusSff8636, "QSFP+ or later with SFF-8636 management interface",
-        0x0e, Cxp, "CXP or later",
+        0x0c, Qsfp, "QSFP (INF-8438)",
+        0x0d, QsfpPlusSff8636, "QSFP+ (SFF-8636)",
+        0x0e, Cxp, "CXP",
         0x0f, ShieldedMultiLane4, "Shielded mini multi-lane 4X",
         0x10, ShieldedMultiLane8, "Shielded mini multi-lane 8X",
-        0x11, Qsfp28, "QSFP28 or later with SFF-8636 management interface",
+        0x11, Qsfp28, "QSFP28 (SFF-8636)",
         0x12, Cxp2, "CXP2",
         0x13, Cdfp, "CDFP (Style 1 or 2)",
         0x14, ShieldedMultiLane4Fanout, "Shielded mini multi-lane 4X fanout",
         0x15, ShieldedMultiLane8Fanout, "Shielded mini multi-lane 8X fanout",
         0x16, Cdfp3, "CDFP (Style 3)",
         0x17, MicroQsfp, "MicroQSFP",
-        0x18, QsfpDD, "QSFP-DD Double Density 8X Pluggable Transceiver",
-        0x19, Qsfp8, "QSFP 8X Pluggable Transceiver",
-        0x1a, SfpDD, "SFP-DD 2X Double Density Pluggable Transceiver",
-        0x1b, Dsfp, "DSFP Dual Small Form Factor Pluggable Transceiver",
+        0x18, QsfpDD, "QSFP-DD 8X Pluggable",
+        0x19, Qsfp8, "QSFP 8X Pluggable",
+        0x1a, SfpDD, "SFP-DD 2X Double Density Pluggable",
+        0x1b, Dsfp, "DSFP Dual Small Form Factor Pluggable",
         0x1c, X4MultiLink, "x4 MiniLink/OcuLink",
         0x1d, X8MiniLink, "x8 MiniLink",
-        0x1e, QsfpPlusCmis, "QSFP+ or later with Common Management Interface Specification",
+        0x1e, QsfpPlusCmis, "QSFP+ (CMIS)",
     },
     other_variants = {
         Reserved : 0x21..=0x7f,
@@ -367,9 +367,9 @@ crate::bitfield_enum! {
         0x34, Id100GLr130, "100G-LR1-30 MSA",
         0x35, Id100GLr140, "100G-LR1-40 MSA",
         0x30, IdAcc50GAUI10en6, "Active Copper Cable with 50GAUI, 200GAUI-2 or 200GAUI-4 C2M (BER <= 10e-6)",
-        0x31, IdAcc50GAUI10en62, "Active Copper Cable with 50GAUI, 200GAUI-2 or 200GAUI-4 C2M (BER <= 10e-6)",
+        0x31, IdAcc50GAUI10en62, "Active Copper Cable with 50GAUI, 200GAUI-2 or 200GAUI-4 C2M (BER <= 10e-6) 2",
         0x32, IdAcc50GAUI2p6en4, "Active Copper Cable with 50GAUI, 200GAUI-2 or 200GAUI-4 C2M (BER <= 2.6e-4 or 10e-5)",
-        0x33, IdAcc50GAUI2p6en41, "Active Copper Cable with 50GAUI, 200GAUI-2 or 200GAUI-4 C2M (BER <= 2.6e-4 or 10e-5)",
+        0x33, IdAcc50GAUI2p6en41, "Active Copper Cable with 50GAUI, 200GAUI-2 or 200GAUI-4 C2M (BER <= 2.6e-4 or 10e-5) 2",
         0x3f, Id100GBaseCr1, "100GBASE-CR1, 200GBASE-CR2 or 400GBASE-CR4",
         0x40, Id50GBaseCr, "50GBASE-CR, 100GBASE-CR2 or 200GBASE-CR4",
         0x41, Id50GBaseSr, "50GBASE-SR, 100GBASE-SR2 or 200GBASE-SR4",
@@ -393,8 +393,8 @@ crate::bitfield_enum! {
 
 crate::bitfield_enum! {
     name = HostElectricalInterfaceId,
-    description = "The host electrical interface ID.\
-    \
+    description = "The host electrical interface ID.\n\
+    \n\
     See SFF-8024, table 4-5.",
     variants = {
         0x00, Undefined, "Undefined",
@@ -454,8 +454,8 @@ crate::bitfield_enum! {
 
 crate::bitfield_enum! {
     name = MediaType,
-    description = "The encoding type for a `MediaInterfaceId`.\
-    \
+    description = "The encoding type for a `MediaInterfaceId`.\n\
+    \n\
     This is used to determine which SFF-8024 table can be used to decode a media\
     interface type. This applies to both host- and media-side interfaces, and\
     eletrical / optical.",
@@ -518,8 +518,8 @@ impl MediaInterfaceId {
 
 crate::bitfield_enum! {
     name = MmfMediaInterfaceId,
-    description = "Media interface ID for multi-mode fiber media.\
-    \
+    description = "Media interface ID for multi-mode fiber media.\n\
+    \n\
     See SFF-8024 Table 4-6.",
     variants = {
         0x00, Undefined, "Undefined",
@@ -553,8 +553,8 @@ crate::bitfield_enum! {
 
 crate::bitfield_enum! {
     name = SmfMediaInterfaceId,
-    description = "Media interface ID for single-mode fiber.\
-    \
+    description = "Media interface ID for single-mode fiber.\n\
+    \n\
     See SFF-8024 Table 4-7.",
     variants = {
         0x00, Undefined, "Undefined",
@@ -610,8 +610,8 @@ crate::bitfield_enum! {
 
 crate::bitfield_enum! {
     name = PassiveCopperMediaInterfaceId,
-    description = "Media interface ID for passive copper cables.\
-    \
+    description = "Media interface ID for passive copper cables.\n\
+    \n\
     See SFF-8024 Table 4-8.",
     variants = {
         0x00, Undefined, "Undefined",
@@ -623,8 +623,8 @@ crate::bitfield_enum! {
 
 crate::bitfield_enum! {
     name = ActiveCableMediaInterfaceId,
-    description = "Media interface ID for active cable assemblies.\
-    \
+    description = "Media interface ID for active cable assemblies.\n\
+    \n\
     See SFF-8024 Table 4-9.",
     variants = {
         0x00, Undefined, "Undefined",
@@ -639,8 +639,8 @@ crate::bitfield_enum! {
 
 crate::bitfield_enum! {
     name = BaseTMediaInterfaceId,
-    description = "Media interface ID for BASE-T.\
-    \
+    description = "Media interface ID for BASE-T.\n\
+    \n\
     See SFF-8024 Table 4-10.",
     variants = {
         0x00, Undefined, "Undefined",
@@ -774,7 +774,7 @@ mod tests {
                 date: Some(String::from("220202ab")),
             },
         };
-        let expected = "{\"identifier\":\"qsfp_plus_sff8636\",\"vendor\":\
+        let expected = "{\"identifier\":\"QSFP+ (SFF-8636)\",\"vendor\":\
             {\"name\":\"foo\",\"oui\":[168,64,37],\"part\":\"bar\",\
             \"revision\":\"ab\",\"serial\":\"some sn\",\"date\":\"220202ab\"}}";
         assert_eq!(serde_json::to_string(&v).unwrap(), expected);
