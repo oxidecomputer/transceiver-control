@@ -19,7 +19,7 @@
 //!
 //! The main type in this crate is the [`Controller`]. This provides a set of
 //! operations that can be done on a number of modules. Those modules are
-//! addressed by a [`ModuleId`](transceiver_messages::ModuleId).
+//! addressed by a [`ModuleId`].
 //!
 //! # Results
 //!
@@ -71,7 +71,7 @@ pub use large_access::LargeMemoryAccess;
 
 use std::net::IpAddr;
 pub use transceiver_decode::Error as DecodeError;
-pub use transceiver_decode::Identifier;
+pub use transceiver_decode::*;
 pub use transceiver_messages::mac::BadMacAddrRange;
 pub use transceiver_messages::mac::MacAddrs;
 use transceiver_messages::message::Header;
@@ -80,10 +80,7 @@ use transceiver_messages::message::Message;
 use transceiver_messages::message::MessageBody;
 pub use transceiver_messages::message::ProtocolError;
 pub use transceiver_messages::message::Status;
-pub use transceiver_messages::mgmt;
-use transceiver_messages::mgmt::ManagementInterface;
-pub use transceiver_messages::InvalidPort;
-pub use transceiver_messages::ModuleId;
+pub use transceiver_messages::*;
 
 #[usdt::provider(provider = "xcvr_ctl")]
 mod probes {
