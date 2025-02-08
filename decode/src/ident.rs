@@ -478,7 +478,10 @@ crate::bitfield_enum! {
     any(feature = "api-traits", test),
     derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)
 )]
-#[cfg_attr(any(feature = "api-traits", test), serde(rename_all = "snake_case"))]
+#[cfg_attr(
+    any(feature = "api-traits", test),
+    serde(tag = "type", content = "id", rename_all = "snake_case")
+)]
 pub enum MediaInterfaceId {
     Mmf(MmfMediaInterfaceId),
     Smf(SmfMediaInterfaceId),
@@ -657,6 +660,8 @@ crate::bitfield_enum! {
 
 #[cfg(test)]
 mod tests {
+    use schemars::JsonSchema as _;
+
     use super::Identifier;
     use super::Oui;
     use super::ParseFromModule;
@@ -779,5 +784,15 @@ mod tests {
             \"revision\":\"ab\",\"serial\":\"some sn\",\"date\":\"220202ab\"}}";
         assert_eq!(serde_json::to_string(&v).unwrap(), expected);
         assert_eq!(v, serde_json::from_str(expected).unwrap());
+    }
+
+    #[test]
+    fn test_identifier_schema() {
+        let s1 = Identifier::json_schema(&mut Default::default());
+        let s2 = String::json_schema(&mut Default::default());
+        assert_eq!(
+            s1, s2,
+            "The JSONSchema for an Identifier should be the same as a String",
+        );
     }
 }

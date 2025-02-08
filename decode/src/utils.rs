@@ -90,11 +90,7 @@ macro_rules! bitfield_enum {
         #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
         #[cfg_attr(
             any(feature = "api-traits", test),
-            derive(schemars::JsonSchema, serde::Deserialize, serde::Serialize)
-        )]
-        #[cfg_attr(
-            any(feature = "api-traits", test),
-            serde(rename_all = "snake_case"),
+            derive(serde::Deserialize, serde::Serialize)
         )]
         pub enum $name {
             $(
@@ -139,6 +135,20 @@ macro_rules! bitfield_enum {
                 }
             }
         }
+
+        #[cfg(any(feature = "api-traits", test))]
+        impl ::schemars::JsonSchema for $name {
+            fn schema_name() -> String {
+                String::from(stringify!($name))
+            }
+
+            fn json_schema(
+                gen: &mut ::schemars::gen::SchemaGenerator
+            ) -> ::schemars::schema::Schema
+            {
+                String::json_schema(gen)
+            }
+        }
     };
 
     (
@@ -172,7 +182,7 @@ macro_rules! bitfield_enum {
         #[derive(Clone, Copy, Debug, PartialEq)]
         #[cfg_attr(
             any(feature = "api-traits", test),
-            derive(schemars::JsonSchema, serde::Deserialize, serde::Serialize)
+            derive(serde::Deserialize, serde::Serialize)
         )]
         pub enum $name {
             $($variant),+
@@ -208,6 +218,20 @@ macro_rules! bitfield_enum {
                 match x {
                     $( $variant => $bits, )+
                 }
+            }
+        }
+
+        #[cfg(any(feature = "api-traits", test))]
+        impl ::schemars::JsonSchema for $name {
+            fn schema_name() -> String {
+                String::from(stringify!($name))
+            }
+
+            fn json_schema(
+                gen: &mut ::schemars::gen::SchemaGenerator
+            ) -> ::schemars::schema::Schema
+            {
+                String::json_schema(gen)
             }
         }
     };

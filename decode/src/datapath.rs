@@ -69,9 +69,13 @@ pub enum Datapath {
 #[derive(Clone, Copy, Debug, PartialEq)]
 #[cfg_attr(
     any(feature = "api-traits", test),
-    derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)
+    derive(serde::Deserialize, serde::Serialize)
 )]
-#[cfg_attr(any(feature = "api-traits", test), serde(rename_all = "snake_case"))]
+#[cfg_attr(
+    any(feature = "api-traits", test),
+    serde(into = "String", try_from = "String")
+)]
+#[cfg_attr(test, derive(strum::EnumIter))]
 pub enum ConnectorType {
     Unknown,
     SubscriberConnector,
@@ -116,10 +120,71 @@ impl fmt::Display for ConnectorType {
             ConnectorType::Rj45 => write!(f, "RJ-45"),
             ConnectorType::Mpo2x12 => write!(f, "MPO-2x12"),
             ConnectorType::Mpo1x16 => write!(f, "MPO-1x16"),
-            ConnectorType::Other(x) => write!(f, "Other ({x:02x})"),
-            ConnectorType::Reserved(x) => write!(f, "Reserved ({x:02x})"),
-            ConnectorType::VendorSpecific(x) => write!(f, "Vendor-specific ({x:02x})"),
+            ConnectorType::Other(x) => write!(f, "Other (0x{x:02x})"),
+            ConnectorType::Reserved(x) => write!(f, "Reserved (0x{x:02x})"),
+            ConnectorType::VendorSpecific(x) => write!(f, "Vendor-specific (0x{x:02x})"),
         }
+    }
+}
+
+impl From<ConnectorType> for String {
+    fn from(value: ConnectorType) -> Self {
+        format!("{value}")
+    }
+}
+
+#[cfg(any(feature = "api-traits", test))]
+impl std::str::FromStr for ConnectorType {
+    type Err = &'static str;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        const ERR: &str = "Unknown or malformed connector type";
+        match value {
+            "Unknown" => return Ok(ConnectorType::Unknown),
+            "Subscriber Connector" => return Ok(ConnectorType::SubscriberConnector),
+            "Lucent Connector (LC)" => return Ok(ConnectorType::LucentConnector),
+            "MPO 1x12" => return Ok(ConnectorType::Mpo1x12),
+            "MPO 2x16" => return Ok(ConnectorType::Mpo2x16),
+            "RJ-45" => return Ok(ConnectorType::Rj45),
+            "MPO-2x12" => return Ok(ConnectorType::Mpo2x12),
+            "MPO-1x16" => return Ok(ConnectorType::Mpo1x16),
+            other => {
+                let Some(other) = other.strip_suffix(")") else {
+                    return Err(ERR);
+                };
+                const PREFIXES: [(&'static str, fn(u8) -> ConnectorType); 3] = [
+                    ("Other (0x", ConnectorType::Other),
+                    ("Reserved (0x", ConnectorType::Reserved),
+                    ("Vendor-specific (0x", ConnectorType::VendorSpecific),
+                ];
+                for (prefix, to_value) in PREFIXES {
+                    if let Some(rest) = other.strip_prefix(prefix) {
+                        return u8::from_str_radix(rest, 16).map_err(|_| ERR).map(to_value);
+                    }
+                }
+                return Err("Unknown connector type");
+            }
+        }
+    }
+}
+
+#[cfg(any(feature = "api-traits", test))]
+impl std::convert::TryFrom<String> for ConnectorType {
+    type Error = <Self as std::str::FromStr>::Err;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        value.parse()
+    }
+}
+
+#[cfg(any(feature = "api-traits", test))]
+impl schemars::JsonSchema for ConnectorType {
+    fn schema_name() -> String {
+        String::from("ConnectorType")
+    }
+
+    fn json_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+        String::json_schema(gen)
     }
 }
 
@@ -132,26 +197,20 @@ impl fmt::Display for ConnectorType {
     any(feature = "api-traits", test),
     derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)
 )]
-#[cfg_attr(any(feature = "api-traits", test), serde(rename_all = "snake_case"))]
+#[cfg_attr(
+    any(feature = "api-traits", test),
+    serde(tag = "type", content = "code", rename_all = "snake_case")
+)]
 pub enum SffComplianceCode {
     Extended(ExtendedSpecificationComplianceCode),
-    Ethernet(u8),
+    Ethernet(EthernetComplianceCode),
 }
 
 impl fmt::Display for SffComplianceCode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Extended(ext) => write!(f, "{}", ext),
-            Self::Ethernet(x) => match x {
-                0b0000_0001 => write!(f, "40G Active Cable"),
-                0b0000_0010 => write!(f, "40GBASE-LR4"),
-                0b0000_0100 => write!(f, "40GBASE-SR4"),
-                0b0000_1000 => write!(f, "40GBASE-CR4"),
-                0b0001_0000 => write!(f, "10GBASE-SR"),
-                0b0010_0000 => write!(f, "10GBASE-LR"),
-                0b0100_0000 => write!(f, "10GBASE-LRM"),
-                _ => unreachable!(),
-            },
+            Self::Ethernet(eth) => write!(f, "{}", eth),
         }
     }
 }
@@ -165,8 +224,79 @@ impl SffComplianceCode {
                 extended_specification,
             ))
         } else {
-            Self::Ethernet(specification)
+            Self::Ethernet(EthernetComplianceCode(specification))
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(
+    any(feature = "api-traits", test),
+    derive(serde::Deserialize, serde::Serialize)
+)]
+#[cfg_attr(
+    any(feature = "api-traits", test),
+    serde(into = "String", try_from = "String")
+)]
+pub struct EthernetComplianceCode(u8);
+
+impl fmt::Display for EthernetComplianceCode {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.0 {
+            0b0000_0001 => write!(f, "40G Active Cable"),
+            0b0000_0010 => write!(f, "40GBASE-LR4"),
+            0b0000_0100 => write!(f, "40GBASE-SR4"),
+            0b0000_1000 => write!(f, "40GBASE-CR4"),
+            0b0001_0000 => write!(f, "10GBASE-SR"),
+            0b0010_0000 => write!(f, "10GBASE-LR"),
+            0b0100_0000 => write!(f, "10GBASE-LRM"),
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<EthernetComplianceCode> for String {
+    fn from(value: EthernetComplianceCode) -> Self {
+        format!("{value}")
+    }
+}
+
+#[cfg(any(feature = "api-traits", test))]
+impl std::str::FromStr for EthernetComplianceCode {
+    type Err = &'static str;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        const ERR: &str = "Unknown or malformed Ethernet compliance code";
+        match value {
+            "40G Active Cable" => Ok(Self(0b0000_0001)),
+            "40GBASE-LR4" => Ok(Self(0b0000_0010)),
+            "40GBASE-SR4" => Ok(Self(0b0000_0100)),
+            "40GBASE-CR4" => Ok(Self(0b0000_1000)),
+            "10GBASE-SR" => Ok(Self(0b0001_0000)),
+            "10GBASE-LR" => Ok(Self(0b0010_0000)),
+            "10GBASE-LRM" => Ok(Self(0b0100_0000)),
+            _ => Err(ERR),
+        }
+    }
+}
+
+#[cfg(any(feature = "api-traits", test))]
+impl std::convert::TryFrom<String> for EthernetComplianceCode {
+    type Error = <Self as std::str::FromStr>::Err;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        value.parse()
+    }
+}
+
+#[cfg(any(feature = "api-traits", test))]
+impl schemars::JsonSchema for EthernetComplianceCode {
+    fn schema_name() -> String {
+        String::from("EthernetComplianceCode")
+    }
+
+    fn json_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+        String::json_schema(gen)
     }
 }
 
@@ -975,6 +1105,8 @@ impl From<&u8> for LaneDatapathConfig {
 
 #[cfg(test)]
 mod tests {
+    use strum::IntoEnumIterator as _;
+
     use super::ApplicationDescriptor;
     use super::Datapath;
     use super::HostElectricalInterfaceId;
@@ -1061,5 +1193,22 @@ mod tests {
         )
         .unwrap();
         assert_eq!(parsed, expected);
+    }
+
+    #[test]
+    fn test_connector_type_from_string() {
+        let s = ConnectorType::LucentConnector.to_string();
+        assert_eq!(ConnectorType::LucentConnector, s.parse().unwrap());
+
+        let s = ConnectorType::Other(3).to_string();
+        assert_eq!(ConnectorType::Other(3), s.parse().unwrap());
+
+        let s = ConnectorType::Reserved(3).to_string();
+        assert_eq!(ConnectorType::Reserved(3), s.parse().unwrap());
+
+        for orig in ConnectorType::iter() {
+            let as_str = orig.to_string();
+            assert_eq!(orig, as_str.parse().unwrap());
+        }
     }
 }
