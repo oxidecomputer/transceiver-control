@@ -376,9 +376,9 @@ enum Cmd {
     /// is from stdin, then the kind may be omitted for _text_ input. The radix
     /// will be interpreted from the input, where:
     ///
-    ///     `0x...` implies hex
-    ///     `0b...` implies a binary string,
-    ///      and anything else is read as decimal.
+    /// - `0x...` implies hex
+    /// - `0b...` implies a binary string,
+    /// - and anything else is read as decimal.
     ///
     /// Note that raw binary input from stdin will only be correctly interpreted
     /// if the `--input-kind binary` flag is provided.
@@ -451,9 +451,9 @@ enum Cmd {
     /// is from stdin, then the kind may be omitted for _text_ input. The radix
     /// will be interpreted from the input, where:
     ///
-    ///     `0x...` implies hex
-    ///     `0b...` implies a binary string,
-    ///      and anything else is read as decimal.
+    /// - `0x...` implies hex
+    /// - `0b...` implies a binary string,
+    /// - and anything else is read as decimal.
     ///
     /// Note that raw binary input from stdin will only be correctly interpreted
     /// if the `--input-kind binary` flag is provided.
