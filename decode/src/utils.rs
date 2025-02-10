@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2024 Oxide Computer Company
+// Copyright 2025 Oxide Computer Company
 
 //! Utilities to make decoding various map data less terrible.
 
@@ -90,20 +90,15 @@ macro_rules! bitfield_enum {
         #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
         #[cfg_attr(
             any(feature = "api-traits", test),
-            derive(schemars::JsonSchema, serde::Deserialize, serde::Serialize)
+            derive(serde::Deserialize, serde::Serialize)
         )]
         #[cfg_attr(
             any(feature = "api-traits", test),
-            serde(rename_all = "snake_case"),
+            serde(into = "String", try_from = "String")
         )]
+        #[cfg_attr(any(test), derive(strum::EnumIter))]
         pub enum $name {
-            $(
-                #[cfg_attr(
-                    any(feature = "api-traits", test),
-                    serde(rename = $display)
-                )]
-                $variant
-            ),+,
+            $($variant),+,
             $($other_variant(u8)),+
         }
 
@@ -113,7 +108,7 @@ macro_rules! bitfield_enum {
                 #[deny(overlapping_range_endpoints)]
                 match self {
                     $( $variant => write!(f, "{}", $display), )+
-                    $( $other_variant(x) => write!(f, "{} ({x:02x})", stringify!($other_variant)), )+
+                    $( $other_variant(x) => write!(f, "{} (0x{x:02x})", stringify!($other_variant)), )+
                 }
             }
         }
@@ -137,6 +132,59 @@ macro_rules! bitfield_enum {
                     $( $variant => $bits, )+
                     $( $other_variant(x) => x, )+
                 }
+            }
+        }
+
+        #[cfg(any(feature = "api-traits", test))]
+        impl ::core::str::FromStr for $name {
+            type Err = &'static str;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                use $name::*;
+                match s {
+                    $( $display => return Ok($variant), )+
+                    _ => {}
+                }
+
+                $(
+                    if let Some(value) = crate::utils::parse_u8_bitfield_variant(
+                        s, stringify!($other_variant)
+                    ) {
+                        return Ok($other_variant(value));
+                    }
+                )+
+
+                Err(concat!("Invalid or malformed value for ", stringify!($name)))
+            }
+        }
+
+        #[cfg(any(feature = "api-traits", test))]
+        impl From<$name> for String {
+            fn from(value: $name) -> String {
+                value.to_string()
+            }
+        }
+
+        #[cfg(any(feature = "api-traits", test))]
+        impl ::core::convert::TryFrom<String> for $name {
+            type Error = <Self as ::core::str::FromStr>::Err;
+
+            fn try_from(s: String) -> Result<Self, Self::Error> {
+                s.parse()
+            }
+        }
+
+        #[cfg(any(feature = "api-traits", test))]
+        impl ::schemars::JsonSchema for $name {
+            fn schema_name() -> String {
+                String::from(stringify!($name))
+            }
+
+            fn json_schema(
+                gen: &mut ::schemars::gen::SchemaGenerator
+            ) -> ::schemars::schema::Schema
+            {
+                String::json_schema(gen)
             }
         }
     };
@@ -172,8 +220,13 @@ macro_rules! bitfield_enum {
         #[derive(Clone, Copy, Debug, PartialEq)]
         #[cfg_attr(
             any(feature = "api-traits", test),
-            derive(schemars::JsonSchema, serde::Deserialize, serde::Serialize)
+            derive(serde::Deserialize, serde::Serialize)
         )]
+        #[cfg_attr(
+            any(feature = "api-traits", test),
+            serde(into = "String", try_from = "String")
+        )]
+        #[cfg_attr(any(test), derive(strum::EnumIter))]
         pub enum $name {
             $($variant),+
         }
@@ -210,11 +263,77 @@ macro_rules! bitfield_enum {
                 }
             }
         }
+
+        #[cfg(any(feature = "api-traits", test))]
+        impl ::core::str::FromStr for $name {
+            type Err = &'static str;
+
+            fn from_str(s: &str) -> Result<Self, Self::Err> {
+                use $name::*;
+                match s {
+                    $( $display => Ok($variant), )+
+                    _ => Err(concat!("Invalid or malformed value for ", stringify!($name)))
+                }
+            }
+        }
+
+        #[cfg(any(feature = "api-traits", test))]
+        impl From<$name> for String {
+            fn from(value: $name) -> String {
+                value.to_string()
+            }
+        }
+
+        #[cfg(any(feature = "api-traits", test))]
+        impl ::core::convert::TryFrom<String> for $name {
+            type Error = <Self as ::core::str::FromStr>::Err;
+
+            fn try_from(s: String) -> Result<Self, Self::Error> {
+                s.parse()
+            }
+        }
+
+        #[cfg(any(feature = "api-traits", test))]
+        impl ::schemars::JsonSchema for $name {
+            fn schema_name() -> String {
+                String::from(stringify!($name))
+            }
+
+            fn json_schema(
+                gen: &mut ::schemars::gen::SchemaGenerator
+            ) -> ::schemars::schema::Schema
+            {
+                String::json_schema(gen)
+            }
+        }
     };
+}
+
+/// Parse the u8 inside a bitfield enum.
+///
+/// Many of the enums we create with `bitfield_enum!()` have a catchall variant,
+/// like "Other" or "Reserved". We want to serialize these variants as strings,
+/// which means we also need to parse them on deserialization.
+///
+/// This method pulls out the hex-formatted u8 from a string, assuming it is
+/// formatted as: `<variant> (0xAA)`. `None` is returned if the prefix doesn't
+/// match or parsing fails.
+#[allow(dead_code)]
+pub(crate) fn parse_u8_bitfield_variant(s: &str, variant: &str) -> Option<u8> {
+    let Some(inner) = s
+        .strip_suffix(")")
+        .and_then(|s| s.strip_prefix(variant))
+        .and_then(|s| s.strip_prefix(" (0x"))
+    else {
+        return None;
+    };
+    u8::from_str_radix(inner, 16).ok()
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::utils::parse_u8_bitfield_variant;
+
     use super::extract_bit;
 
     #[test]
@@ -233,5 +352,25 @@ mod tests {
         for shift in 8..=255 {
             assert!(extract_bit(0, shift).is_err());
         }
+    }
+
+    #[test]
+    fn test_parse_u8_bitfield_variant() {
+        assert_eq!(3, parse_u8_bitfield_variant("Foo (0x03)", "Foo").unwrap());
+
+        // Wrong name.
+        assert!(parse_u8_bitfield_variant("Foo (0x03)", "Bar").is_none());
+
+        // Missing closing, opening, or both parentheses.
+        assert!(parse_u8_bitfield_variant("Foo (0x03", "Foo").is_none());
+        assert!(parse_u8_bitfield_variant("Foo 0x03)", "Foo").is_none());
+        assert!(parse_u8_bitfield_variant("Foo 0x03", "Foo").is_none());
+
+        // Invalid hex
+        assert!(parse_u8_bitfield_variant("Foo (0x)", "Foo").is_none());
+        assert!(parse_u8_bitfield_variant("Foo (3)", "Foo").is_none());
+
+        // Out of range
+        assert!(parse_u8_bitfield_variant("Foo (0xFFFF)", "Foo").is_none());
     }
 }

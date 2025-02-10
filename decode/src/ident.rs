@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2023 Oxide Computer Company
+// Copyright 2025 Oxide Computer Company
 
 //! Decoding of transceiver identifying information.
 
@@ -478,7 +478,10 @@ crate::bitfield_enum! {
     any(feature = "api-traits", test),
     derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)
 )]
-#[cfg_attr(any(feature = "api-traits", test), serde(rename_all = "snake_case"))]
+#[cfg_attr(
+    any(feature = "api-traits", test),
+    serde(tag = "type", content = "id", rename_all = "snake_case")
+)]
 pub enum MediaInterfaceId {
     Mmf(MmfMediaInterfaceId),
     Smf(SmfMediaInterfaceId),
@@ -657,6 +660,18 @@ crate::bitfield_enum! {
 
 #[cfg(test)]
 mod tests {
+    use schemars::JsonSchema as _;
+    use strum::IntoEnumIterator as _;
+
+    use crate::ActiveCableMediaInterfaceId;
+    use crate::BaseTMediaInterfaceId;
+    use crate::ExtendedSpecificationComplianceCode;
+    use crate::HostElectricalInterfaceId;
+    use crate::MediaType;
+    use crate::MmfMediaInterfaceId;
+    use crate::PassiveCopperMediaInterfaceId;
+    use crate::SmfMediaInterfaceId;
+
     use super::Identifier;
     use super::Oui;
     use super::ParseFromModule;
@@ -779,5 +794,87 @@ mod tests {
             \"revision\":\"ab\",\"serial\":\"some sn\",\"date\":\"220202ab\"}}";
         assert_eq!(serde_json::to_string(&v).unwrap(), expected);
         assert_eq!(v, serde_json::from_str(expected).unwrap());
+    }
+
+    #[test]
+    fn test_identifier_schema() {
+        let s1 = Identifier::json_schema(&mut Default::default());
+        let s2 = String::json_schema(&mut Default::default());
+        assert_eq!(
+            s1, s2,
+            "The JSONSchema for an Identifier should be the same as a String",
+        );
+    }
+
+    #[test]
+    fn test_identifier_state_from_string() {
+        for value in Identifier::iter() {
+            let s = value.to_string();
+            assert_eq!(value, s.parse().unwrap());
+        }
+    }
+
+    #[test]
+    fn test_extended_specification_compliance_code_from_string() {
+        for value in ExtendedSpecificationComplianceCode::iter() {
+            let s = value.to_string();
+            assert_eq!(value, s.parse().unwrap());
+        }
+    }
+
+    #[test]
+    fn test_host_electrical_interface_id_from_string() {
+        for value in HostElectricalInterfaceId::iter() {
+            let s = value.to_string();
+            assert_eq!(value, s.parse().unwrap());
+        }
+    }
+
+    #[test]
+    fn test_media_type_from_string() {
+        for value in MediaType::iter() {
+            let s = value.to_string();
+            assert_eq!(value, s.parse().unwrap());
+        }
+    }
+
+    #[test]
+    fn test_mmf_media_interface_id_from_string() {
+        for value in MmfMediaInterfaceId::iter() {
+            let s = value.to_string();
+            assert_eq!(value, s.parse().unwrap());
+        }
+    }
+
+    #[test]
+    fn test_smf_media_interface_id_from_string() {
+        for value in SmfMediaInterfaceId::iter() {
+            let s = value.to_string();
+            assert_eq!(value, s.parse().unwrap());
+        }
+    }
+
+    #[test]
+    fn test_passive_copper_media_interface_id_from_string() {
+        for value in PassiveCopperMediaInterfaceId::iter() {
+            let s = value.to_string();
+            assert_eq!(value, s.parse().unwrap());
+        }
+    }
+
+    #[test]
+    fn test_active_cable_media_interface_id_from_string() {
+        for value in ActiveCableMediaInterfaceId::iter() {
+            let s = value.to_string();
+            assert_eq!(value, s.parse().unwrap());
+        }
+    }
+
+    #[test]
+    fn test_base_t_media_interface_id_from_string() {
+        for value in BaseTMediaInterfaceId::iter() {
+            let s = value.to_string();
+            assert_eq!(value, s.parse().unwrap());
+        }
     }
 }

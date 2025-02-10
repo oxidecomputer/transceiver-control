@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2024 Oxide Computer Company
+// Copyright 2025 Oxide Computer Company
 
 //! Decode module datapath state.
 
@@ -63,63 +63,26 @@ pub enum Datapath {
     },
 }
 
-/// The type of a media-side connector.
-///
-/// These values come from SFF-8024 Rev 4.10 Table 4-3
-#[derive(Clone, Copy, Debug, PartialEq)]
-#[cfg_attr(
-    any(feature = "api-traits", test),
-    derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)
-)]
-#[cfg_attr(any(feature = "api-traits", test), serde(rename_all = "snake_case"))]
-pub enum ConnectorType {
-    Unknown,
-    SubscriberConnector,
-    LucentConnector,
-    Mpo1x12,
-    Mpo2x16,
-    Rj45,
-    Mpo2x12,
-    Mpo1x16,
-    Other(u8),
-    Reserved(u8),
-    VendorSpecific(u8),
-}
-
-impl From<u8> for ConnectorType {
-    fn from(value: u8) -> Self {
-        use ConnectorType::*;
-        match value {
-            0x00 => Unknown,
-            0x01 => SubscriberConnector,
-            0x07 => LucentConnector,
-            0x0c => Mpo1x12,
-            0x0d => Mpo2x16,
-            0x22 => Rj45,
-            0x27 => Mpo2x12,
-            0x28 => Mpo1x16,
-            0x0e..=0x1f | 0x29..=0x7f => Reserved(value),
-            0x80..=0xff => VendorSpecific(value),
-            x => Other(x),
-        }
-    }
-}
-
-impl fmt::Display for ConnectorType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            ConnectorType::Unknown => write!(f, "Unknown"),
-            ConnectorType::SubscriberConnector => write!(f, "Subscriber Connector"),
-            ConnectorType::LucentConnector => write!(f, "Lucent Connector (LC)"),
-            ConnectorType::Mpo1x12 => write!(f, "MPO 1x12"),
-            ConnectorType::Mpo2x16 => write!(f, "MPO 2x16"),
-            ConnectorType::Rj45 => write!(f, "RJ-45"),
-            ConnectorType::Mpo2x12 => write!(f, "MPO-2x12"),
-            ConnectorType::Mpo1x16 => write!(f, "MPO-1x16"),
-            ConnectorType::Other(x) => write!(f, "Other ({x:02x})"),
-            ConnectorType::Reserved(x) => write!(f, "Reserved ({x:02x})"),
-            ConnectorType::VendorSpecific(x) => write!(f, "Vendor-specific ({x:02x})"),
-        }
+crate::bitfield_enum! {
+    name = ConnectorType,
+    description = "The type of a media-side connector.\n\
+    \n\
+    These values come from SFF-8024 Rev 4.10 Table 4-3.",
+    variants = {
+        0x00, Unknown, "Unknown or unspecified",
+        0x01, SubscriberConnector, "Subscriber Connector (SC)",
+        0x07, LucentConnector, "Lucent Connector (LC)",
+        0x0c, Mpo1x12, "MPO 1x12",
+        0x0d, Mpo2x16, "MPO 2x16",
+        0x22, Rj45, "RJ-45",
+        0x23, NoSeparableConnector, "No separable connector",
+        0x27, Mpo2x12, "MPO 2x12",
+        0x28, Mpo1x16, "MPO 1x16",
+    },
+    other_variants = {
+        Reserved : 0x0e..=0x1f | 0x29..=0x74,
+        VendorSpecific : 0x80..=0xff,
+        Other : _
     }
 }
 
@@ -132,26 +95,20 @@ impl fmt::Display for ConnectorType {
     any(feature = "api-traits", test),
     derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)
 )]
-#[cfg_attr(any(feature = "api-traits", test), serde(rename_all = "snake_case"))]
+#[cfg_attr(
+    any(feature = "api-traits", test),
+    serde(tag = "type", content = "code", rename_all = "snake_case")
+)]
 pub enum SffComplianceCode {
     Extended(ExtendedSpecificationComplianceCode),
-    Ethernet(u8),
+    Ethernet(EthernetComplianceCode),
 }
 
 impl fmt::Display for SffComplianceCode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             Self::Extended(ext) => write!(f, "{}", ext),
-            Self::Ethernet(x) => match x {
-                0b0000_0001 => write!(f, "40G Active Cable"),
-                0b0000_0010 => write!(f, "40GBASE-LR4"),
-                0b0000_0100 => write!(f, "40GBASE-SR4"),
-                0b0000_1000 => write!(f, "40GBASE-CR4"),
-                0b0001_0000 => write!(f, "10GBASE-SR"),
-                0b0010_0000 => write!(f, "10GBASE-LR"),
-                0b0100_0000 => write!(f, "10GBASE-LRM"),
-                _ => unreachable!(),
-            },
+            Self::Ethernet(eth) => write!(f, "{}", eth),
         }
     }
 }
@@ -165,8 +122,79 @@ impl SffComplianceCode {
                 extended_specification,
             ))
         } else {
-            Self::Ethernet(specification)
+            Self::Ethernet(EthernetComplianceCode(specification))
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(
+    any(feature = "api-traits", test),
+    derive(serde::Deserialize, serde::Serialize)
+)]
+#[cfg_attr(
+    any(feature = "api-traits", test),
+    serde(into = "String", try_from = "String")
+)]
+pub struct EthernetComplianceCode(u8);
+
+impl fmt::Display for EthernetComplianceCode {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self.0 {
+            0b0000_0001 => write!(f, "40G Active Cable"),
+            0b0000_0010 => write!(f, "40GBASE-LR4"),
+            0b0000_0100 => write!(f, "40GBASE-SR4"),
+            0b0000_1000 => write!(f, "40GBASE-CR4"),
+            0b0001_0000 => write!(f, "10GBASE-SR"),
+            0b0010_0000 => write!(f, "10GBASE-LR"),
+            0b0100_0000 => write!(f, "10GBASE-LRM"),
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<EthernetComplianceCode> for String {
+    fn from(value: EthernetComplianceCode) -> Self {
+        format!("{value}")
+    }
+}
+
+#[cfg(any(feature = "api-traits", test))]
+impl std::str::FromStr for EthernetComplianceCode {
+    type Err = &'static str;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        const ERR: &str = "Unknown or malformed Ethernet compliance code";
+        match value {
+            "40G Active Cable" => Ok(Self(0b0000_0001)),
+            "40GBASE-LR4" => Ok(Self(0b0000_0010)),
+            "40GBASE-SR4" => Ok(Self(0b0000_0100)),
+            "40GBASE-CR4" => Ok(Self(0b0000_1000)),
+            "10GBASE-SR" => Ok(Self(0b0001_0000)),
+            "10GBASE-LR" => Ok(Self(0b0010_0000)),
+            "10GBASE-LRM" => Ok(Self(0b0100_0000)),
+            _ => Err(ERR),
+        }
+    }
+}
+
+#[cfg(any(feature = "api-traits", test))]
+impl std::convert::TryFrom<String> for EthernetComplianceCode {
+    type Error = <Self as std::str::FromStr>::Err;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        value.parse()
+    }
+}
+
+#[cfg(any(feature = "api-traits", test))]
+impl schemars::JsonSchema for EthernetComplianceCode {
+    fn schema_name() -> String {
+        String::from("EthernetComplianceCode")
+    }
+
+    fn json_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+        String::json_schema(gen)
     }
 }
 
@@ -975,6 +1003,8 @@ impl From<&u8> for LaneDatapathConfig {
 
 #[cfg(test)]
 mod tests {
+    use strum::IntoEnumIterator as _;
+
     use super::ApplicationDescriptor;
     use super::Datapath;
     use super::HostElectricalInterfaceId;
@@ -984,6 +1014,7 @@ mod tests {
     use super::ParseFromModule;
     use super::Sff8636Datapath;
     use crate::ident::SmfMediaInterfaceId;
+    use crate::CmisDatapathState;
     use crate::ConnectorType;
     use crate::ExtendedSpecificationComplianceCode;
     use crate::LaneDatapathConfig;
@@ -1061,5 +1092,21 @@ mod tests {
         )
         .unwrap();
         assert_eq!(parsed, expected);
+    }
+
+    #[test]
+    fn test_connector_type_from_string() {
+        for value in ConnectorType::iter() {
+            let s = value.to_string();
+            assert_eq!(value, s.parse().unwrap());
+        }
+    }
+
+    #[test]
+    fn test_cmis_datapath_state_from_string() {
+        for value in CmisDatapathState::iter() {
+            let s = value.to_string();
+            assert_eq!(value, s.parse().unwrap());
+        }
     }
 }
