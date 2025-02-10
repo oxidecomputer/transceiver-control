@@ -154,11 +154,7 @@ macro_rules! bitfield_enum {
                     }
                 )+
 
-                Err(
-                    const_format::concatcp!(
-                    "Invalid or malformed value for ",
-                    stringify!($name),
-                ))
+                Err(concat!("Invalid or malformed value for ", stringify!($name)))
             }
         }
 
@@ -276,11 +272,7 @@ macro_rules! bitfield_enum {
                 use $name::*;
                 match s {
                     $( $display => Ok($variant), )+
-                    _ => Err(
-                        const_format::concatcp!(
-                        "Invalid or malformed value for ",
-                        stringify!($name),
-                    ))
+                    _ => Err(concat!("Invalid or malformed value for ", stringify!($name)))
                 }
             }
         }
