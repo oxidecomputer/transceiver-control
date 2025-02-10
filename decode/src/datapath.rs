@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-// Copyright 2024 Oxide Computer Company
+// Copyright 2025 Oxide Computer Company
 
 //! Decode module datapath state.
 
@@ -63,128 +63,26 @@ pub enum Datapath {
     },
 }
 
-/// The type of a media-side connector.
-///
-/// These values come from SFF-8024 Rev 4.10 Table 4-3
-#[derive(Clone, Copy, Debug, PartialEq)]
-#[cfg_attr(
-    any(feature = "api-traits", test),
-    derive(serde::Deserialize, serde::Serialize)
-)]
-#[cfg_attr(
-    any(feature = "api-traits", test),
-    serde(into = "String", try_from = "String")
-)]
-#[cfg_attr(test, derive(strum::EnumIter))]
-pub enum ConnectorType {
-    Unknown,
-    SubscriberConnector,
-    LucentConnector,
-    Mpo1x12,
-    Mpo2x16,
-    Rj45,
-    Mpo2x12,
-    Mpo1x16,
-    Other(u8),
-    Reserved(u8),
-    VendorSpecific(u8),
-}
-
-impl From<u8> for ConnectorType {
-    fn from(value: u8) -> Self {
-        use ConnectorType::*;
-        match value {
-            0x00 => Unknown,
-            0x01 => SubscriberConnector,
-            0x07 => LucentConnector,
-            0x0c => Mpo1x12,
-            0x0d => Mpo2x16,
-            0x22 => Rj45,
-            0x27 => Mpo2x12,
-            0x28 => Mpo1x16,
-            0x0e..=0x1f | 0x29..=0x7f => Reserved(value),
-            0x80..=0xff => VendorSpecific(value),
-            x => Other(x),
-        }
-    }
-}
-
-impl fmt::Display for ConnectorType {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            ConnectorType::Unknown => write!(f, "Unknown"),
-            ConnectorType::SubscriberConnector => write!(f, "Subscriber Connector"),
-            ConnectorType::LucentConnector => write!(f, "Lucent Connector (LC)"),
-            ConnectorType::Mpo1x12 => write!(f, "MPO 1x12"),
-            ConnectorType::Mpo2x16 => write!(f, "MPO 2x16"),
-            ConnectorType::Rj45 => write!(f, "RJ-45"),
-            ConnectorType::Mpo2x12 => write!(f, "MPO-2x12"),
-            ConnectorType::Mpo1x16 => write!(f, "MPO-1x16"),
-            ConnectorType::Other(x) => write!(f, "Other (0x{x:02x})"),
-            ConnectorType::Reserved(x) => write!(f, "Reserved (0x{x:02x})"),
-            ConnectorType::VendorSpecific(x) => write!(f, "Vendor-specific (0x{x:02x})"),
-        }
-    }
-}
-
-impl From<ConnectorType> for String {
-    fn from(value: ConnectorType) -> Self {
-        format!("{value}")
-    }
-}
-
-#[cfg(any(feature = "api-traits", test))]
-impl std::str::FromStr for ConnectorType {
-    type Err = &'static str;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        const ERR: &str = "Unknown or malformed connector type";
-        match value {
-            "Unknown" => return Ok(ConnectorType::Unknown),
-            "Subscriber Connector" => return Ok(ConnectorType::SubscriberConnector),
-            "Lucent Connector (LC)" => return Ok(ConnectorType::LucentConnector),
-            "MPO 1x12" => return Ok(ConnectorType::Mpo1x12),
-            "MPO 2x16" => return Ok(ConnectorType::Mpo2x16),
-            "RJ-45" => return Ok(ConnectorType::Rj45),
-            "MPO-2x12" => return Ok(ConnectorType::Mpo2x12),
-            "MPO-1x16" => return Ok(ConnectorType::Mpo1x16),
-            other => {
-                let Some(other) = other.strip_suffix(")") else {
-                    return Err(ERR);
-                };
-                const PREFIXES: [(&'static str, fn(u8) -> ConnectorType); 3] = [
-                    ("Other (0x", ConnectorType::Other),
-                    ("Reserved (0x", ConnectorType::Reserved),
-                    ("Vendor-specific (0x", ConnectorType::VendorSpecific),
-                ];
-                for (prefix, to_value) in PREFIXES {
-                    if let Some(rest) = other.strip_prefix(prefix) {
-                        return u8::from_str_radix(rest, 16).map_err(|_| ERR).map(to_value);
-                    }
-                }
-                return Err("Unknown connector type");
-            }
-        }
-    }
-}
-
-#[cfg(any(feature = "api-traits", test))]
-impl std::convert::TryFrom<String> for ConnectorType {
-    type Error = <Self as std::str::FromStr>::Err;
-
-    fn try_from(value: String) -> Result<Self, Self::Error> {
-        value.parse()
-    }
-}
-
-#[cfg(any(feature = "api-traits", test))]
-impl schemars::JsonSchema for ConnectorType {
-    fn schema_name() -> String {
-        String::from("ConnectorType")
-    }
-
-    fn json_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-        String::json_schema(gen)
+crate::bitfield_enum! {
+    name = ConnectorType,
+    description = "The type of a media-side connector.\n\
+    \n\
+    These values come from SFF-8024 Rev 4.10 Table 4-3.",
+    variants = {
+        0x00, Unknown, "Unknown or unspecified",
+        0x01, SubscriberConnector, "Subscriber Connector (SC)",
+        0x07, LucentConnector, "Lucent Connector (LC)",
+        0x0c, Mpo1x12, "MPO 1x12",
+        0x0d, Mpo2x16, "MPO 2x16",
+        0x22, Rj45, "RJ-45",
+        0x23, NoSeparableConnector, "No separable connector",
+        0x27, Mpo2x12, "MPO 2x12",
+        0x28, Mpo1x16, "MPO 1x16",
+    },
+    other_variants = {
+        Reserved : 0x0e..=0x1f | 0x29..=0x74,
+        VendorSpecific : 0x80..=0xff,
+        Other : _
     }
 }
 
@@ -1116,6 +1014,7 @@ mod tests {
     use super::ParseFromModule;
     use super::Sff8636Datapath;
     use crate::ident::SmfMediaInterfaceId;
+    use crate::CmisDatapathState;
     use crate::ConnectorType;
     use crate::ExtendedSpecificationComplianceCode;
     use crate::LaneDatapathConfig;
@@ -1197,18 +1096,17 @@ mod tests {
 
     #[test]
     fn test_connector_type_from_string() {
-        let s = ConnectorType::LucentConnector.to_string();
-        assert_eq!(ConnectorType::LucentConnector, s.parse().unwrap());
+        for value in ConnectorType::iter() {
+            let s = value.to_string();
+            assert_eq!(value, s.parse().unwrap());
+        }
+    }
 
-        let s = ConnectorType::Other(3).to_string();
-        assert_eq!(ConnectorType::Other(3), s.parse().unwrap());
-
-        let s = ConnectorType::Reserved(3).to_string();
-        assert_eq!(ConnectorType::Reserved(3), s.parse().unwrap());
-
-        for orig in ConnectorType::iter() {
-            let as_str = orig.to_string();
-            assert_eq!(orig, as_str.parse().unwrap());
+    #[test]
+    fn test_cmis_datapath_state_from_string() {
+        for value in CmisDatapathState::iter() {
+            let s = value.to_string();
+            assert_eq!(value, s.parse().unwrap());
         }
     }
 }
