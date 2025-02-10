@@ -186,6 +186,10 @@ macro_rules! bitfield_enum {
             {
                 String::json_schema(gen)
             }
+
+            fn is_referenceable() -> bool {
+                false
+            }
         }
     };
 
@@ -304,6 +308,10 @@ macro_rules! bitfield_enum {
             ) -> ::schemars::schema::Schema
             {
                 String::json_schema(gen)
+            }
+
+            fn is_referenceable() -> bool {
+                false
             }
         }
     };
