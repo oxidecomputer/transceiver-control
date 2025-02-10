@@ -781,6 +781,17 @@ impl SerializedSize for Status {
     const MAX_SIZE: usize = core::mem::size_of::<Status>();
 }
 
+#[cfg(any(feature = "api-traits", test))]
+impl ::schemars::JsonSchema for Status {
+    fn schema_name() -> String {
+        String::from("Status")
+    }
+
+    fn json_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+        u8::json_schema(gen)
+    }
+}
+
 bitflags::bitflags! {
     /// Module status, including bits set by Hubris
     ///
@@ -918,6 +929,17 @@ impl SerializedSize for ExtendedStatus {
     const MAX_SIZE: usize = core::mem::size_of::<ExtendedStatus>();
 }
 
+#[cfg(any(feature = "api-traits", test))]
+impl ::schemars::JsonSchema for ExtendedStatus {
+    fn schema_name() -> String {
+        String::from("ExtendedStatus")
+    }
+
+    fn json_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
+        u32::json_schema(gen)
+    }
+}
+
 /// The state of a module's attention LED, on the Sidecar front IO panel.
 #[derive(
     Clone, Copy, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, SerializedSize,
@@ -978,6 +1000,7 @@ mod test {
     use crate::ModuleId;
     use core::mem::size_of;
     use hubpack::SerializedSize;
+    use schemars::JsonSchema as _;
 
     #[test]
     fn test_deserialize_led_state() {
@@ -1508,5 +1531,17 @@ mod test {
         // Test that ExtendedStatus is a superset of Status by converting
         // Status::all, which panics if this isn't the case.
         let _e: ExtendedStatus = Status::all().into();
+    }
+
+    #[test]
+    fn test_status_schema() {
+        assert_eq!(
+            Status::json_schema(&mut Default::default()),
+            u8::json_schema(&mut Default::default()),
+        );
+        assert_eq!(
+            ExtendedStatus::json_schema(&mut Default::default()),
+            u32::json_schema(&mut Default::default()),
+        );
     }
 }
