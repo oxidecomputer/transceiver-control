@@ -194,7 +194,20 @@ impl schemars::JsonSchema for EthernetComplianceCode {
     }
 
     fn json_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-        String::json_schema(gen)
+        let mut s = String::json_schema(gen);
+        let ::schemars::schema::Schema::Object(obj) = &mut s else {
+            unreachable!();
+        };
+        obj.metadata().description.replace(String::from(
+            "The Ethernet specification implemented by a module.",
+        ));
+        s
+    }
+
+    // We want to make sure the schema is inlined. In this case, we don't expect
+    // the type to be meaningful to consumers.
+    fn is_referenceable() -> bool {
+        false
     }
 }
 

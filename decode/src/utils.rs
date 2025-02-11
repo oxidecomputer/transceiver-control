@@ -184,7 +184,20 @@ macro_rules! bitfield_enum {
                 gen: &mut ::schemars::gen::SchemaGenerator
             ) -> ::schemars::schema::Schema
             {
-                String::json_schema(gen)
+                // Use the JSONSchema for a string, but ensure we keep the
+                // description from the original type itself.
+                let mut s = String::json_schema(gen);
+                let ::schemars::schema::Schema::Object(obj) = &mut s else {
+                    unreachable!();
+                };
+                obj.metadata().description.replace(String::from($docstring));
+                s
+            }
+
+            // We want to make sure the schema is inlined. In this case, we
+            // don't expect the type to be meaningful to consumers.
+            fn is_referenceable() -> bool {
+                false
             }
         }
     };
@@ -303,7 +316,20 @@ macro_rules! bitfield_enum {
                 gen: &mut ::schemars::gen::SchemaGenerator
             ) -> ::schemars::schema::Schema
             {
-                String::json_schema(gen)
+                // Use the JSONSchema for a string, but ensure we keep the
+                // description from the original type itself.
+                let mut s = String::json_schema(gen);
+                let ::schemars::schema::Schema::Object(obj) = &mut s else {
+                    unreachable!();
+                };
+                obj.metadata().description.replace(String::from($docstring));
+                s
+            }
+
+            // We want to make sure the schema is inlined. In this case, we
+            // don't expect the type to be meaningful to consumers.
+            fn is_referenceable() -> bool {
+                false
             }
         }
     };
