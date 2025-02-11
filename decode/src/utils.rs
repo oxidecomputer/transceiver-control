@@ -184,7 +184,17 @@ macro_rules! bitfield_enum {
                 gen: &mut ::schemars::gen::SchemaGenerator
             ) -> ::schemars::schema::Schema
             {
-                String::json_schema(gen)
+                // Use the JSONSchema for a string, but ensure we keep the
+                // description from the original type itself.
+                let mut s = String::json_schema(gen);
+                let ::schemars::schema::Schema::Object(obj) = &mut s else {
+                    unreachable!();
+                };
+                obj
+                    .metadata
+                    .get_or_insert_with(Default::default)
+                    .description = Some(String::from($docstring));
+                s
             }
         }
     };

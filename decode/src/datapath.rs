@@ -194,7 +194,20 @@ impl schemars::JsonSchema for EthernetComplianceCode {
     }
 
     fn json_schema(gen: &mut schemars::gen::SchemaGenerator) -> schemars::schema::Schema {
-        String::json_schema(gen)
+        let mut s = String::json_schema(gen);
+        let ::schemars::schema::Schema::Object(obj) = &mut s else {
+            unreachable!();
+        };
+        obj.metadata
+            .get_or_insert_with(Default::default)
+            .description = Some(String::from(
+            "The Ethernet specification implemented by a module.",
+        ));
+        s
+    }
+
+    fn is_referenceable() -> bool {
+        false
     }
 }
 

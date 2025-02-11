@@ -660,7 +660,6 @@ crate::bitfield_enum! {
 
 #[cfg(test)]
 mod tests {
-    use schemars::JsonSchema as _;
     use strum::IntoEnumIterator as _;
 
     use crate::ActiveCableMediaInterfaceId;
@@ -794,16 +793,6 @@ mod tests {
             \"revision\":\"ab\",\"serial\":\"some sn\",\"date\":\"220202ab\"}}";
         assert_eq!(serde_json::to_string(&v).unwrap(), expected);
         assert_eq!(v, serde_json::from_str(expected).unwrap());
-    }
-
-    #[test]
-    fn test_identifier_schema() {
-        let s1 = Identifier::json_schema(&mut Default::default());
-        let s2 = String::json_schema(&mut Default::default());
-        assert_eq!(
-            s1, s2,
-            "The JSONSchema for an Identifier should be the same as a String",
-        );
     }
 
     #[test]
