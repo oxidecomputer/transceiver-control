@@ -198,14 +198,14 @@ impl schemars::JsonSchema for EthernetComplianceCode {
         let ::schemars::schema::Schema::Object(obj) = &mut s else {
             unreachable!();
         };
-        obj.metadata
-            .get_or_insert_with(Default::default)
-            .description = Some(String::from(
+        obj.metadata().description.replace(String::from(
             "The Ethernet specification implemented by a module.",
         ));
         s
     }
 
+    // We want to make sure the schema is inlined. In this case, we don't expect
+    // the type to be meaningful to consumers.
     fn is_referenceable() -> bool {
         false
     }
