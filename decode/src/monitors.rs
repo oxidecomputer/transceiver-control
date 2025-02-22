@@ -303,7 +303,13 @@ impl ParseFromModule for Monitors {
     fn reads(id: Identifier) -> Result<Vec<MemoryRead>, Error> {
         match id {
             Identifier::QsfpPlusSff8636 | Identifier::Qsfp28 => {
-                // First, we'll read support for monitoring values, and the
+                // First, read the revision compliance byte. This will tell us
+                // how to handle the fact that we might be missing advertisement
+                // bits for the temperature and voltage.
+                let page = sff8636::Page::Lower;
+                let status = MemoryRead::new(page, 1, 1).unwrap();
+
+                // Next, we'll read support for monitoring values, and the
                 // description of how Rx power is measured.
                 //
                 // See SFF-8636 rev 2.10a Table 6-23.
@@ -336,7 +342,8 @@ impl ParseFromModule for Monitors {
                 let per_lane =
                     (0..N_READS).map(|i| MemoryRead::new(page, START + SIZE * i, SIZE).unwrap());
 
-                let mut reads = Vec::with_capacity(5);
+                let mut reads = Vec::with_capacity(6);
+                reads.push(status);
                 reads.push(support);
                 reads.push(module_wide);
                 reads.extend(per_lane);
@@ -428,33 +435,52 @@ impl ParseFromModule for Monitors {
     fn parse<'a>(id: Identifier, mut reads: impl Iterator<Item = &'a [u8]>) -> Result<Self, Error> {
         match id {
             Identifier::QsfpPlusSff8636 | Identifier::Qsfp28 => {
-                // Decode the support first, see Table 6-23. We expect one byte
+                // Decode the status first, which tells us which revision we're
+                // on. We specifically need to know if we're pre Rev 2.8, in
+                // which case the temp and voltage support bits might be zero,
+                // but the values are still actually there.
+                let status = reads
+                    .next()
+                    .ok_or(Error::ParseFailed)?
+                    .first()
+                    .ok_or(Error::ParseFailed)?;
+                let is_pre_rev2p8 = *status < 0x08;
+
+                // Decode the support next, see Table 6-23. We expect one byte
                 // first.
                 let byte = reads
                     .next()
                     .ok_or(Error::ParseFailed)?
                     .first()
                     .ok_or(Error::ParseFailed)?;
+                let temp_supported = (byte & 0b0010_0000) != 0;
+                let supply_voltage_supported = (byte & 0b0001_0000) != 0;
                 let rx_power_is_average = (byte & 0b0000_1000) != 0;
                 let tx_power_supported = (byte & 0b0000_0100) != 0;
 
-                // Decode the temperature, and record it if it looks reasonable.
+                // Decode the temperature and voltage if possible.
                 //
-                // NOTE: Temperature and voltage support is advertised in byte
-                // 220, bits 4 and 5. However, this advertisement can have
-                // false-negatives. In older modules, pre rev-2.8 of the
-                // SFF-8636 spec, these bits were reserved. So modules would
-                // report 0 for them, even though they actually reported the
-                // temperature or voltage.
+                // If the module is old (pre Rev 2.8), the advertisement bits
+                // for these don't mean anything. In that case, attempt to
+                // read it, and throw it away if it's not reasonable.
                 //
-                // So, if the bits are 1, then the values are _definitely_
-                // supported, but they _may_ be supported even if the bits are
-                // clear. To handle these cases reliably and simply, we always
-                // read the values, and throw them away if they're absurd.
+                // Otherwise, we actually assume the advertisement bits are
+                // correct.
                 let module_wide = reads.next().ok_or(Error::ParseFailed)?;
-                let temperature =
-                    decode_temperature_if_reasonable([module_wide[0], module_wide[1]]);
-                let supply_voltage = decode_voltage_if_reasonable([module_wide[4], module_wide[5]]);
+                let temperature = if is_pre_rev2p8 {
+                    decode_temperature_if_reasonable([module_wide[0], module_wide[1]])
+                } else if temp_supported {
+                    Some(decode_temperature([module_wide[0], module_wide[1]]))
+                } else {
+                    None
+                };
+                let supply_voltage = if is_pre_rev2p8 {
+                    decode_voltage_if_reasonable([module_wide[4], module_wide[5]])
+                } else if supply_voltage_supported {
+                    Some(decode_supply_voltage([module_wide[4], module_wide[5]]))
+                } else {
+                    None
+                };
 
                 // Decode the per-lane receiver power. We actually can't tell
                 // the difference between "unsupported" and a peak-to-peak
@@ -698,14 +724,37 @@ mod tests {
     #[test]
     fn test_sff8636_monitor_reads() {
         let reads = Monitors::reads(Identifier::QsfpPlusSff8636).unwrap();
-        assert_eq!(reads.len(), 5);
+        assert_eq!(reads.len(), 6);
     }
 
     #[test]
     fn test_parse_sff8636_monitor_all_supported() {
+        // Advertise that we're a new module.
+        let status = &[0x08];
+
         // Advertise that everything is supported
         let support = &[0b0011_1100];
 
+        test_parse_sff8636_monitor_with_status_and_support(status, support);
+    }
+
+    #[test]
+    fn test_parse_sff8636_monitor_with_old_status_and_no_support() {
+        // Advertise that we're a very old module, so these bits don't mean
+        // anything anyway.
+        let status = &[0x07];
+
+        // Advertise that power measurements are supported, but ignore temp and
+        // voltage.
+        let support = &[0b0000_1100];
+
+        // We should still get the same temp and voltage, because the lack of
+        // advertisement bits is meaningless and the values themselves are
+        // reasonable.
+        test_parse_sff8636_monitor_with_status_and_support(status, support);
+    }
+
+    fn test_parse_sff8636_monitor_with_status_and_support(status: &[u8], support: &[u8]) {
         // Encode a module temperature of 50 * LSB \approx 0.19 C.
         let temp: i16 = 50;
         let expected_temp = f32::from(temp) * TEMP_RESOLUTION;
@@ -742,7 +791,8 @@ mod tests {
 
         // Package it all up.
         let reads = [
-            support.as_slice(),
+            status,
+            support,
             &module_data,
             &rx_pow_bytes,
             &tx_bias_bytes,
