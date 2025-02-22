@@ -228,8 +228,34 @@ const WATT_TO_MW: f32 = 1e3;
 // Conversion from Amps to milliamps, which we report.
 const AMP_TO_MA: f32 = 1e3;
 
+fn monitor_bytes_are_absurd(bytes: &[u8; 2]) -> bool {
+    bytes == &[0, 0] || bytes == &[0xff, 0xff]
+}
+
+// Try to decode the temperature, returning `None` if it appears absurd.
+//
+// "Absurd" here means all zeros or all 0xFF.
+fn decode_temperature_if_reasonable(bytes: [u8; 2]) -> Option<f32> {
+    if monitor_bytes_are_absurd(&bytes) {
+        None
+    } else {
+        Some(decode_temperature(bytes))
+    }
+}
+
 fn decode_temperature(bytes: [u8; 2]) -> f32 {
     decode_with_scale::<i16>(bytes, TEMP_RESOLUTION)
+}
+
+// Try to decode the supply voltage, return `None` if it appears absurd.
+//
+// "Absurd" here means all zeros or all 0xFF.
+fn decode_voltage_if_reasonable(bytes: [u8; 2]) -> Option<f32> {
+    if monitor_bytes_are_absurd(&bytes) {
+        None
+    } else {
+        Some(decode_supply_voltage(bytes))
+    }
 }
 
 fn decode_supply_voltage(bytes: [u8; 2]) -> f32 {
@@ -409,26 +435,26 @@ impl ParseFromModule for Monitors {
                     .ok_or(Error::ParseFailed)?
                     .first()
                     .ok_or(Error::ParseFailed)?;
-                let temp_supported = (byte & 0b0010_0000) != 0;
-                let supply_voltage_supported = (byte & 0b0001_0000) != 0;
                 let rx_power_is_average = (byte & 0b0000_1000) != 0;
                 let tx_power_supported = (byte & 0b0000_0100) != 0;
 
-                // Decode the temperature, if it is implemented.
+                // Decode the temperature, and record it if it looks reasonable.
+                //
+                // NOTE: Temperature and voltage support is advertised in byte
+                // 220, bits 4 and 5. However, this advertisement can have
+                // false-negatives. In older modules, pre rev-2.8 of the
+                // SFF-8636 spec, these bits were reserved. So modules would
+                // report 0 for them, even though they actually reported the
+                // temperature or voltage.
+                //
+                // So, if the bits are 1, then the values are _definitely_
+                // supported, but they _may_ be supported even if the bits are
+                // clear. To handle these cases reliably and simply, we always
+                // read the values, and throw them away if they're absurd.
                 let module_wide = reads.next().ok_or(Error::ParseFailed)?;
-                let temperature = if temp_supported {
-                    Some(decode_temperature([module_wide[0], module_wide[1]]))
-                } else {
-                    None
-                };
-
-                // Decode supply voltage, if implemented.
-                let supply_voltage = if supply_voltage_supported {
-                    // Bytes 24-25 are reserved, skip them.
-                    Some(decode_supply_voltage([module_wide[4], module_wide[5]]))
-                } else {
-                    None
-                };
+                let temperature =
+                    decode_temperature_if_reasonable([module_wide[0], module_wide[1]]);
+                let supply_voltage = decode_voltage_if_reasonable([module_wide[4], module_wide[5]]);
 
                 // Decode the per-lane receiver power. We actually can't tell
                 // the difference between "unsupported" and a peak-to-peak
@@ -646,6 +672,8 @@ impl ParseFromModule for Monitors {
 
 #[cfg(test)]
 mod tests {
+    use crate::monitors::monitor_bytes_are_absurd;
+
     use super::Aux1Monitor;
     use super::Aux2Monitor;
     use super::Aux3Monitor;
@@ -886,5 +914,13 @@ mod tests {
         let expected = ReceiverPower::Average(1.0);
         assert_eq!(expected, serde_json::from_str(s).unwrap());
         assert_eq!(serde_json::to_string(&expected).unwrap().as_str(), s);
+    }
+
+    #[test]
+    fn test_monitor_bytes_are_absurd() {
+        assert_eq!(monitor_bytes_are_absurd(&[0x00, 0x00]), true);
+        assert_eq!(monitor_bytes_are_absurd(&[0xff, 0xff]), true);
+        assert_eq!(monitor_bytes_are_absurd(&[0xff, 0x00]), false);
+        assert_eq!(monitor_bytes_are_absurd(&[0x00, 0xff]), false);
     }
 }
