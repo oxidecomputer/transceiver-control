@@ -258,6 +258,14 @@ fn parse_status(s: &str) -> Result<ExtendedStatus, String> {
     s.parse::<ExtendedStatus>().map_err(|e| e.to_string())
 }
 
+fn read_u8(s: &str) -> Result<u8, String> {
+    let (s, radix) = s
+        .strip_prefix("0x")
+        .map(|hex| (hex, 16))
+        .unwrap_or_else(|| (s, 10));
+    u8::from_str_radix(s, radix).map_err(|e| e.to_string())
+}
+
 #[derive(Subcommand)]
 enum Cmd {
     /// Return the status of the addressed modules, such as presence, power
@@ -360,9 +368,15 @@ enum Cmd {
         binary: bool,
 
         /// The offset to start reading from.
+        ///
+        /// This may be specified in hex, starting with `0x`, or in decimal.
+        #[arg(value_parser = read_u8)]
         offset: u8,
 
         /// The number of bytes to read.
+        ///
+        /// This may be specified in hex, starting with `0x`, or in decimal.
+        #[arg(value_parser = read_u8)]
         len: u8,
     },
 
@@ -401,6 +415,9 @@ enum Cmd {
         input_kind: Option<InputKind>,
 
         /// The offset to start writing to.
+        ///
+        /// This may be specified in hex, starting with `0x`, or in decimal.
+        #[arg(value_parser = read_u8)]
         offset: u8,
     },
 
@@ -420,14 +437,16 @@ enum Cmd {
         binary: bool,
 
         /// The upper page to read from.
-        #[arg(short, long, default_value_t = 0)]
+        #[arg(short, long, default_value_t = 0, value_parser = read_u8)]
         page: u8,
 
         /// For CMIS modules, the bank of the upper page to read from.
         ///
         /// Note that some pages require a bank and others may not have a bank.
         /// The validity will be checked at runtime.
-        #[arg(short, long, conflicts_with("sff"))]
+        ///
+        /// This may be specified in hex, starting with `0x`, or in decimal.
+        #[arg(short, long, conflicts_with("sff"), value_parser = read_u8)]
         bank: Option<u8>,
 
         /// The offset to start reading from.
@@ -435,9 +454,15 @@ enum Cmd {
         /// Note that offsets are always specified as relative to the full
         /// 256-byte transceiver memory map. E.g., to read starting from the
         /// first byte of an upper page, the value `128` should be specified.
+        ///
+        /// This may be specified in hex, starting with `0x`, or in decimal.
+        #[arg(value_parser = read_u8)]
         offset: u8,
 
         /// The number of bytes to read.
+        ///
+        /// This may be specified in hex, starting with `0x`, or in decimal.
+        #[arg(value_parser = read_u8)]
         len: u8,
     },
 
@@ -476,14 +501,18 @@ enum Cmd {
         input_kind: Option<InputKind>,
 
         /// The upper page to read from.
-        #[arg(short, long, default_value_t = 0)]
+        ///
+        /// This may be specified in hex, starting with `0x`, or in decimal.
+        #[arg(short, long, default_value_t = 0, value_parser = read_u8)]
         page: u8,
 
         /// For CMIS modules, the bank of the upper page to read from.
         ///
         /// Note that some pages require a bank and others may not have a bank.
         /// The validity will be checked at runtime.
-        #[arg(short, long, conflicts_with("sff"))]
+        ///
+        /// This may be specified in hex, starting with `0x`, or in decimal.
+        #[arg(short, long, conflicts_with("sff"), value_parser = read_u8)]
         bank: Option<u8>,
 
         /// The offset to start writing to.
@@ -491,6 +520,9 @@ enum Cmd {
         /// Note that offsets are always specified as relative to the full
         /// 256-byte transceiver memory map. E.g., to read starting from the
         /// first byte of an upper page, the value `128` should be specified.
+        ///
+        /// This may be specified in hex, starting with `0x`, or in decimal.
+        #[arg(value_parser = read_u8)]
         offset: u8,
     },
 
@@ -1646,6 +1678,8 @@ fn print_sff8636_datapath(
 
 #[cfg(test)]
 mod tests {
+    use crate::read_u8;
+
     use super::load_write_data;
     use super::load_write_data_autodetect_kind;
     use super::parse_transceivers;
@@ -1808,5 +1842,13 @@ mod tests {
         assert!(parse_transceivers("0,1000000").is_err());
         assert!(parse_transceivers("0-10,1000000").is_err());
         assert!(parse_transceivers("0-100").is_err());
+    }
+
+    #[test]
+    fn test_read_u8() {
+        assert_eq!(read_u8("01").unwrap(), 1);
+        assert_eq!(read_u8("0x01").unwrap(), 1);
+        assert!(read_u8("ff").is_err());
+        assert_eq!(read_u8("0xff").unwrap(), 0xff);
     }
 }
