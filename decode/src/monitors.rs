@@ -306,6 +306,8 @@ impl ParseFromModule for Monitors {
                 // First, read the revision compliance byte. This will tell us
                 // how to handle the fact that we might be missing advertisement
                 // bits for the temperature and voltage.
+                //
+                // See SFF-8636 rev 2.10a Table 6-3.
                 let page = sff8636::Page::Lower;
                 let status = MemoryRead::new(page, 1, 1).unwrap();
 
