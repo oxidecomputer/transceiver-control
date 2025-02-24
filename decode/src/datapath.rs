@@ -138,6 +138,16 @@ impl SffComplianceCode {
 )]
 pub struct EthernetComplianceCode(u8);
 
+#[cfg(test)]
+impl EthernetComplianceCode {
+    /// Construct from a byte, not checking that the value is valid.
+    ///
+    /// This should only be used in tests.
+    pub const fn new_unchecked(x: u8) -> Self {
+        Self(x)
+    }
+}
+
 impl fmt::Display for EthernetComplianceCode {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.0 {
@@ -148,7 +158,7 @@ impl fmt::Display for EthernetComplianceCode {
             0b0001_0000 => write!(f, "10GBASE-SR"),
             0b0010_0000 => write!(f, "10GBASE-LR"),
             0b0100_0000 => write!(f, "10GBASE-LRM"),
-            _ => unreachable!(),
+            x => write!(f, "Unknown (0x{x:02x})"),
         }
     }
 }
@@ -1029,6 +1039,7 @@ mod tests {
     use crate::ident::SmfMediaInterfaceId;
     use crate::CmisDatapathState;
     use crate::ConnectorType;
+    use crate::EthernetComplianceCode;
     use crate::ExtendedSpecificationComplianceCode;
     use crate::LaneDatapathConfig;
     use crate::SffComplianceCode;
@@ -1121,5 +1132,11 @@ mod tests {
             let s = value.to_string();
             assert_eq!(value, s.parse().unwrap());
         }
+    }
+
+    #[test]
+    fn do_not_panic_on_bad_spec() {
+        let code = EthernetComplianceCode::new_unchecked(0);
+        assert_eq!(code.to_string(), "Unknown (0x00)");
     }
 }
