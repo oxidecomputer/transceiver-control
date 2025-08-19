@@ -63,6 +63,43 @@ pub enum Datapath {
     },
 }
 
+/// A link speed in bits-per-second.
+#[derive(Clone, Copy, Debug, PartialEq)]
+#[cfg_attr(
+    any(feature = "api-traits", test),
+    derive(serde::Deserialize, serde::Serialize, schemars::JsonSchema)
+)]
+#[cfg_attr(any(feature = "api-traits", test), serde(transparent))]
+pub struct Bps(pub u64);
+
+pub(crate) const GBPS: u64 = 1_000_000_000;
+pub(crate) const MBPS: u64 = 1_000_000;
+
+impl fmt::Display for Bps {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let (denom, suffix) = if self.0 >= GBPS {
+            (GBPS as f64, "Gbps")
+        } else if self.0 >= MBPS {
+            (MBPS as f64, "Mbps")
+        } else {
+            (1.0, "Bps")
+        };
+        write!(f, "{} {}", self.0 as f64 / denom, suffix)
+    }
+}
+
+impl Datapath {
+    /// Return the speeds supported by the datapath.
+    ///
+    /// If the supported speeds aren't knonw, None is returned.
+    pub fn speeds(&self) -> Option<Vec<Bps>> {
+        match self {
+            Datapath::Cmis { datapaths, .. } => datapaths.values().map(|d| d.speed()).collect(),
+            Datapath::Sff8636 { specification, .. } => specification.speed().map(|s| vec![s]),
+        }
+    }
+}
+
 crate::bitfield_enum! {
     name = ConnectorType,
     description = "The type of a media-side connector.\n\
@@ -125,6 +162,16 @@ impl SffComplianceCode {
             Self::Ethernet(EthernetComplianceCode(specification))
         }
     }
+
+    /// Return the speed supported by this specification.
+    ///
+    /// If the supported speed isn't known, return None.
+    pub fn speed(&self) -> Option<Bps> {
+        match self {
+            SffComplianceCode::Extended(ext) => ext.speed(),
+            SffComplianceCode::Ethernet(eth) => eth.speed(),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -145,6 +192,25 @@ impl EthernetComplianceCode {
     /// This should only be used in tests.
     pub const fn new_unchecked(x: u8) -> Self {
         Self(x)
+    }
+}
+
+impl EthernetComplianceCode {
+    /// Return the speed supported by this spec.
+    ///
+    /// If the speed isn't known, None is returned.
+    pub fn speed(&self) -> Option<Bps> {
+        let speed = match self.0 {
+            0b0000_0001 => 40,
+            0b0000_0010 => 40,
+            0b0000_0100 => 40,
+            0b0000_1000 => 40,
+            0b0001_0000 => 10,
+            0b0010_0000 => 10,
+            0b0100_0000 => 10,
+            _ => return None,
+        };
+        Some(Bps(speed * GBPS))
     }
 }
 
@@ -756,6 +822,15 @@ pub struct CmisDatapath {
     pub lane_status: BTreeMap<u8, CmisLaneStatus>,
 }
 
+impl CmisDatapath {
+    /// Return the speed supported by this datapath.
+    ///
+    /// If the supported speed isn't known, None is returned.
+    pub fn speed(&self) -> Option<Bps> {
+        self.application.media_id.speed()
+    }
+}
+
 /// The status of a single CMIS lane.
 ///
 /// If any particular control or status value is unsupported by a module, it is
@@ -1026,9 +1101,12 @@ impl From<&u8> for LaneDatapathConfig {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use strum::IntoEnumIterator as _;
 
     use super::ApplicationDescriptor;
+    use super::CmisDatapath;
     use super::Datapath;
     use super::HostElectricalInterfaceId;
     use super::Identifier;
@@ -1043,6 +1121,77 @@ mod tests {
     use crate::ExtendedSpecificationComplianceCode;
     use crate::LaneDatapathConfig;
     use crate::SffComplianceCode;
+
+    #[test]
+    fn report_sff_speeds() {
+        let dp = Datapath::Sff8636 {
+            connector: ConnectorType::LucentConnector,
+            lanes: [Sff8636Datapath {
+                tx_enabled: true,
+                tx_los: false,
+                rx_los: false,
+                tx_adaptive_eq_fault: false,
+                tx_fault: false,
+                tx_lol: true,
+                rx_lol: true,
+                tx_cdr_enabled: true,
+                rx_cdr_enabled: true,
+            }; 4],
+            specification: SffComplianceCode::Extended(
+                ExtendedSpecificationComplianceCode::Id100GBCwdm4,
+            ),
+        };
+        let Some(s) = dp.speeds() else {
+            panic!("Should report speeds for 100G CWDM4 datapath");
+        };
+        assert_eq!(s.len(), 1, "Should report 1 speed");
+        assert_eq!(s[0].0, 100_000_000_000, "Should have reported 100G");
+    }
+
+    #[test]
+    fn report_cmis_speeds() {
+        let host_id = HostElectricalInterfaceId::IdCaui4;
+        let media_id = MediaInterfaceId::Smf(SmfMediaInterfaceId::Id100GBaseLr4);
+        let n_lanes = 4;
+        let media_lane_assignment_options = 0b1;
+        let application = ApplicationDescriptor {
+            host_id,
+            media_id,
+            host_lane_count: n_lanes,
+            media_lane_count: n_lanes,
+            host_lane_assignment_options: 0b1,
+            media_lane_assignment_options,
+        };
+        let dp0 = CmisDatapath {
+            application,
+            lane_status: BTreeMap::new(),
+        };
+
+        let media_id = MediaInterfaceId::Smf(SmfMediaInterfaceId::Id200GBaseLr4);
+        let application = ApplicationDescriptor {
+            host_id,
+            media_id,
+            host_lane_count: n_lanes,
+            media_lane_count: n_lanes,
+            host_lane_assignment_options: 0b1,
+            media_lane_assignment_options,
+        };
+        let dp1 = CmisDatapath {
+            application,
+            lane_status: BTreeMap::new(),
+        };
+        let dp = Datapath::Cmis {
+            connector: ConnectorType::LucentConnector,
+            supported_lanes: 0b1111_1111,
+            datapaths: BTreeMap::from([(0, dp0), (1, dp1)]),
+        };
+        let Some(speeds) = dp.speeds() else {
+            panic!("Should have reported speeds for multi-speed module");
+        };
+        assert_eq!(speeds.len(), 2, "Should have reported 2 speeds");
+        assert_eq!(speeds[0].0, 100_000_000_000);
+        assert_eq!(speeds[1].0, 200_000_000_000);
+    }
 
     #[test]
     fn test_decode_cmis_lane_datapath_config() {

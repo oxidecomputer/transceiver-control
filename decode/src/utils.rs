@@ -147,7 +147,7 @@ macro_rules! bitfield_enum {
                 }
 
                 $(
-                    if let Some(value) = crate::utils::parse_u8_bitfield_variant(
+                    if let Some(value) = $crate::utils::parse_u8_bitfield_variant(
                         s, stringify!($other_variant)
                     ) {
                         return Ok($other_variant(value));
@@ -346,13 +346,10 @@ macro_rules! bitfield_enum {
 /// match or parsing fails.
 #[allow(dead_code)]
 pub(crate) fn parse_u8_bitfield_variant(s: &str, variant: &str) -> Option<u8> {
-    let Some(inner) = s
+    let inner = s
         .strip_suffix(")")
         .and_then(|s| s.strip_prefix(variant))
-        .and_then(|s| s.strip_prefix(" (0x"))
-    else {
-        return None;
-    };
+        .and_then(|s| s.strip_prefix(" (0x"))?;
     u8::from_str_radix(inner, 16).ok()
 }
 

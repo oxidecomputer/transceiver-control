@@ -6,6 +6,7 @@
 
 //! Decoding of transceiver identifying information.
 
+use crate::Bps;
 use crate::Error;
 use crate::ParseFromModule;
 use std::fmt;
@@ -391,6 +392,93 @@ crate::bitfield_enum! {
     other_variants = { Reserved : 0x0a | 0x0f | 0x3b..=0x3e | 0x4d..=0x7e | 0x82..=0xff },
 }
 
+impl ExtendedSpecificationComplianceCode {
+    /// Return the speed supported by this spec, or None if it's not known.
+    pub fn speed(&self) -> Option<crate::Bps> {
+        use crate::GBPS;
+        use crate::MBPS;
+        use ExtendedSpecificationComplianceCode::*;
+        let speed = match self {
+            Unspecified => return None,
+            Id100GAoc5en5 => 100 * GBPS,
+            Id100GBaseSr4 => 100 * GBPS,
+            Id100GBaseLr4 => 100 * GBPS,
+            Id100GBaseEr4 => 100 * GBPS,
+            Id100GBaseSr10 => 100 * GBPS,
+            Id100GBCwdm4 => 100 * GBPS,
+            Id100GPsm4 => 100 * GBPS,
+            Id100GAcc => 100 * GBPS,
+            Obsolete => return None,
+            Id100GBaseCr4 => 100 * GBPS,
+            Id25GBaseCrS => 25 * GBPS,
+            Id25GBaseCrN => 25 * GBPS,
+            Id10MbEth => 10 * MBPS,
+            Id40GBaseEr4 => 40 * GBPS,
+            Id4x10GBaseSr => 10 * GBPS,
+            Id40GPsm4 => 40 * GBPS,
+            IdG959p1i12d1 => return None,
+            IdG959p1s12d2 => return None,
+            IdG9592p1l1d1 => return None,
+            Id10GBaseT => 10 * GBPS,
+            Id100GClr4 => 100 * GBPS,
+            Id100GAoc10en12 => 100 * GBPS,
+            Id100GAcc10en12 => 100 * GBPS,
+            Id100GeDwdm2 => 100 * GBPS,
+            Id100GWdm => 100 * GBPS,
+            Id10GBaseTSr => 10 * GBPS,
+            Id5GBaseT => 5 * GBPS,
+            Id2p5GBaseT => 2500 * MBPS,
+            Id40GSwdm4 => 40 * GBPS,
+            Id100GSwdm4 => 100 * GBPS,
+            Id100GPam4BiDi => 100 * GBPS,
+            Id10GBaseBr => 10 * GBPS,
+            Id25GBaseBr => 26 * GBPS,
+            Id50GBaseBr => 50 * GBPS,
+            Id4wdm10 => 100 * GBPS,
+            Id4wdm20 => 100 * GBPS,
+            Id4wdm40 => 100 * GBPS,
+            Id100GBaseDr => 100 * GBPS,
+            Id100GFr => 100 * GBPS,
+            Id100GLr => 100 * GBPS,
+            Id100GBaseSr1 => 100 * GBPS,
+            Id100GBaseVr1 => 100 * GBPS,
+            Id100GBaseSr12 => 100 * GBPS,
+            Id100GBaseVr12 => 100 * GBPS,
+            Id100GBaseFr1 => 100 * GBPS,
+            Id100GBaseLr1 => 100 * GBPS,
+            Id100GLr120Caui4 => 100 * GBPS,
+            Id100GLr130Caui4 => 100 * GBPS,
+            Id100GLr140Caui4 => 100 * GBPS,
+            Id100GLr120 => 100 * GBPS,
+            Id100GLr130 => 100 * GBPS,
+            Id100GLr140 => 100 * GBPS,
+            IdAcc50GAUI10en6 => return None,
+            IdAcc50GAUI10en62 => return None,
+            IdAcc50GAUI2p6en4 => return None,
+            IdAcc50GAUI2p6en41 => return None,
+            Id100GBaseCr1 => 100 * GBPS,
+            Id50GBaseCr => 50 * GBPS,
+            Id50GBaseSr => 50 * GBPS,
+            Id50GBaseFr => 50 * GBPS,
+            Id50GBaseEr => 50 * GBPS,
+            Id200GBaseFr4 => 200 * GBPS,
+            Id200GPsm4 => 200 * GBPS,
+            Id50GBaseLr => 50 * GBPS,
+            Id200GBaseLr4 => 200 * GBPS,
+            Id400GBaseDr4 => 400 * GBPS,
+            Id400GBaseFr4 => 400 * GBPS,
+            Id400GBaseLr4 => 400 * GBPS,
+            Id400GGLr410 => 400 * GBPS,
+            Id400GBaseZr => 400 * GBPS,
+            Id256GfcSw4 => 256 * GBPS,
+            Id64Gfc => 64 * GBPS,
+            Id128Gfc => 128 * GBPS,
+            Reserved(_) => return None,
+        };
+        Some(crate::Bps(speed))
+    }
+}
+
 crate::bitfield_enum! {
     name = HostElectricalInterfaceId,
     description = "The host electrical interface ID.\n\
@@ -517,6 +605,19 @@ impl MediaInterfaceId {
             MediaType::BaseT => Some(MediaInterfaceId::BaseT(BaseTMediaInterfaceId::from(x))),
         }
     }
+
+    /// Return the speed of this media type, if known.
+    ///
+    /// If the speed isn't known, return None.
+    pub fn speed(&self) -> Option<Bps> {
+        match self {
+            MediaInterfaceId::Mmf(mmf) => mmf.speed(),
+            MediaInterfaceId::Smf(smf) => smf.speed(),
+            MediaInterfaceId::PassiveCopper(_pc) => None,
+            MediaInterfaceId::ActiveCable(_ac) => None,
+            MediaInterfaceId::BaseT(bt) => bt.speed(),
+        }
+    }
 }
 
 crate::bitfield_enum! {
@@ -552,6 +653,42 @@ crate::bitfield_enum! {
         0x1a, Id400GBaseSr42, "400GBASE-SR4.2",
     },
     other_variants = { Reserved : _, }
+}
+
+impl MmfMediaInterfaceId {
+    /// Return the speed of this MMF type, if known.
+    pub fn speed(&self) -> Option<Bps> {
+        use MmfMediaInterfaceId::*;
+        let speed = match self {
+            Undefined => return None,
+            Id10GBaseSw => 10,
+            Id10GBaseSr => 10,
+            Id25GBaseSr => 25,
+            Id40GBaseSr3 => 40,
+            Id40GESwdm4 => 40,
+            Id40GEBiDi => 40,
+            Id50GBaseSr => 50,
+            Id100GBaseSr10 => 100,
+            Id100GBaseSr4 => 100,
+            Id100GBaseSwdm4 => 100,
+            Id100GEBiDi => 100,
+            Id100GBaseSr2 => 100,
+            Id100GBaseSr1 => 100,
+            Id100GBaseVr1 => 100,
+            Id200GBaseSr4 => 200,
+            Id200GBaseSr2 => 200,
+            Id200GBaseVr2 => 200,
+            Id400GBaseSr16 => 400,
+            Id400GBaseSr8 => 400,
+            Id400GBaseSr4 => 400,
+            Id400GBaseVr4 => 400,
+            Id800GBaseSr8 => 800,
+            Id800GBaseVr8 => 800,
+            Id400GBaseSr42 => 40,
+            Reserved(_) => return None,
+        };
+        Some(Bps(speed * crate::GBPS))
+    }
 }
 
 crate::bitfield_enum! {
@@ -611,6 +748,66 @@ crate::bitfield_enum! {
     other_variants = { Reserved : _ },
 }
 
+impl SmfMediaInterfaceId {
+    /// Return the speed of this SMF media type, if known.
+    ///
+    /// If the speed isn't known, return None.
+    pub fn speed(&self) -> Option<Bps> {
+        use SmfMediaInterfaceId::*;
+        let speed = match self {
+            Undefined => return None,
+            Id10GBaseLw => 10,
+            Id10GBaseEw => 10,
+            Id10GZw => 10,
+            Id10GBaseLr => 10,
+            Id10GBaseEr => 10,
+            Id10GBaseBr => 10,
+            Id10GZr => 10,
+            Id25GBaseLr => 25,
+            Id25GBaseEr => 25,
+            Id25GBaseBr => 25,
+            Id40GBaseLr4 => 40,
+            Id40GBaseFr => 40,
+            Id50GBaseFr => 50,
+            Id50GBaseLr => 50,
+            Id50GBaseEr => 50,
+            Id50GBaseBr => 50,
+            Id100GBaseLr4 => 100,
+            Id100GBaseEr4 => 100,
+            Id100GPsm4 => 100,
+            Id100GCwdm4Ocp => 100,
+            Id100GCwdm4 => 100,
+            Id100G4wdm10 => 100,
+            Id100G4wdm20 => 100,
+            Id100G4wdm40 => 100,
+            Id100GBaseDr => 100,
+            Id100GFr => 100,
+            Id100GLr => 100,
+            Id100GLr120 => 100,
+            Id100GEr130 => 100,
+            Id100GEr140 => 100,
+            Id100GBaseZr => 100,
+            Id200GBaseDr4 => 200,
+            Id200GBaseFr4 => 200,
+            Id200GBaseLr4 => 200,
+            Id200GBaseEr4 => 200,
+            Id400GBaseFr8 => 400,
+            Id400GBaseLr8 => 400,
+            Id400GBaseEr8 => 400,
+            Id400GBaseDr4 => 400,
+            Id400GBaseDr42 => 400,
+            Id400GFr4 => 400,
+            Id400GBaseLr46 => 400,
+            Id400GLr410 => 400,
+            Id400GBaseZr => 400,
+            Id800GBaseDr8 => 800,
+            Id800GBaseDr82 => 800,
+            Reserved(_) => return None,
+        };
+        Some(Bps(speed * crate::GBPS))
+    }
+}
+
 crate::bitfield_enum! {
     name = PassiveCopperMediaInterfaceId,
     description = "Media interface ID for passive copper cables.\n\
@@ -656,6 +853,29 @@ crate::bitfield_enum! {
         0x07, Id50GBaseT, "50GBASE-T",
     },
     other_variants = { Custom: 0xc0..=0xff, Reserved: 0x08..=0xbf },
+}
+
+impl BaseTMediaInterfaceId {
+    /// Return the speed of this media type, if known.
+    ///
+    /// If the speed is not known, return None,
+    pub fn speed(&self) -> Option<Bps> {
+        use crate::GBPS;
+        use crate::MBPS;
+        let speed = match self {
+            BaseTMediaInterfaceId::Undefined => return None,
+            BaseTMediaInterfaceId::Id1000BaseT => 1000,
+            BaseTMediaInterfaceId::Id2p5GBaseT => 2500 * MBPS,
+            BaseTMediaInterfaceId::Id5GBaseT => 5 * GBPS,
+            BaseTMediaInterfaceId::Id10GBaseT => 10 * GBPS,
+            BaseTMediaInterfaceId::Id25GBaseT => 25 * GBPS,
+            BaseTMediaInterfaceId::Id40GBaseT => 40 * GBPS,
+            BaseTMediaInterfaceId::Id50GBaseT => 50 * GBPS,
+            BaseTMediaInterfaceId::Custom(_) => return None,
+            BaseTMediaInterfaceId::Reserved(_) => return None,
+        };
+        Some(Bps(speed))
+    }
 }
 
 #[cfg(test)]
