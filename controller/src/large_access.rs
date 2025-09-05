@@ -196,16 +196,24 @@ mod tests {
     fn test_build_large_memory_access_at_boundary() {
         // test at 256
         test_build_large_memory_access_impl::<mgmt::MemoryRead, mgmt::cmis::Page>(
-            mgmt::cmis::Page::Upper(UpperPage::new_unbanked(0).unwrap()), 192, 64
+            mgmt::cmis::Page::Upper(UpperPage::new_unbanked(0).unwrap()),
+            192,
+            64,
         );
         test_build_large_memory_access_impl::<mgmt::MemoryWrite, mgmt::cmis::Page>(
-            mgmt::cmis::Page::Upper(UpperPage::new_unbanked(0).unwrap()), 192, 64
+            mgmt::cmis::Page::Upper(UpperPage::new_unbanked(0).unwrap()),
+            192,
+            64,
         );
         test_build_large_memory_access_impl::<mgmt::MemoryRead, mgmt::sff8636::Page>(
-            mgmt::sff8636::Page::Upper(mgmt::sff8636::UpperPage::new(0).unwrap()), 192, 64
+            mgmt::sff8636::Page::Upper(mgmt::sff8636::UpperPage::new(0).unwrap()),
+            192,
+            64,
         );
         test_build_large_memory_access_impl::<mgmt::MemoryWrite, mgmt::sff8636::Page>(
-            mgmt::sff8636::Page::Upper(mgmt::sff8636::UpperPage::new(0).unwrap()), 192, 64
+            mgmt::sff8636::Page::Upper(mgmt::sff8636::UpperPage::new(0).unwrap()),
+            192,
+            64,
         );
     }
 
@@ -213,16 +221,24 @@ mod tests {
     fn test_build_large_memory_access_exceeding_boundary() {
         // test at 256
         test_build_large_memory_access_impl::<mgmt::MemoryRead, mgmt::cmis::Page>(
-            mgmt::cmis::Page::Upper(UpperPage::new_unbanked(0).unwrap()), 192, 65
+            mgmt::cmis::Page::Upper(UpperPage::new_unbanked(0).unwrap()),
+            192,
+            65,
         );
         test_build_large_memory_access_impl::<mgmt::MemoryWrite, mgmt::cmis::Page>(
-            mgmt::cmis::Page::Upper(UpperPage::new_unbanked(0).unwrap()), 192, 65
+            mgmt::cmis::Page::Upper(UpperPage::new_unbanked(0).unwrap()),
+            192,
+            65,
         );
         test_build_large_memory_access_impl::<mgmt::MemoryRead, mgmt::sff8636::Page>(
-            mgmt::sff8636::Page::Upper(mgmt::sff8636::UpperPage::new(0).unwrap()), 192, 65
+            mgmt::sff8636::Page::Upper(mgmt::sff8636::UpperPage::new(0).unwrap()),
+            192,
+            65,
         );
         test_build_large_memory_access_impl::<mgmt::MemoryWrite, mgmt::sff8636::Page>(
-            mgmt::sff8636::Page::Upper(mgmt::sff8636::UpperPage::new(0).unwrap()), 192, 65
+            mgmt::sff8636::Page::Upper(mgmt::sff8636::UpperPage::new(0).unwrap()),
+            192,
+            65,
         );
     }
 
@@ -245,7 +261,10 @@ mod tests {
                 assert_eq!(read.page(), &mgmt::Page::from(page));
             }
         } else {
-            assert_eq!(true, mgmt::MemoryRead::build_many(page, offset, len).is_err())
+            assert_eq!(
+                true,
+                mgmt::MemoryRead::build_many(page, offset, len).is_err()
+            )
         }
     }
 }
