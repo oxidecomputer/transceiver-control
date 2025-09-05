@@ -180,4 +180,56 @@ mod tests {
             "All reads need to sum to the full expected size",
         );
     }
+
+    #[test]
+    fn test_build_large_memory_access_at_boundary() {
+        // test at 256
+        test_build_large_memory_access_impl::<mgmt::MemoryRead, mgmt::cmis::Page>(
+            mgmt::cmis::Page::Lower, 192, 64
+        );
+        test_build_large_memory_access_impl::<mgmt::MemoryWrite, mgmt::cmis::Page>(
+            mgmt::cmis::Page::Lower, 192, 64
+        );
+        test_build_large_memory_access_impl::<mgmt::MemoryRead, mgmt::sff8636::Page>(
+            mgmt::sff8636::Page::Lower, 192, 64
+        );
+        test_build_large_memory_access_impl::<mgmt::MemoryWrite, mgmt::sff8636::Page>(
+            mgmt::sff8636::Page::Lower, 192, 64
+        );
+    }
+
+    #[test]
+    fn test_build_large_memory_access_exceeding_boundary() {
+        // test at 256
+        test_build_large_memory_access_impl::<mgmt::MemoryRead, mgmt::cmis::Page>(
+            mgmt::cmis::Page::Lower, 192, 65
+        );
+        test_build_large_memory_access_impl::<mgmt::MemoryWrite, mgmt::cmis::Page>(
+            mgmt::cmis::Page::Lower, 192, 65
+        );
+        test_build_large_memory_access_impl::<mgmt::MemoryRead, mgmt::sff8636::Page>(
+            mgmt::sff8636::Page::Lower, 192, 65
+        );
+        test_build_large_memory_access_impl::<mgmt::MemoryWrite, mgmt::sff8636::Page>(
+            mgmt::sff8636::Page::Lower, 192, 65
+        );
+    }
+
+    fn test_build_large_memory_access_impl<T, P>(page: P, offset: u8, len: u8)
+    where
+        T: LargeMemoryAccess<P>,
+        P: MemoryPage,
+        mgmt::Page: From<P>,
+        mgmt::MemoryRead: LargeMemoryAccess<P>,
+    {
+        let reads = mgmt::MemoryRead::build_many(page, offset, len)
+            .expect("failed to build multiple accesses");
+        assert_eq!(reads.len(), usize::from(len / T::SIZE));
+
+        for (read, expected_offset) in reads.into_iter().zip((0..).step_by(T::SIZE as _)) {
+            assert_eq!(read.offset(), expected_offset);
+            assert_eq!(read.len(), T::SIZE);
+            assert_eq!(read.page(), &mgmt::Page::from(page));
+        }
+    }
 }
