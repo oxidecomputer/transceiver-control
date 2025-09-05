@@ -39,15 +39,24 @@ where
 
     /// Split a single large access into many, using `Self::build_one()`.
     fn build_many(page: P, offset: u8, len: u8) -> Result<Vec<Self>, Error> {
-        let end = offset + len;
-        (offset..end)
+        // A valid read scenario could lead the "end" to be 256 (e.g., offset = 192 and len = 64).
+        // Simply adding these as u8 would result in an overflow.
+        let stop = offset as u16 + len as u16;
+
+        // The module memory map is only 256 bytes long, reject reads that attempt to go beyond
+        // that.
+        if stop > 256 {
+            return Err(Error::ByteOutOfRange(stop as usize));
+        }
+
+        (offset as u16..stop)
             .step_by(usize::from(Self::SIZE))
             .map(|new_offset| {
                 // The length is up to SIZE, or the remainder of the entire
                 // operation, whichever is smaller.
-                let remainder = end - new_offset;
+                let remainder = (stop - new_offset) as u8;
                 let new_len = Self::SIZE.min(remainder);
-                Self::build_one(page, new_offset, new_len)
+                Self::build_one(page, new_offset as u8, new_len)
             })
             .collect()
     }
@@ -89,6 +98,8 @@ impl LargeMemoryAccess<mgmt::cmis::Page> for mgmt::MemoryWrite {
 
 #[cfg(test)]
 mod tests {
+    use transceiver_messages::mgmt::cmis::UpperPage;
+
     use super::mgmt;
     use super::LargeMemoryAccess;
     use super::MemoryPage;
@@ -185,16 +196,16 @@ mod tests {
     fn test_build_large_memory_access_at_boundary() {
         // test at 256
         test_build_large_memory_access_impl::<mgmt::MemoryRead, mgmt::cmis::Page>(
-            mgmt::cmis::Page::Lower, 192, 64
+            mgmt::cmis::Page::Upper(UpperPage::new_unbanked(0).unwrap()), 192, 64
         );
         test_build_large_memory_access_impl::<mgmt::MemoryWrite, mgmt::cmis::Page>(
-            mgmt::cmis::Page::Lower, 192, 64
+            mgmt::cmis::Page::Upper(UpperPage::new_unbanked(0).unwrap()), 192, 64
         );
         test_build_large_memory_access_impl::<mgmt::MemoryRead, mgmt::sff8636::Page>(
-            mgmt::sff8636::Page::Lower, 192, 64
+            mgmt::sff8636::Page::Upper(mgmt::sff8636::UpperPage::new(0).unwrap()), 192, 64
         );
         test_build_large_memory_access_impl::<mgmt::MemoryWrite, mgmt::sff8636::Page>(
-            mgmt::sff8636::Page::Lower, 192, 64
+            mgmt::sff8636::Page::Upper(mgmt::sff8636::UpperPage::new(0).unwrap()), 192, 64
         );
     }
 
@@ -202,16 +213,16 @@ mod tests {
     fn test_build_large_memory_access_exceeding_boundary() {
         // test at 256
         test_build_large_memory_access_impl::<mgmt::MemoryRead, mgmt::cmis::Page>(
-            mgmt::cmis::Page::Lower, 192, 65
+            mgmt::cmis::Page::Upper(UpperPage::new_unbanked(0).unwrap()), 192, 65
         );
         test_build_large_memory_access_impl::<mgmt::MemoryWrite, mgmt::cmis::Page>(
-            mgmt::cmis::Page::Lower, 192, 65
+            mgmt::cmis::Page::Upper(UpperPage::new_unbanked(0).unwrap()), 192, 65
         );
         test_build_large_memory_access_impl::<mgmt::MemoryRead, mgmt::sff8636::Page>(
-            mgmt::sff8636::Page::Lower, 192, 65
+            mgmt::sff8636::Page::Upper(mgmt::sff8636::UpperPage::new(0).unwrap()), 192, 65
         );
         test_build_large_memory_access_impl::<mgmt::MemoryWrite, mgmt::sff8636::Page>(
-            mgmt::sff8636::Page::Lower, 192, 65
+            mgmt::sff8636::Page::Upper(mgmt::sff8636::UpperPage::new(0).unwrap()), 192, 65
         );
     }
 
@@ -222,14 +233,19 @@ mod tests {
         mgmt::Page: From<P>,
         mgmt::MemoryRead: LargeMemoryAccess<P>,
     {
-        let reads = mgmt::MemoryRead::build_many(page, offset, len)
-            .expect("failed to build multiple accesses");
-        assert_eq!(reads.len(), usize::from(len / T::SIZE));
+        let idx = offset as usize + len as usize;
+        if idx <= 256 {
+            let reads = mgmt::MemoryRead::build_many(page, offset, len)
+                .expect("failed to build multiple accesses");
+            assert_eq!(reads.len(), usize::from(len / T::SIZE));
 
-        for (read, expected_offset) in reads.into_iter().zip((0..).step_by(T::SIZE as _)) {
-            assert_eq!(read.offset(), expected_offset);
-            assert_eq!(read.len(), T::SIZE);
-            assert_eq!(read.page(), &mgmt::Page::from(page));
+            for (read, expected_offset) in reads.into_iter().zip((offset..).step_by(T::SIZE as _)) {
+                assert_eq!(read.offset(), expected_offset);
+                assert_eq!(read.len(), T::SIZE);
+                assert_eq!(read.page(), &mgmt::Page::from(page));
+            }
+        } else {
+            assert_eq!(true, mgmt::MemoryRead::build_many(page, offset, len).is_err())
         }
     }
 }

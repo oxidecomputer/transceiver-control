@@ -217,6 +217,11 @@ pub enum Error {
     /// A failure interacting with a transceiver module.
     #[error("Error interacting with transceiver module")]
     Transceiver(#[from] TransceiverError),
+
+    /// A failure when an I2C transaction will attempt to access outside the
+    /// 256 memory map size.
+    #[error("Error constructing an I2C transaction")]
+    ByteOutOfRange(usize),
 }
 
 impl From<mgmt::Error> for Error {
