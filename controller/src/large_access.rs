@@ -54,9 +54,9 @@ where
             .map(|new_offset| {
                 // The length is up to SIZE, or the remainder of the entire
                 // operation, whichever is smaller.
-                let remainder = (stop - new_offset) as u8;
+                let remainder = u8::try_from(stop - new_offset).unwrap();
                 let new_len = Self::SIZE.min(remainder);
-                Self::build_one(page, new_offset as u8, new_len)
+                Self::build_one(page, u8::try_from(new_offset).unwrap(), new_len)
             })
             .collect()
     }

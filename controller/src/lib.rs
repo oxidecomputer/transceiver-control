@@ -220,7 +220,7 @@ pub enum Error {
 
     /// A failure when an I2C transaction will attempt to access outside the
     /// 256 memory map size.
-    #[error("Error constructing an I2C transaction")]
+    #[error("End of read (<the value>) is out of the range [0, 255]")]
     ByteOutOfRange(usize),
 }
 
