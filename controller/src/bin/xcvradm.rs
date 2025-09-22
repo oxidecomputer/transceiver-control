@@ -471,6 +471,18 @@ enum Cmd {
         /// This may be specified in hex, starting with `0x`, or in decimal.
         #[arg(value_parser = read_u8)]
         len: u8,
+
+        /// Print the output in a parseable format.
+        #[arg(long, short)]
+        parseable: bool,
+
+        /// Select the output fields to be displayed.
+        #[arg(long, short, requires = "parseable")]
+        output: Vec<ReadDataFields>,
+
+        /// Character used to separate output fields. (Default: :::)
+        #[arg(long, requires = "parseable")]
+        output_separator: Option<String>,
     },
 
     /// Write the lower page of a set of transceiver modules.
@@ -557,6 +569,18 @@ enum Cmd {
         /// This may be specified in hex, starting with `0x`, or in decimal.
         #[arg(value_parser = read_u8)]
         len: u8,
+
+        /// Print the output in a parseable format.
+        #[arg(long, short)]
+        parseable: bool,
+
+        /// Select the output fields to be displayed.
+        #[arg(long, short, requires = "parseable")]
+        output: Vec<ReadDataFields>,
+
+        /// Character used to separate output fields. (Default: :::)
+        #[arg(long, requires = "parseable")]
+        output_separator: Option<String>,
     },
 
     /// Write the upper page of a set of transceiver modules.
@@ -808,7 +832,12 @@ enum VendorInfoFields {
 }
 
 #[derive(Clone, ValueEnum, PartialEq)]
-enum ReadLowerFields {}
+enum ReadDataFields {
+    /// The port number of the switch.
+    Port,
+    /// The requested data from the transceiver module.
+    Data,
+}
 
 #[derive(Clone, ValueEnum, PartialEq)]
 enum ReadUpperFields {}
@@ -1159,10 +1188,20 @@ async fn main() -> anyhow::Result<()> {
             binary,
             offset,
             len,
+            parseable,
+            output,
+            output_separator,
         } => {
             if len == 0 {
                 return Ok(());
             }
+
+            let kind = if parseable {
+                OutputKind::parseable(output, output_separator)
+            } else {
+                OutputKind::Default
+            };
+
             let reads = match (sff, cmis) {
                 (true, false) => MemoryRead::build_many(sff8636::Page::Lower, offset, len)
                     .context("Failed to setup lower page memory read")?,
@@ -1180,7 +1219,7 @@ async fn main() -> anyhow::Result<()> {
                     .context("Failed to read transceiver modules")?;
                 read_result = read_result.append(&res).unwrap();
             }
-            print_read_data(&read_result, binary);
+            print_read_data(&read_result, binary, &kind);
             if !args.ignore_errors {
                 print_failures(&read_result.failures);
             }
@@ -1219,10 +1258,20 @@ async fn main() -> anyhow::Result<()> {
             bank,
             offset,
             len,
+            parseable,
+            output,
+            output_separator,
         } => {
             if len == 0 {
                 return Ok(());
             }
+
+            let kind = if parseable {
+                OutputKind::parseable(output, output_separator)
+            } else {
+                OutputKind::Default
+            };
+
             let reads = match (sff, cmis) {
                 (true, false) => {
                     let page =
@@ -1252,7 +1301,7 @@ async fn main() -> anyhow::Result<()> {
                     .context("Failed to read transceiver modules")?;
                 read_result = read_result.append(&res).unwrap();
             }
-            print_read_data(&read_result, binary);
+            print_read_data(&read_result, binary, &kind);
             if !args.ignore_errors {
                 print_failures(&read_result.failures);
             }
@@ -1611,8 +1660,12 @@ fn print_all_status(status_result: &ExtendedStatusResult) {
     }
 }
 
-fn print_read_data(read_result: &ReadResult, binary: bool) {
-    println!("Port Data");
+fn print_read_data(read_result: &ReadResult, binary: bool, kind: &OutputKind<ReadDataFields>) {
+    match kind {
+        OutputKind::Default => println!("Port Data"),
+        OutputKind::Parseable { fields, separator } => print_parseable_header(fields, separator),
+    }
+
     let fmt_data = if binary {
         |byte| format!("0b{byte:08b}")
     } else {
@@ -1624,7 +1677,19 @@ fn print_read_data(read_result: &ReadResult, binary: bool) {
         .zip(read_result.data().iter())
     {
         let formatted_data = each.iter().map(fmt_data).collect::<Vec<_>>().join(",");
-        println!("{port:>WIDTH$} [{formatted_data}]",);
+        match kind {
+            OutputKind::Default => println!("{port:>WIDTH$} [{formatted_data}]"),
+            OutputKind::Parseable { fields, separator } => {
+                fields
+                    .iter()
+                    .map(|field| match field {
+                        ReadDataFields::Port => port.to_string(),
+                        ReadDataFields::Data => formatted_data.clone(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(separator.as_str());
+            }
+        }
     }
 }
 
