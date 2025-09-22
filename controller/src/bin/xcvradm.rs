@@ -240,7 +240,10 @@ enum OutputKind<T> {
 
 impl<T> OutputKind<T> {
     fn parseable(fields: Vec<T>, separator: Option<String>) -> Self {
-        OutputKind::Parseable { fields, separator: ParseableOutputSeparator::new(separator) }
+        OutputKind::Parseable {
+            fields,
+            separator: ParseableOutputSeparator::new(separator),
+        }
     }
 }
 
@@ -281,7 +284,9 @@ enum StatusKind {
     // Print all bits from all modules.
     All,
     // Print the parseable representation of each set of status bits.
-    Parseable { separator: ParseableOutputSeparator },
+    Parseable {
+        separator: ParseableOutputSeparator,
+    },
 }
 
 #[derive(Clone, Copy, Debug, clap::Parser)]
@@ -331,7 +336,7 @@ enum Cmd {
         /// a "1" is printed. Otherwise a "0" is printed.
         #[arg(long)]
         all: bool,
-        
+
         /// Print the output in a parseable format.
         #[arg(long, short, conflicts_with_all = ["all", "with", "without"])]
         parseable: bool,
@@ -803,12 +808,10 @@ enum VendorInfoFields {
 }
 
 #[derive(Clone, ValueEnum, PartialEq)]
-enum ReadLowerFields {
-}
+enum ReadLowerFields {}
 
 #[derive(Clone, ValueEnum, PartialEq)]
-enum ReadUpperFields {
-}
+enum ReadUpperFields {}
 
 #[derive(Clone, ValueEnum, PartialEq)]
 enum MemoryModelFields {
@@ -955,9 +958,18 @@ async fn main() -> anyhow::Result<()> {
     let modules = address_transceivers(&controller, transceivers).await?;
 
     match args.cmd {
-        Cmd::Status { with, without, all, parseable, output, output_separator } => {
+        Cmd::Status {
+            with,
+            without,
+            all,
+            parseable,
+            output,
+            output_separator,
+        } => {
             let kind = match (with, without, all, parseable) {
-                (None, None, false, true) => StatusKind::Parseable { separator: ParseableOutputSeparator::new(output_separator) },
+                (None, None, false, true) => StatusKind::Parseable {
+                    separator: ParseableOutputSeparator::new(output_separator),
+                },
                 (None, None, false, false) => StatusKind::Normal,
                 (None, None, true, false) => StatusKind::All,
                 (maybe_with, maybe_without, false, false) => {
@@ -1018,7 +1030,11 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
-        Cmd::Power { parseable, output, output_separator } => {
+        Cmd::Power {
+            parseable,
+            output,
+            output_separator,
+        } => {
             let kind = if parseable {
                 OutputKind::parseable(output, output_separator)
             } else {
@@ -1095,7 +1111,11 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
-        Cmd::Identify { parseable, output, output_separator } => {
+        Cmd::Identify {
+            parseable,
+            output,
+            output_separator,
+        } => {
             let kind = if parseable {
                 OutputKind::parseable(output, output_separator)
             } else {
@@ -1112,7 +1132,11 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
-        Cmd::VendorInfo { parseable, output, output_separator } => {
+        Cmd::VendorInfo {
+            parseable,
+            output,
+            output_separator,
+        } => {
             let kind = if parseable {
                 OutputKind::parseable(output, output_separator)
             } else {
@@ -1272,7 +1296,11 @@ async fn main() -> anyhow::Result<()> {
                 print_failures(&write_result.failures);
             }
         }
-        Cmd::MemoryModel { parseable, output, output_separator } => {
+        Cmd::MemoryModel {
+            parseable,
+            output,
+            output_separator,
+        } => {
             let kind = if parseable {
                 OutputKind::parseable(output, output_separator)
             } else {
@@ -1313,7 +1341,11 @@ async fn main() -> anyhow::Result<()> {
                 print_failures(&ack_result.failures);
             }
         }
-        Cmd::Leds { parseable, output, output_separator } => {
+        Cmd::Leds {
+            parseable,
+            output,
+            output_separator,
+        } => {
             let kind = if parseable {
                 OutputKind::parseable(output, output_separator)
             } else {
@@ -1338,7 +1370,11 @@ async fn main() -> anyhow::Result<()> {
                 print_failures(&ack_result.failures);
             }
         }
-        Cmd::Monitors { parseable, output, output_separator } => {
+        Cmd::Monitors {
+            parseable,
+            output,
+            output_separator,
+        } => {
             let kind = if parseable {
                 OutputKind::parseable(output, output_separator)
             } else {
@@ -1467,29 +1503,51 @@ fn print_power_mode(mode_result: &PowerModeResult, kind: &OutputKind<PowerFields
                 println!("{port:>WIDTH$}  {state:POWER_WIDTH$}  {over}",);
             }
             OutputKind::Parseable { fields, separator } => {
-                fields.iter().map(|field| match field {
-                    PowerFields::Port => port.to_string(),
-                    PowerFields::Power => state.clone(),
-                    PowerFields::Override => over.to_string(),
-                }).collect::<Vec<_>>().join(separator.as_str());
+                fields
+                    .iter()
+                    .map(|field| match field {
+                        PowerFields::Port => port.to_string(),
+                        PowerFields::Power => state.clone(),
+                        PowerFields::Override => over.to_string(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(separator.as_str());
             }
         }
     }
 }
 
-fn print_module_status(status_result: &ExtendedStatusResult, kind: StatusKind, output: &[StatusFields]) {
+fn print_module_status(
+    status_result: &ExtendedStatusResult,
+    kind: StatusKind,
+    output: &[StatusFields],
+) {
     match kind {
         StatusKind::Parseable { separator } => {
-            println!("{}", output.iter().map(|field| match field {
-                StatusFields::Port => "port",
-                StatusFields::Status => "status",
-            }).collect::<Vec<_>>().join(separator.as_str()));
+            println!(
+                "{}",
+                output
+                    .iter()
+                    .map(|field| match field {
+                        StatusFields::Port => "port",
+                        StatusFields::Status => "status",
+                    })
+                    .collect::<Vec<_>>()
+                    .join(separator.as_str())
+            );
 
             for (port, status) in status_result.iter() {
-                println!("{}", output.iter().map(|field| match field {
-                    StatusFields::Port => port.to_string(),
-                    StatusFields::Status => status.to_string(),
-                }).collect::<Vec<_>>().join(separator.as_str()));
+                println!(
+                    "{}",
+                    output
+                        .iter()
+                        .map(|field| match field {
+                            StatusFields::Port => port.to_string(),
+                            StatusFields::Status => status.to_string(),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(separator.as_str())
+                );
             }
         }
         StatusKind::Normal => {
@@ -1595,11 +1653,15 @@ fn print_module_identifier(ident_result: &IdentifierResult, kind: &OutputKind<Id
                 println!("{port:>WIDTH$} {ident:ID_BYTE_WIDTH$} {id}");
             }
             OutputKind::Parseable { fields, separator } => {
-                fields.iter().map(|field| match field {
-                    IdentifyFields::Port => port.to_string(),
-                    IdentifyFields::Ident => ident.clone(),
-                    IdentifyFields::Description => id.to_string(),
-                }).collect::<Vec<_>>().join(separator.as_str());
+                fields
+                    .iter()
+                    .map(|field| match field {
+                        IdentifyFields::Port => port.to_string(),
+                        IdentifyFields::Ident => ident.clone(),
+                        IdentifyFields::Description => id.to_string(),
+                    })
+                    .collect::<Vec<_>>()
+                    .join(separator.as_str());
             }
         }
     }
@@ -1607,8 +1669,7 @@ fn print_module_identifier(ident_result: &IdentifierResult, kind: &OutputKind<Id
 
 fn print_vendor_info(vendor_result: &VendorInfoResult, kind: &OutputKind<VendorInfoFields>) {
     match kind {
-        OutputKind::Default => 
-        println!(
+        OutputKind::Default => println!(
             "Port {:ID_DEBUG_WIDTH$} {:VENDOR_WIDTH$} {:PART_WIDTH$} \
             {:REV_WIDTH$} {:SERIAL_WIDTH$} {:DATE_WIDTH$}",
             "Identifier", "Vendor", "Part", "Rev", "Serial", "Mfg date"
@@ -1633,25 +1694,40 @@ fn print_vendor_info(vendor_result: &VendorInfoResult, kind: &OutputKind<VendorI
                 println!(
                     "{port:>WIDTH$} {:ID_DEBUG_WIDTH$} {:VENDOR_WIDTH$} \
                     {:PART_WIDTH$} {:REV_WIDTH$} {:SERIAL_WIDTH$} {:DATE_WIDTH$}",
-                    ident, info.vendor.name, info.vendor.part, info.vendor.revision, info.vendor.serial, date,
+                    ident,
+                    info.vendor.name,
+                    info.vendor.part,
+                    info.vendor.revision,
+                    info.vendor.serial,
+                    date,
                 );
             }
             OutputKind::Parseable { fields, separator } => {
-                println!("{}", fields.iter().map(|field| match field  {
-                    VendorInfoFields::Port => port.to_string(),
-                    VendorInfoFields::Identifier => ident.clone(),
-                    VendorInfoFields::Vendor => info.vendor.name.clone(),
-                    VendorInfoFields::Part => info.vendor.part.clone(),
-                    VendorInfoFields::Rev => info.vendor.revision.clone(),
-                    VendorInfoFields::Serial => info.vendor.serial.clone(),
-                    VendorInfoFields::ManufacturedDate => date.to_string(),
-                }).collect::<Vec<_>>().join(separator.as_str()));
+                println!(
+                    "{}",
+                    fields
+                        .iter()
+                        .map(|field| match field {
+                            VendorInfoFields::Port => port.to_string(),
+                            VendorInfoFields::Identifier => ident.clone(),
+                            VendorInfoFields::Vendor => info.vendor.name.clone(),
+                            VendorInfoFields::Part => info.vendor.part.clone(),
+                            VendorInfoFields::Rev => info.vendor.revision.clone(),
+                            VendorInfoFields::Serial => info.vendor.serial.clone(),
+                            VendorInfoFields::ManufacturedDate => date.to_string(),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(separator.as_str())
+                );
             }
         }
     }
 }
 
-fn print_module_memory_model(model_result: &MemoryModelResult, kind: &OutputKind<MemoryModelFields>) {
+fn print_module_memory_model(
+    model_result: &MemoryModelResult,
+    kind: &OutputKind<MemoryModelFields>,
+) {
     match kind {
         OutputKind::Default => println!("Port Model"),
         OutputKind::Parseable { fields, separator } => print_parseable_header(fields, separator),
@@ -1665,10 +1741,17 @@ fn print_module_memory_model(model_result: &MemoryModelResult, kind: &OutputKind
         match kind {
             OutputKind::Default => println!("{port:>WIDTH$} {model}"),
             OutputKind::Parseable { fields, separator } => {
-                println!("{}", fields.iter().map(|field| match field  {
-                    MemoryModelFields::Port => port.to_string(),
-                    MemoryModelFields::Model => model.to_string(),
-                }).collect::<Vec<_>>().join(separator.as_str()));
+                println!(
+                    "{}",
+                    fields
+                        .iter()
+                        .map(|field| match field {
+                            MemoryModelFields::Port => port.to_string(),
+                            MemoryModelFields::Model => model.to_string(),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(separator.as_str())
+                );
             }
         }
     }
@@ -1730,10 +1813,10 @@ fn print_monitors(monitor_result: &MonitorResult, kind: &OutputKind<MonitorField
                 if need_newline {
                     println!();
                 }
-        
+
                 // Start by printing the module address.
                 println!("Port {port}");
-        
+
                 // Print module temperature, if supported.
                 print!("  {:>NAME_WIDTH$}: ", "Temperature (C)");
                 if let Some(temp) = monitor.temperature {
@@ -1741,7 +1824,7 @@ fn print_monitors(monitor_result: &MonitorResult, kind: &OutputKind<MonitorField
                 } else {
                     println!("{unsupported}");
                 }
-        
+
                 // Print supply voltage, if supported.
                 print!("  {:>NAME_WIDTH$}: ", "Supply voltage (V)");
                 if let Some(volt) = monitor.supply_voltage {
@@ -1749,7 +1832,7 @@ fn print_monitors(monitor_result: &MonitorResult, kind: &OutputKind<MonitorField
                 } else {
                     println!("{unsupported}");
                 }
-        
+
                 // Print the receiver power per-lane.
                 //
                 // Rx power is measured in one of two ways, either an average or
@@ -1767,7 +1850,7 @@ fn print_monitors(monitor_result: &MonitorResult, kind: &OutputKind<MonitorField
                     print!("  {:>NAME_WIDTH$}: ", "Rx power (mW)");
                     println!("{unsupported}");
                 }
-        
+
                 // Print the Tx bias current.
                 print!("  {:>NAME_WIDTH$}: ", "Tx bias (mA)");
                 if let Some(tx_bias) = &monitor.transmitter_bias_current {
@@ -1775,7 +1858,7 @@ fn print_monitors(monitor_result: &MonitorResult, kind: &OutputKind<MonitorField
                 } else {
                     println!("{unsupported}");
                 }
-        
+
                 // Print the Tx output power.
                 print!("  {:>NAME_WIDTH$}: ", "Tx power (mW)");
                 if let Some(tx_pow) = &monitor.transmitter_power {
@@ -1783,7 +1866,7 @@ fn print_monitors(monitor_result: &MonitorResult, kind: &OutputKind<MonitorField
                 } else {
                     println!("{unsupported}");
                 }
-        
+
                 // Print each auxiliary monitor.
                 //
                 // The requires that we print the "observable", the thing being measured
@@ -1801,20 +1884,24 @@ fn print_monitors(monitor_result: &MonitorResult, kind: &OutputKind<MonitorField
                 } else {
                     println!("  {:>NAME_WIDTH$}: {unsupported}", "Aux 1");
                 }
-        
+
                 if let Some(Some(aux2)) = monitor.aux_monitors.map(|aux| aux.aux2) {
                     let (name, value) = match aux2 {
                         Aux2Monitor::TecCurrent(c) => ("Aux 2, TEC current (mA)", format!("{c}")),
-                        Aux2Monitor::LaserTemperature(t) => ("Aux 2, Laser temp (C)", format!("{t}")),
+                        Aux2Monitor::LaserTemperature(t) => {
+                            ("Aux 2, Laser temp (C)", format!("{t}"))
+                        }
                     };
                     println!("  {name:>NAME_WIDTH$}: {value}");
                 } else {
                     println!("  {:>NAME_WIDTH$}: {unsupported}", "Aux 2");
                 }
-        
+
                 if let Some(Some(aux3)) = monitor.aux_monitors.map(|aux| aux.aux3) {
                     let (name, value) = match aux3 {
-                        Aux3Monitor::LaserTemperature(t) => ("Aux 3, Laser temp (C)", format!("{t}")),
+                        Aux3Monitor::LaserTemperature(t) => {
+                            ("Aux 3, Laser temp (C)", format!("{t}"))
+                        }
                         Aux3Monitor::AdditionalSupplyVoltage(v) => {
                             ("Aux 3, Supply voltage 2 (V)", format!("{v}"))
                         }
@@ -1827,26 +1914,47 @@ fn print_monitors(monitor_result: &MonitorResult, kind: &OutputKind<MonitorField
                 need_newline = true;
             }
             OutputKind::Parseable { fields, separator } => {
-                println!("{}", fields.iter().map(|field| match field {
-                    MonitorFields::Port => port.to_string(),
-                    MonitorFields::Temperature => monitor.temperature.map(|t| t.to_string()).unwrap_or_else(|| String::from("unsupported")),
-                    MonitorFields::SupplyVoltage => monitor.supply_voltage.map(|v| v.to_string()).unwrap_or_else(|| String::from("unsupported")),
-                    MonitorFields::AverageRxPower => monitor.receiver_power.as_ref().map(|rx| {
-                        format!("[{}]", display_list(rx.iter().map(|x| x.value())))
-                    }).unwrap_or_else(|| String::from("unsupported")),
-                    MonitorFields::TxBias => monitor.transmitter_bias_current.as_ref().map(|tx| {
-                        format!("[{}]", display_list(tx.iter()))
-                    }).unwrap_or_else(|| String::from("unsupported")),
-                    MonitorFields::TxPower => monitor.transmitter_power.as_ref().map(|tx| {
-                        format!("[{}]", display_list(tx.iter()))
-                    }).unwrap_or_else(|| String::from("unsupported")),
-                    // MonitorFields::Aux1 => monitor.temperature.map(|t| t.to_string()).unwrap_or_else(|| String::from("unsupported")),
-                    MonitorFields::Aux1 => unimplemented!(),
-                    // MonitorFields::Aux2 => monitor.temperature.map(|t| t.to_string()).unwrap_or_else(|| String::from("unsupported")),
-                    MonitorFields::Aux2 => unimplemented!(),
-                    // MonitorFields::Aux3 => monitor.temperature.map(|t| t.to_string()).unwrap_or_else(|| String::from("unsupported")),
-                    MonitorFields::Aux3 => unimplemented!(),
-                }).collect::<Vec<_>>().join(separator.as_str()));
+                println!(
+                    "{}",
+                    fields
+                        .iter()
+                        .map(|field| match field {
+                            MonitorFields::Port => port.to_string(),
+                            MonitorFields::Temperature => monitor
+                                .temperature
+                                .map(|t| t.to_string())
+                                .unwrap_or_else(|| String::from("unsupported")),
+                            MonitorFields::SupplyVoltage => monitor
+                                .supply_voltage
+                                .map(|v| v.to_string())
+                                .unwrap_or_else(|| String::from("unsupported")),
+                            MonitorFields::AverageRxPower => monitor
+                                .receiver_power
+                                .as_ref()
+                                .map(|rx| {
+                                    format!("[{}]", display_list(rx.iter().map(|x| x.value())))
+                                })
+                                .unwrap_or_else(|| String::from("unsupported")),
+                            MonitorFields::TxBias => monitor
+                                .transmitter_bias_current
+                                .as_ref()
+                                .map(|tx| { format!("[{}]", display_list(tx.iter())) })
+                                .unwrap_or_else(|| String::from("unsupported")),
+                            MonitorFields::TxPower => monitor
+                                .transmitter_power
+                                .as_ref()
+                                .map(|tx| { format!("[{}]", display_list(tx.iter())) })
+                                .unwrap_or_else(|| String::from("unsupported")),
+                            // MonitorFields::Aux1 => monitor.temperature.map(|t| t.to_string()).unwrap_or_else(|| String::from("unsupported")),
+                            MonitorFields::Aux1 => unimplemented!(),
+                            // MonitorFields::Aux2 => monitor.temperature.map(|t| t.to_string()).unwrap_or_else(|| String::from("unsupported")),
+                            MonitorFields::Aux2 => unimplemented!(),
+                            // MonitorFields::Aux3 => monitor.temperature.map(|t| t.to_string()).unwrap_or_else(|| String::from("unsupported")),
+                            MonitorFields::Aux3 => unimplemented!(),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(separator.as_str())
+                );
             }
         }
     }
@@ -2043,14 +2151,20 @@ fn print_sff8636_datapath(
     println!("{}", builder.build().with(Style::empty()));
 }
 
-fn print_parseable_header<T>(fields: &[T], separator: &ParseableOutputSeparator) where T: ValueEnum {
-    let header = fields.iter().map(|field| {
-        field
-            .to_possible_value()
-            .map(|value| value.get_name().to_string())
-            .expect("Unknown field {:field?}")
-    })
-    .collect::<Vec<_>>().join(separator.as_str());
+fn print_parseable_header<T>(fields: &[T], separator: &ParseableOutputSeparator)
+where
+    T: ValueEnum,
+{
+    let header = fields
+        .iter()
+        .map(|field| {
+            field
+                .to_possible_value()
+                .map(|value| value.get_name().to_string())
+                .expect("Unknown field {:field?}")
+        })
+        .collect::<Vec<_>>()
+        .join(separator.as_str());
 
     println!("{}", header);
 }
