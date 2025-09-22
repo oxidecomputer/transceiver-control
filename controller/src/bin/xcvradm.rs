@@ -48,7 +48,6 @@ use transceiver_decode::Datapath;
 use transceiver_decode::ReceiverPower;
 use transceiver_decode::Sff8636Datapath;
 use transceiver_decode::SffComplianceCode;
-use transceiver_decode::VendorInfo;
 use transceiver_messages::filter_module_data;
 use transceiver_messages::mac::MacAddrs;
 use transceiver_messages::message::ExtendedStatus;
