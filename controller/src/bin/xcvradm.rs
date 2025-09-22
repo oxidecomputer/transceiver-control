@@ -1938,43 +1938,30 @@ fn print_monitors(monitor_result: &MonitorResult, kind: &OutputKind<MonitorField
                 // as well. Each line is formatted like:
                 //
                 // Aux N, <observable> (<units>): <value>
-                if let Some(Some(aux1)) = monitor.aux_monitors.map(|aux| aux.aux1) {
-                    let (name, value) = match aux1 {
-                        Aux1Monitor::TecCurrent(c) => ("Aux 1, TEC current (mA)", format!("{c}")),
-                        Aux1Monitor::Custom(c) => {
-                            ("Aux 1, Custom", format!("[0x{:02x},0x{:02x}]", c[0], c[1]))
-                        }
-                    };
-                    println!("  {name:>NAME_WIDTH$}: {value}");
+                let (aux1_name, aux1_value) =
+                    aux1_monitor_value(monitor.aux_monitors.and_then(|aux| aux.aux1));
+                if let Some(aux1_value) = aux1_value {
+                    println!("  {aux1_name:>NAME_WIDTH$}: {aux1_value}");
                 } else {
-                    println!("  {:>NAME_WIDTH$}: {unsupported}", "Aux 1");
+                    println!("  {:>NAME_WIDTH$}: {unsupported}", aux1_name);
                 }
 
-                if let Some(Some(aux2)) = monitor.aux_monitors.map(|aux| aux.aux2) {
-                    let (name, value) = match aux2 {
-                        Aux2Monitor::TecCurrent(c) => ("Aux 2, TEC current (mA)", format!("{c}")),
-                        Aux2Monitor::LaserTemperature(t) => {
-                            ("Aux 2, Laser temp (C)", format!("{t}"))
-                        }
-                    };
-                    println!("  {name:>NAME_WIDTH$}: {value}");
+                let (aux2_name, aux2_value) =
+                    aux2_monitor_value(monitor.aux_monitors.and_then(|aux| aux.aux2));
+                if let Some(aux2_value) = aux2_value {
+                    println!("  {aux2_name:>NAME_WIDTH$}: {aux2_value}");
                 } else {
-                    println!("  {:>NAME_WIDTH$}: {unsupported}", "Aux 2");
+                    println!("  {:>NAME_WIDTH$}: {unsupported}", aux2_name);
                 }
 
-                if let Some(Some(aux3)) = monitor.aux_monitors.map(|aux| aux.aux3) {
-                    let (name, value) = match aux3 {
-                        Aux3Monitor::LaserTemperature(t) => {
-                            ("Aux 3, Laser temp (C)", format!("{t}"))
-                        }
-                        Aux3Monitor::AdditionalSupplyVoltage(v) => {
-                            ("Aux 3, Supply voltage 2 (V)", format!("{v}"))
-                        }
-                    };
-                    println!("  {name:>NAME_WIDTH$}: {value}");
+                let (aux3_name, aux3_value) =
+                    aux3_monitor_value(monitor.aux_monitors.and_then(|aux| aux.aux3));
+                if let Some(aux3_value) = aux3_value {
+                    println!("  {aux3_name:>NAME_WIDTH$}: {aux3_value}");
                 } else {
-                    println!("  {:>NAME_WIDTH$}: {unsupported}", "Aux 3");
+                    println!("  {:>NAME_WIDTH$}: {unsupported}", aux3_name);
                 }
+
                 // Print additional newline between each port for clarity.
                 need_newline = true;
             }
@@ -2010,18 +1997,68 @@ fn print_monitors(monitor_result: &MonitorResult, kind: &OutputKind<MonitorField
                                 .as_ref()
                                 .map(|tx| { format!("[{}]", display_list(tx.iter())) })
                                 .unwrap_or_else(|| String::from("unsupported")),
-                            // MonitorFields::Aux1 => monitor.temperature.map(|t| t.to_string()).unwrap_or_else(|| String::from("unsupported")),
-                            MonitorFields::Aux1 => unimplemented!(),
-                            // MonitorFields::Aux2 => monitor.temperature.map(|t| t.to_string()).unwrap_or_else(|| String::from("unsupported")),
-                            MonitorFields::Aux2 => unimplemented!(),
-                            // MonitorFields::Aux3 => monitor.temperature.map(|t| t.to_string()).unwrap_or_else(|| String::from("unsupported")),
-                            MonitorFields::Aux3 => unimplemented!(),
+                            MonitorFields::Aux1 => aux1_monitor_value(
+                                monitor.aux_monitors.and_then(|monitor| monitor.aux1)
+                            )
+                            .1
+                            .map(|value| value)
+                            .unwrap_or_else(|| String::from("unsupported")),
+                            MonitorFields::Aux2 => aux2_monitor_value(
+                                monitor.aux_monitors.and_then(|monitor| monitor.aux2)
+                            )
+                            .1
+                            .map(|value| value)
+                            .unwrap_or_else(|| String::from("unsupported")),
+                            MonitorFields::Aux3 => aux3_monitor_value(
+                                monitor.aux_monitors.and_then(|monitor| monitor.aux3)
+                            )
+                            .1
+                            .map(|value| value)
+                            .unwrap_or_else(|| String::from("unsupported")),
                         })
                         .collect::<Vec<_>>()
                         .join(separator.as_str())
                 );
             }
         }
+    }
+}
+
+fn aux1_monitor_value(monitor: Option<Aux1Monitor>) -> (&'static str, Option<String>) {
+    if let Some(aux1) = monitor {
+        match aux1 {
+            Aux1Monitor::TecCurrent(c) => ("Aux 1, TEC current (mA)", Some(format!("{c}"))),
+            Aux1Monitor::Custom(c) => (
+                "Aux 1, Custom",
+                Some(format!("[0x{:02x},0x{:02x}]", c[0], c[1])),
+            ),
+        }
+    } else {
+        ("Aux 1", None)
+    }
+}
+
+fn aux2_monitor_value(monitor: Option<Aux2Monitor>) -> (&'static str, Option<String>) {
+    if let Some(aux2) = monitor {
+        match aux2 {
+            Aux2Monitor::TecCurrent(c) => ("Aux 2, TEC current (mA)", Some(format!("{c}"))),
+            Aux2Monitor::LaserTemperature(t) => ("Aux 2, Laser temp (C)", Some(format!("{t}"))),
+        }
+    } else {
+        ("Aux 2", None)
+    }
+}
+
+fn aux3_monitor_value(monitor: Option<Aux3Monitor>) -> (&'static str, Option<String>) {
+    if let Some(aux3) = monitor {
+        match aux3 {
+            Aux3Monitor::LaserTemperature(t) => ("Aux 3, Laser temp (C)", Some(format!("{t}"))),
+            Aux3Monitor::AdditionalSupplyVoltage(v) => {
+                ("Aux 3, Supply voltage 2 (V)", Some(format!("{v}")))
+            }
+        }
+    } else {
+        ("Aux 3", None)
     }
 }
 
