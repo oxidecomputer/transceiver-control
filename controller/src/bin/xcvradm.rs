@@ -265,7 +265,7 @@ impl ParseableOutputSeparator {
 impl ParseableOutputSeparator {
     fn as_str(&self) -> &str {
         match self {
-            ParseableOutputSeparator::Default => ":::",
+            ParseableOutputSeparator::Default => ":",
             ParseableOutputSeparator::Custom(s) => s.as_str(),
         }
     }
@@ -345,7 +345,7 @@ enum Cmd {
         #[arg(long, short, requires = "parseable")]
         output: Vec<StatusFields>,
 
-        /// Character used to separate output fields. (Default: :::)
+        /// Character used to separate output fields. (Default: :)
         #[arg(long, requires = "parseable")]
         output_separator: Option<String>,
     },
@@ -376,7 +376,7 @@ enum Cmd {
         #[arg(long, short, requires = "parseable")]
         output: Vec<PowerFields>,
 
-        /// Character used to separate output fields. (Default: :::)
+        /// Character used to separate output fields. (Default: :)
         #[arg(long, requires = "parseable")]
         output_separator: Option<String>,
     },
@@ -425,7 +425,7 @@ enum Cmd {
         #[arg(long, short, requires = "parseable")]
         output: Vec<IdentifyFields>,
 
-        /// Character used to separate output fields. (Default: :::)
+        /// Character used to separate output fields. (Default: :)
         #[arg(long, requires = "parseable")]
         output_separator: Option<String>,
     },
@@ -440,7 +440,7 @@ enum Cmd {
         #[arg(long, short, requires = "parseable")]
         output: Vec<VendorInfoFields>,
 
-        /// Character used to separate output fields. (Default: :::)
+        /// Character used to separate output fields. (Default: :)
         #[arg(long, requires = "parseable")]
         output_separator: Option<String>,
     },
@@ -480,7 +480,7 @@ enum Cmd {
         #[arg(long, short, requires = "parseable")]
         output: Vec<ReadDataFields>,
 
-        /// Character used to separate output fields. (Default: :::)
+        /// Character used to separate output fields. (Default: :)
         #[arg(long, requires = "parseable")]
         output_separator: Option<String>,
     },
@@ -578,7 +578,7 @@ enum Cmd {
         #[arg(long, short, requires = "parseable")]
         output: Vec<ReadDataFields>,
 
-        /// Character used to separate output fields. (Default: :::)
+        /// Character used to separate output fields. (Default: :)
         #[arg(long, requires = "parseable")]
         output_separator: Option<String>,
     },
@@ -659,7 +659,7 @@ enum Cmd {
         #[arg(long, short, requires = "parseable")]
         output: Vec<MemoryModelFields>,
 
-        /// Character used to separate output fields. (Default: :::)
+        /// Character used to separate output fields. (Default: :)
         #[arg(long, requires = "parseable")]
         output_separator: Option<String>,
     },
@@ -696,7 +696,7 @@ enum Cmd {
         #[arg(long, short, requires = "parseable")]
         output: Vec<LedFields>,
 
-        /// Character used to separate output fields. (Default: :::)
+        /// Character used to separate output fields. (Default: :)
         #[arg(long, requires = "parseable")]
         output_separator: Option<String>,
     },
@@ -731,7 +731,7 @@ enum Cmd {
         #[arg(long, short, requires = "parseable")]
         output: Vec<MonitorFields>,
 
-        /// Character used to separate output fields. (Default: :::)
+        /// Character used to separate output fields. (Default: :)
         #[arg(long, requires = "parseable")]
         output_separator: Option<String>,
     },
