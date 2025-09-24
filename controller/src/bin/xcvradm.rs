@@ -231,18 +231,33 @@ enum InputKind {
 
 #[derive(Clone, Debug, PartialEq)]
 enum OutputKind<T> {
-    Default,
+    Default {
+        header: bool,
+    },
     Parseable {
+        header: bool,
         fields: Vec<T>,
         separator: ParseableOutputSeparator,
     },
 }
 
 impl<T> OutputKind<T> {
-    fn parseable(fields: Vec<T>, separator: Option<String>) -> Self {
+    fn with_header(header: bool) -> Self {
+        OutputKind::Default { header }
+    }
+
+    fn parseable(header: bool, fields: Vec<T>, separator: Option<String>) -> Self {
         OutputKind::Parseable {
+            header,
             fields,
             separator: ParseableOutputSeparator::new(separator),
+        }
+    }
+
+    fn display_header(&self) -> bool {
+        match self {
+            Self::Default { header } => *header,
+            Self::Parseable { header, .. } => *header,
         }
     }
 }
@@ -348,6 +363,10 @@ enum Cmd {
         /// Character used to separate output fields. (Default: :)
         #[arg(long, requires = "parseable")]
         output_separator: Option<String>,
+
+        /// Omit displaying the output header
+        #[arg(long, conflicts_with_all = ["all", "with", "without"])]
+        omit_header: bool,
     },
 
     /// Reset the addressed modules.
@@ -379,6 +398,10 @@ enum Cmd {
         /// Character used to separate output fields. (Default: :)
         #[arg(long, requires = "parseable")]
         output_separator: Option<String>,
+
+        /// Omit displaying the output header
+        #[arg(long)]
+        omit_header: bool,
     },
 
     /// Enable the hot swap controller for the addressed modules.
@@ -428,6 +451,10 @@ enum Cmd {
         /// Character used to separate output fields. (Default: :)
         #[arg(long, requires = "parseable")]
         output_separator: Option<String>,
+
+        /// Omit displaying the output header
+        #[arg(long)]
+        omit_header: bool,
     },
 
     /// Read the vendor information for a set of modules.
@@ -443,6 +470,10 @@ enum Cmd {
         /// Character used to separate output fields. (Default: :)
         #[arg(long, requires = "parseable")]
         output_separator: Option<String>,
+
+        /// Omit displaying the output header
+        #[arg(long)]
+        omit_header: bool,
     },
 
     /// Read the lower page of a set of transceiver modules.
@@ -483,6 +514,10 @@ enum Cmd {
         /// Character used to separate output fields. (Default: :)
         #[arg(long, requires = "parseable")]
         output_separator: Option<String>,
+
+        /// Omit displaying the output header
+        #[arg(long)]
+        omit_header: bool,
     },
 
     /// Write the lower page of a set of transceiver modules.
@@ -581,6 +616,10 @@ enum Cmd {
         /// Character used to separate output fields. (Default: :)
         #[arg(long, requires = "parseable")]
         output_separator: Option<String>,
+
+        /// Omit displaying the output header
+        #[arg(long)]
+        omit_header: bool,
     },
 
     /// Write the upper page of a set of transceiver modules.
@@ -662,6 +701,10 @@ enum Cmd {
         /// Character used to separate output fields. (Default: :)
         #[arg(long, requires = "parseable")]
         output_separator: Option<String>,
+
+        /// Omit displaying the output header
+        #[arg(long)]
+        omit_header: bool,
     },
 
     /// Return the MAC addresses for the particular system allotted by its
@@ -699,6 +742,10 @@ enum Cmd {
         /// Character used to separate output fields. (Default: :)
         #[arg(long, requires = "parseable")]
         output_separator: Option<String>,
+
+        /// Omit displaying the output header
+        #[arg(long)]
+        omit_header: bool,
     },
 
     /// Set the state of the addressed modules' attention LEDs.
@@ -734,6 +781,10 @@ enum Cmd {
         /// Character used to separate output fields. (Default: :)
         #[arg(long, requires = "parseable")]
         output_separator: Option<String>,
+
+        /// Omit displaying the output header
+        #[arg(long)]
+        omit_header: bool,
     },
 
     /// Return information about the datapath of a set of modules.
@@ -994,6 +1045,7 @@ async fn main() -> anyhow::Result<()> {
             parseable,
             output,
             output_separator,
+            omit_header,
         } => {
             let kind = match (with, without, all, parseable) {
                 (None, None, false, true) => StatusKind::Parseable {
@@ -1033,7 +1085,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             };
 
-            print_module_status(&status_result, kind, &output);
+            print_module_status(&status_result, omit_header, kind, &output);
             if !args.ignore_errors {
                 print_failures(&status_result.failures);
             }
@@ -1063,11 +1115,12 @@ async fn main() -> anyhow::Result<()> {
             parseable,
             output,
             output_separator,
+            omit_header,
         } => {
             let kind = if parseable {
-                OutputKind::parseable(output, output_separator)
+                OutputKind::parseable(!omit_header, output, output_separator)
             } else {
-                OutputKind::Default
+                OutputKind::with_header(!omit_header)
             };
 
             let mode_result = controller
@@ -1144,11 +1197,12 @@ async fn main() -> anyhow::Result<()> {
             parseable,
             output,
             output_separator,
+            omit_header,
         } => {
             let kind = if parseable {
-                OutputKind::parseable(output, output_separator)
+                OutputKind::parseable(!omit_header, output, output_separator)
             } else {
-                OutputKind::Default
+                OutputKind::with_header(!omit_header)
             };
 
             let ident_result = controller
@@ -1165,11 +1219,12 @@ async fn main() -> anyhow::Result<()> {
             parseable,
             output,
             output_separator,
+            omit_header,
         } => {
             let kind = if parseable {
-                OutputKind::parseable(output, output_separator)
+                OutputKind::parseable(!omit_header, output, output_separator)
             } else {
-                OutputKind::Default
+                OutputKind::with_header(!omit_header)
             };
 
             let info_result = controller
@@ -1191,15 +1246,16 @@ async fn main() -> anyhow::Result<()> {
             parseable,
             output,
             output_separator,
+            omit_header,
         } => {
             if len == 0 {
                 return Ok(());
             }
 
             let kind = if parseable {
-                OutputKind::parseable(output, output_separator)
+                OutputKind::parseable(!omit_header, output, output_separator)
             } else {
-                OutputKind::Default
+                OutputKind::with_header(!omit_header)
             };
 
             let reads = match (sff, cmis) {
@@ -1261,15 +1317,16 @@ async fn main() -> anyhow::Result<()> {
             parseable,
             output,
             output_separator,
+            omit_header,
         } => {
             if len == 0 {
                 return Ok(());
             }
 
             let kind = if parseable {
-                OutputKind::parseable(output, output_separator)
+                OutputKind::parseable(!omit_header, output, output_separator)
             } else {
-                OutputKind::Default
+                OutputKind::with_header(!omit_header)
             };
 
             let reads = match (sff, cmis) {
@@ -1349,11 +1406,12 @@ async fn main() -> anyhow::Result<()> {
             parseable,
             output,
             output_separator,
+            omit_header,
         } => {
             let kind = if parseable {
-                OutputKind::parseable(output, output_separator)
+                OutputKind::parseable(!omit_header, output, output_separator)
             } else {
-                OutputKind::Default
+                OutputKind::with_header(!omit_header)
             };
 
             let layout_result = controller
@@ -1394,11 +1452,12 @@ async fn main() -> anyhow::Result<()> {
             parseable,
             output,
             output_separator,
+            omit_header,
         } => {
             let kind = if parseable {
-                OutputKind::parseable(output, output_separator)
+                OutputKind::parseable(!omit_header, output, output_separator)
             } else {
-                OutputKind::Default
+                OutputKind::with_header(!omit_header)
             };
 
             let state_result = controller
@@ -1423,11 +1482,12 @@ async fn main() -> anyhow::Result<()> {
             parseable,
             output,
             output_separator,
+            omit_header,
         } => {
             let kind = if parseable {
-                OutputKind::parseable(output, output_separator)
+                OutputKind::parseable(!omit_header, output, output_separator)
             } else {
-                OutputKind::Default
+                OutputKind::with_header(!omit_header)
             };
 
             let monitor_result = controller
@@ -1531,9 +1591,13 @@ fn print_failures(failures: &FailedModules) {
 }
 
 fn print_power_mode(mode_result: &PowerModeResult, kind: &OutputKind<PowerFields>) {
-    match kind {
-        OutputKind::Default => println!("Port  Power  Software-override"),
-        OutputKind::Parseable { fields, separator } => print_parseable_header(fields, separator),
+    if kind.display_header() {
+        match kind {
+            OutputKind::Default { .. } => println!("Port  Power  Software-override"),
+            OutputKind::Parseable {
+                fields, separator, ..
+            } => print_parseable_header(fields, separator),
+        }
     }
 
     for (port, mode) in mode_result
@@ -1548,10 +1612,12 @@ fn print_power_mode(mode_result: &PowerModeResult, kind: &OutputKind<PowerFields
         };
         let state = format!("{:?}", mode.state);
         match kind {
-            OutputKind::Default => {
+            OutputKind::Default { .. } => {
                 println!("{port:>WIDTH$}  {state:POWER_WIDTH$}  {over}",);
             }
-            OutputKind::Parseable { fields, separator } => {
+            OutputKind::Parseable {
+                fields, separator, ..
+            } => {
                 fields
                     .iter()
                     .map(|field| match field {
@@ -1568,22 +1634,25 @@ fn print_power_mode(mode_result: &PowerModeResult, kind: &OutputKind<PowerFields
 
 fn print_module_status(
     status_result: &ExtendedStatusResult,
+    omit_header: bool,
     kind: StatusKind,
     output: &[StatusFields],
 ) {
     match kind {
         StatusKind::Parseable { separator } => {
-            println!(
-                "{}",
-                output
-                    .iter()
-                    .map(|field| match field {
-                        StatusFields::Port => "port",
-                        StatusFields::Status => "status",
-                    })
-                    .collect::<Vec<_>>()
-                    .join(separator.as_str())
-            );
+            if !omit_header {
+                println!(
+                    "{}",
+                    output
+                        .iter()
+                        .map(|field| match field {
+                            StatusFields::Port => "port",
+                            StatusFields::Status => "status",
+                        })
+                        .collect::<Vec<_>>()
+                        .join(separator.as_str())
+                );
+            }
 
             for (port, status) in status_result.iter() {
                 println!(
@@ -1600,7 +1669,9 @@ fn print_module_status(
             }
         }
         StatusKind::Normal => {
-            println!("Port Status");
+            if !omit_header {
+                println!("Port Status");
+            }
             for (port, status) in status_result.iter() {
                 println!("{port:>WIDTH$} {}", status);
             }
@@ -1661,9 +1732,13 @@ fn print_all_status(status_result: &ExtendedStatusResult) {
 }
 
 fn print_read_data(read_result: &ReadResult, binary: bool, kind: &OutputKind<ReadDataFields>) {
-    match kind {
-        OutputKind::Default => println!("Port Data"),
-        OutputKind::Parseable { fields, separator } => print_parseable_header(fields, separator),
+    if kind.display_header() {
+        match kind {
+            OutputKind::Default { .. } => println!("Port Data"),
+            OutputKind::Parseable {
+                fields, separator, ..
+            } => print_parseable_header(fields, separator),
+        }
     }
 
     let fmt_data = if binary {
@@ -1678,8 +1753,10 @@ fn print_read_data(read_result: &ReadResult, binary: bool, kind: &OutputKind<Rea
     {
         let formatted_data = each.iter().map(fmt_data).collect::<Vec<_>>().join(",");
         match kind {
-            OutputKind::Default => println!("{port:>WIDTH$} [{formatted_data}]"),
-            OutputKind::Parseable { fields, separator } => {
+            OutputKind::Default { .. } => println!("{port:>WIDTH$} [{formatted_data}]"),
+            OutputKind::Parseable {
+                fields, separator, ..
+            } => {
                 fields
                     .iter()
                     .map(|field| match field {
@@ -1702,9 +1779,13 @@ const SERIAL_WIDTH: usize = 16;
 const DATE_WIDTH: usize = 20;
 
 fn print_module_identifier(ident_result: &IdentifierResult, kind: &OutputKind<IdentifyFields>) {
-    match kind {
-        OutputKind::Default => println!("Port Ident Description"),
-        OutputKind::Parseable { fields, separator } => print_parseable_header(fields, separator),
+    if kind.display_header() {
+        match kind {
+            OutputKind::Default { .. } => println!("Port Ident Description"),
+            OutputKind::Parseable {
+                fields, separator, ..
+            } => print_parseable_header(fields, separator),
+        }
     }
 
     for (port, id) in ident_result
@@ -1714,10 +1795,12 @@ fn print_module_identifier(ident_result: &IdentifierResult, kind: &OutputKind<Id
     {
         let ident = format!("0x{:02x}", u8::from(*id));
         match kind {
-            OutputKind::Default => {
+            OutputKind::Default { .. } => {
                 println!("{port:>WIDTH$} {ident:ID_BYTE_WIDTH$} {id}");
             }
-            OutputKind::Parseable { fields, separator } => {
+            OutputKind::Parseable {
+                fields, separator, ..
+            } => {
                 fields
                     .iter()
                     .map(|field| match field {
@@ -1733,13 +1816,17 @@ fn print_module_identifier(ident_result: &IdentifierResult, kind: &OutputKind<Id
 }
 
 fn print_vendor_info(vendor_result: &VendorInfoResult, kind: &OutputKind<VendorInfoFields>) {
-    match kind {
-        OutputKind::Default => println!(
-            "Port {:ID_DEBUG_WIDTH$} {:VENDOR_WIDTH$} {:PART_WIDTH$} \
-            {:REV_WIDTH$} {:SERIAL_WIDTH$} {:DATE_WIDTH$}",
-            "Identifier", "Vendor", "Part", "Rev", "Serial", "Mfg date"
-        ),
-        OutputKind::Parseable { fields, separator } => print_parseable_header(fields, separator),
+    if kind.display_header() {
+        match kind {
+            OutputKind::Default { .. } => println!(
+                "Port {:ID_DEBUG_WIDTH$} {:VENDOR_WIDTH$} {:PART_WIDTH$} \
+                {:REV_WIDTH$} {:SERIAL_WIDTH$} {:DATE_WIDTH$}",
+                "Identifier", "Vendor", "Part", "Rev", "Serial", "Mfg date"
+            ),
+            OutputKind::Parseable {
+                fields, separator, ..
+            } => print_parseable_header(fields, separator),
+        }
     }
 
     for (port, info) in vendor_result
@@ -1755,7 +1842,7 @@ fn print_vendor_info(vendor_result: &VendorInfoResult, kind: &OutputKind<VendorI
         let date = info.vendor.date.as_deref().unwrap_or("Unknown");
 
         match kind {
-            OutputKind::Default => {
+            OutputKind::Default { .. } => {
                 println!(
                     "{port:>WIDTH$} {:ID_DEBUG_WIDTH$} {:VENDOR_WIDTH$} \
                     {:PART_WIDTH$} {:REV_WIDTH$} {:SERIAL_WIDTH$} {:DATE_WIDTH$}",
@@ -1767,7 +1854,9 @@ fn print_vendor_info(vendor_result: &VendorInfoResult, kind: &OutputKind<VendorI
                     date,
                 );
             }
-            OutputKind::Parseable { fields, separator } => {
+            OutputKind::Parseable {
+                fields, separator, ..
+            } => {
                 println!(
                     "{}",
                     fields
@@ -1793,9 +1882,13 @@ fn print_module_memory_model(
     model_result: &MemoryModelResult,
     kind: &OutputKind<MemoryModelFields>,
 ) {
-    match kind {
-        OutputKind::Default => println!("Port Model"),
-        OutputKind::Parseable { fields, separator } => print_parseable_header(fields, separator),
+    if kind.display_header() {
+        match kind {
+            OutputKind::Default { .. } => println!("Port Model"),
+            OutputKind::Parseable {
+                fields, separator, ..
+            } => print_parseable_header(fields, separator),
+        }
     }
 
     for (port, model) in model_result
@@ -1804,8 +1897,10 @@ fn print_module_memory_model(
         .zip(model_result.memory_models().iter())
     {
         match kind {
-            OutputKind::Default => println!("{port:>WIDTH$} {model}"),
-            OutputKind::Parseable { fields, separator } => {
+            OutputKind::Default { .. } => println!("{port:>WIDTH$} {model}"),
+            OutputKind::Parseable {
+                fields, separator, ..
+            } => {
                 println!(
                     "{}",
                     fields
@@ -1846,13 +1941,34 @@ fn print_mac_address_range(macs: MacAddrs, summary: bool) {
 }
 
 fn print_led_state(result: &LedStateResult, kind: &OutputKind<LedFields>) {
-    match kind {
-        OutputKind::Default => println!("Port LED"),
-        OutputKind::Parseable { fields, separator } => print_parseable_header(fields, separator),
+    if kind.display_header() {
+        match kind {
+            OutputKind::Default { .. } => println!("Port LED"),
+            OutputKind::Parseable {
+                fields, separator, ..
+            } => print_parseable_header(fields, separator),
+        }
     }
 
     for (port, state) in result.iter() {
-        println!("{port:>WIDTH$} {state:?}");
+        match kind {
+            OutputKind::Default { .. } => println!("{port:>WIDTH$} {state:?}"),
+            OutputKind::Parseable {
+                fields, separator, ..
+            } => {
+                println!(
+                    "{}",
+                    fields
+                        .iter()
+                        .map(|field| match field {
+                            LedFields::Port => port.to_string(),
+                            LedFields::Led => state.to_string(),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(separator.as_str())
+                );
+            }
+        }
     }
 }
 
@@ -1865,8 +1981,13 @@ fn display_list<T: std::fmt::Display>(items: impl Iterator<Item = T>) -> String 
 }
 
 fn print_monitors(monitor_result: &MonitorResult, kind: &OutputKind<MonitorFields>) {
-    if let OutputKind::Parseable { fields, separator } = kind {
-        print_parseable_header(fields, separator)
+    if kind.display_header() {
+        if let OutputKind::Parseable {
+            fields, separator, ..
+        } = kind
+        {
+            print_parseable_header(fields, separator)
+        }
     }
 
     const NAME_WIDTH: usize = 22;
@@ -1874,7 +1995,7 @@ fn print_monitors(monitor_result: &MonitorResult, kind: &OutputKind<MonitorField
     let mut need_newline = false;
     for (port, monitor) in monitor_result.iter() {
         match kind {
-            OutputKind::Default => {
+            OutputKind::Default { .. } => {
                 if need_newline {
                     println!();
                 }
@@ -1965,7 +2086,9 @@ fn print_monitors(monitor_result: &MonitorResult, kind: &OutputKind<MonitorField
                 // Print additional newline between each port for clarity.
                 need_newline = true;
             }
-            OutputKind::Parseable { fields, separator } => {
+            OutputKind::Parseable {
+                fields, separator, ..
+            } => {
                 println!(
                     "{}",
                     fields
