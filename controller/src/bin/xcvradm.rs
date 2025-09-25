@@ -352,21 +352,8 @@ enum Cmd {
         #[arg(long)]
         all: bool,
 
-        /// Print the output in a parseable format.
-        #[arg(long, short, conflicts_with_all = ["all", "with", "without"])]
-        parseable: bool,
-
-        /// Select the output fields to be displayed.
-        #[arg(long, short, requires = "parseable")]
-        output: Vec<StatusFields>,
-
-        /// Character used to separate output fields. (Default: :)
-        #[arg(long, requires = "parseable")]
-        output_separator: Option<String>,
-
-        /// Omit displaying the output header
-        #[arg(long, conflicts_with_all = ["all", "with", "without"])]
-        omit_header: bool,
+        #[command(flatten)]
+        parse_args: ParsableArgs<StatusFields>,
     },
 
     /// Reset the addressed modules.
@@ -387,21 +374,8 @@ enum Cmd {
     /// This takes into account whether a module has specified software override
     /// of power control, and may take up to 2s to complete.
     Power {
-        /// Print the output in a parseable format.
-        #[arg(long, short)]
-        parseable: bool,
-
-        /// Select the output fields to be displayed.
-        #[arg(long, short, requires = "parseable")]
-        output: Vec<PowerFields>,
-
-        /// Character used to separate output fields. (Default: :)
-        #[arg(long, requires = "parseable")]
-        output_separator: Option<String>,
-
-        /// Omit displaying the output header
-        #[arg(long)]
-        omit_header: bool,
+        #[command(flatten)]
+        parse_args: ParsableArgs<PowerFields>,
     },
 
     /// Enable the hot swap controller for the addressed modules.
@@ -440,40 +414,14 @@ enum Cmd {
 
     /// Read the SFF-8024 identifier for a set of modules.
     Identify {
-        /// Print the output in a parseable format.
-        #[arg(long, short)]
-        parseable: bool,
-
-        /// Select the output fields to be displayed.
-        #[arg(long, short, requires = "parseable")]
-        output: Vec<IdentifyFields>,
-
-        /// Character used to separate output fields. (Default: :)
-        #[arg(long, requires = "parseable")]
-        output_separator: Option<String>,
-
-        /// Omit displaying the output header
-        #[arg(long)]
-        omit_header: bool,
+        #[command(flatten)]
+        parse_args: ParsableArgs<IdentifyFields>,
     },
 
     /// Read the vendor information for a set of modules.
     VendorInfo {
-        /// Print the output in a parseable format.
-        #[arg(long, short)]
-        parseable: bool,
-
-        /// Select the output fields to be displayed.
-        #[arg(long, short, requires = "parseable")]
-        output: Vec<VendorInfoFields>,
-
-        /// Character used to separate output fields. (Default: :)
-        #[arg(long, requires = "parseable")]
-        output_separator: Option<String>,
-
-        /// Omit displaying the output header
-        #[arg(long)]
-        omit_header: bool,
+        #[command(flatten)]
+        parse_args: ParsableArgs<VendorInfoFields>,
     },
 
     /// Read the lower page of a set of transceiver modules.
@@ -503,21 +451,8 @@ enum Cmd {
         #[arg(value_parser = read_u8)]
         len: u8,
 
-        /// Print the output in a parseable format.
-        #[arg(long, short)]
-        parseable: bool,
-
-        /// Select the output fields to be displayed.
-        #[arg(long, short, requires = "parseable")]
-        output: Vec<ReadDataFields>,
-
-        /// Character used to separate output fields. (Default: :)
-        #[arg(long, requires = "parseable")]
-        output_separator: Option<String>,
-
-        /// Omit displaying the output header
-        #[arg(long)]
-        omit_header: bool,
+        #[command(flatten)]
+        parse_args: ParsableArgs<ReadDataFields>,
     },
 
     /// Write the lower page of a set of transceiver modules.
@@ -605,21 +540,8 @@ enum Cmd {
         #[arg(value_parser = read_u8)]
         len: u8,
 
-        /// Print the output in a parseable format.
-        #[arg(long, short)]
-        parseable: bool,
-
-        /// Select the output fields to be displayed.
-        #[arg(long, short, requires = "parseable")]
-        output: Vec<ReadDataFields>,
-
-        /// Character used to separate output fields. (Default: :)
-        #[arg(long, requires = "parseable")]
-        output_separator: Option<String>,
-
-        /// Omit displaying the output header
-        #[arg(long)]
-        omit_header: bool,
+        #[command(flatten)]
+        parse_args: ParsableArgs<ReadDataFields>,
     },
 
     /// Write the upper page of a set of transceiver modules.
@@ -690,21 +612,8 @@ enum Cmd {
     /// indicates that page `0x10` is supported, and the module implements banks
     /// 0 and 1 (16 lanes).
     MemoryModel {
-        /// Print the output in a parseable format.
-        #[arg(long, short)]
-        parseable: bool,
-
-        /// Select the output fields to be displayed.
-        #[arg(long, short, requires = "parseable")]
-        output: Vec<MemoryModelFields>,
-
-        /// Character used to separate output fields. (Default: :)
-        #[arg(long, requires = "parseable")]
-        output_separator: Option<String>,
-
-        /// Omit displaying the output header
-        #[arg(long)]
-        omit_header: bool,
+        #[command(flatten)]
+        parse_args: ParsableArgs<MemoryModelFields>,
     },
 
     /// Return the MAC addresses for the particular system allotted by its
@@ -731,21 +640,8 @@ enum Cmd {
 
     /// Return the state of the addressed modules' attention LEDs.
     Leds {
-        /// Print the output in a parseable format.
-        #[arg(long, short)]
-        parseable: bool,
-
-        /// Select the output fields to be displayed.
-        #[arg(long, short, requires = "parseable")]
-        output: Vec<LedFields>,
-
-        /// Character used to separate output fields. (Default: :)
-        #[arg(long, requires = "parseable")]
-        output_separator: Option<String>,
-
-        /// Omit displaying the output header
-        #[arg(long)]
-        omit_header: bool,
+        #[command(flatten)]
+        parse_args: ParsableArgs<LedFields>,
     },
 
     /// Set the state of the addressed modules' attention LEDs.
@@ -770,21 +666,8 @@ enum Cmd {
     /// near zero should be treated with caution, and the datasheet should be
     /// consulted for details.
     Monitors {
-        /// Print the output in a parseable format.
-        #[arg(long, short)]
-        parseable: bool,
-
-        /// Select the output fields to be displayed.
-        #[arg(long, short, requires = "parseable")]
-        output: Vec<MonitorFields>,
-
-        /// Character used to separate output fields. (Default: :)
-        #[arg(long, requires = "parseable")]
-        output_separator: Option<String>,
-
-        /// Omit displaying the output header
-        #[arg(long)]
-        omit_header: bool,
+        #[command(flatten)]
+        parse_args: ParsableArgs<MonitorFields>,
     },
 
     /// Return information about the datapath of a set of modules.
@@ -798,6 +681,25 @@ enum Cmd {
     /// - Tx and Rx loss-of-signal (LOS) and loss-of-lock (LOL) information
     /// - Datapath state (for CMIS modules only)
     Datapath,
+}
+
+#[derive(Parser)]
+pub struct ParsableArgs<T: ValueEnum + Send + Sync + 'static> {
+    /// Print the output in a parseable format.
+    #[arg(long, short)]
+    parseable: bool,
+
+    /// Select the output fields to be displayed.
+    #[arg(long, short, requires = "parseable")]
+    output: Vec<T>,
+
+    /// Character used to separate output fields. (Default: ":")
+    #[arg(long, requires = "parseable")]
+    output_separator: Option<String>,
+
+    /// Omit displaying the output header
+    #[arg(long)]
+    omit_header: bool,
 }
 
 // Maximum number of bytes to read from input source for writing to module.
@@ -860,7 +762,7 @@ enum IdentifyFields {
     Port,
     /// SFF-8024 identifier of the transceiver module.
     Ident,
-    /// ??? - Needs details
+    /// Description of the module interface as defined by SFF-8024.
     Description,
 }
 
@@ -878,7 +780,7 @@ enum VendorInfoFields {
     Rev,
     /// Serial number of the transceiver module.
     Serial,
-    /// ??? - Needs details
+    /// Manufactured date formatted as a date-code specified in SFF-8636
     ManufacturedDate,
 }
 
@@ -923,7 +825,7 @@ enum MonitorFields {
     Port,
     /// The temperature of the transceiver module.
     Temperature,
-    /// ??? - Is this power being supplied to the module?
+    /// Voltage supplied to the transceiver module in V.
     SupplyVoltage,
     /// Average received power of the transceiver module in mW.
     AverageRxPower,
@@ -931,11 +833,11 @@ enum MonitorFields {
     TxBias,
     /// Transmit power of the transceiver module in mW.
     TxPower,
-    /// ???
+    /// Auxiliary monitor 1 as reported by the transceiver module.
     Aux1,
-    /// ???
+    /// Auxiliary monitor 2 as reported by the transceiver module.
     Aux2,
-    /// ???
+    /// Auxiliary monitor 3 as reported by the transceiver module.
     Aux3,
 }
 
@@ -1042,10 +944,13 @@ async fn main() -> anyhow::Result<()> {
             with,
             without,
             all,
-            parseable,
-            output,
-            output_separator,
-            omit_header,
+            parse_args:
+                ParsableArgs {
+                    parseable,
+                    output,
+                    output_separator,
+                    omit_header,
+                },
         } => {
             let kind = match (with, without, all, parseable) {
                 (None, None, false, true) => StatusKind::Parseable {
@@ -1112,10 +1017,13 @@ async fn main() -> anyhow::Result<()> {
         }
 
         Cmd::Power {
-            parseable,
-            output,
-            output_separator,
-            omit_header,
+            parse_args:
+                ParsableArgs {
+                    parseable,
+                    output,
+                    output_separator,
+                    omit_header,
+                },
         } => {
             let kind = if parseable {
                 OutputKind::parseable(!omit_header, output, output_separator)
@@ -1194,10 +1102,13 @@ async fn main() -> anyhow::Result<()> {
         }
 
         Cmd::Identify {
-            parseable,
-            output,
-            output_separator,
-            omit_header,
+            parse_args:
+                ParsableArgs {
+                    parseable,
+                    output,
+                    output_separator,
+                    omit_header,
+                },
         } => {
             let kind = if parseable {
                 OutputKind::parseable(!omit_header, output, output_separator)
@@ -1216,10 +1127,13 @@ async fn main() -> anyhow::Result<()> {
         }
 
         Cmd::VendorInfo {
-            parseable,
-            output,
-            output_separator,
-            omit_header,
+            parse_args:
+                ParsableArgs {
+                    parseable,
+                    output,
+                    output_separator,
+                    omit_header,
+                },
         } => {
             let kind = if parseable {
                 OutputKind::parseable(!omit_header, output, output_separator)
@@ -1243,10 +1157,13 @@ async fn main() -> anyhow::Result<()> {
             binary,
             offset,
             len,
-            parseable,
-            output,
-            output_separator,
-            omit_header,
+            parse_args:
+                ParsableArgs {
+                    parseable,
+                    output,
+                    output_separator,
+                    omit_header,
+                },
         } => {
             if len == 0 {
                 return Ok(());
@@ -1314,10 +1231,13 @@ async fn main() -> anyhow::Result<()> {
             bank,
             offset,
             len,
-            parseable,
-            output,
-            output_separator,
-            omit_header,
+            parse_args:
+                ParsableArgs {
+                    parseable,
+                    output,
+                    output_separator,
+                    omit_header,
+                },
         } => {
             if len == 0 {
                 return Ok(());
@@ -1403,10 +1323,13 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Cmd::MemoryModel {
-            parseable,
-            output,
-            output_separator,
-            omit_header,
+            parse_args:
+                ParsableArgs {
+                    parseable,
+                    output,
+                    output_separator,
+                    omit_header,
+                },
         } => {
             let kind = if parseable {
                 OutputKind::parseable(!omit_header, output, output_separator)
@@ -1449,10 +1372,13 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Cmd::Leds {
-            parseable,
-            output,
-            output_separator,
-            omit_header,
+            parse_args:
+                ParsableArgs {
+                    parseable,
+                    output,
+                    output_separator,
+                    omit_header,
+                },
         } => {
             let kind = if parseable {
                 OutputKind::parseable(!omit_header, output, output_separator)
@@ -1479,10 +1405,13 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Cmd::Monitors {
-            parseable,
-            output,
-            output_separator,
-            omit_header,
+            parse_args:
+                ParsableArgs {
+                    parseable,
+                    output,
+                    output_separator,
+                    omit_header,
+                },
         } => {
             let kind = if parseable {
                 OutputKind::parseable(!omit_header, output, output_separator)
