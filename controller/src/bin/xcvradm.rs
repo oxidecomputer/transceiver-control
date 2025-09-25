@@ -2056,18 +2056,18 @@ fn print_monitors(monitor_result: &MonitorResult, kind: &OutputKind<MonitorField
                                     .receiver_power
                                     .as_ref()
                                     .map(|rx| {
-                                        format!("[{}]", display_list(rx.iter().map(|x| x.value())))
+                                        format!("{}", display_list(rx.iter().map(|x| x.value())))
                                     })
                                     .unwrap_or_else(|| String::from("unsupported")),
                                 MonitorFields::TxBias => monitor
                                     .transmitter_bias_current
                                     .as_ref()
-                                    .map(|tx| { format!("[{}]", display_list(tx.iter())) })
+                                    .map(|tx| { format!("{}", display_list(tx.iter())) })
                                     .unwrap_or_else(|| String::from("unsupported")),
                                 MonitorFields::TxPower => monitor
                                     .transmitter_power
                                     .as_ref()
-                                    .map(|tx| { format!("[{}]", display_list(tx.iter())) })
+                                    .map(|tx| { format!("{}", display_list(tx.iter())) })
                                     .unwrap_or_else(|| String::from("unsupported")),
                                 MonitorFields::Aux1 => aux1_monitor_value(
                                     monitor.aux_monitors.and_then(|monitor| monitor.aux1)
