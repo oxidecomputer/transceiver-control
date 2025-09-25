@@ -689,7 +689,7 @@ pub struct ParsableArgs<T: ValueEnum + Send + Sync + 'static> {
     #[arg(long, short)]
     parseable: bool,
 
-    /// Select the output fields to be displayed.
+    /// Select the output fields to be displayed. Fields that are not supported by a module are emitted as empty values.
     #[arg(long, short, requires = "parseable")]
     output: Vec<T>,
 
@@ -2047,46 +2047,46 @@ fn print_monitors(monitor_result: &MonitorResult, kind: &OutputKind<MonitorField
                                 MonitorFields::Temperature => monitor
                                     .temperature
                                     .map(|t| t.to_string())
-                                    .unwrap_or_else(|| String::from("unsupported")),
+                                    .unwrap_or_else(|| String::new()),
                                 MonitorFields::SupplyVoltage => monitor
                                     .supply_voltage
                                     .map(|v| v.to_string())
-                                    .unwrap_or_else(|| String::from("unsupported")),
+                                    .unwrap_or_else(|| String::new()),
                                 MonitorFields::AverageRxPower => monitor
                                     .receiver_power
                                     .as_ref()
                                     .map(|rx| {
                                         format!("{}", display_list(rx.iter().map(|x| x.value())))
                                     })
-                                    .unwrap_or_else(|| String::from("unsupported")),
+                                    .unwrap_or_else(|| String::new()),
                                 MonitorFields::TxBias => monitor
                                     .transmitter_bias_current
                                     .as_ref()
                                     .map(|tx| { format!("{}", display_list(tx.iter())) })
-                                    .unwrap_or_else(|| String::from("unsupported")),
+                                    .unwrap_or_else(|| String::new()),
                                 MonitorFields::TxPower => monitor
                                     .transmitter_power
                                     .as_ref()
                                     .map(|tx| { format!("{}", display_list(tx.iter())) })
-                                    .unwrap_or_else(|| String::from("unsupported")),
+                                    .unwrap_or_else(|| String::new()),
                                 MonitorFields::Aux1 => aux1_monitor_value(
                                     monitor.aux_monitors.and_then(|monitor| monitor.aux1)
                                 )
                                 .1
                                 .map(|value| value)
-                                .unwrap_or_else(|| String::from("unsupported")),
+                                .unwrap_or_else(|| String::new()),
                                 MonitorFields::Aux2 => aux2_monitor_value(
                                     monitor.aux_monitors.and_then(|monitor| monitor.aux2)
                                 )
                                 .1
                                 .map(|value| value)
-                                .unwrap_or_else(|| String::from("unsupported")),
+                                .unwrap_or_else(|| String::new()),
                                 MonitorFields::Aux3 => aux3_monitor_value(
                                     monitor.aux_monitors.and_then(|monitor| monitor.aux3)
                                 )
                                 .1
                                 .map(|value| value)
-                                .unwrap_or_else(|| String::from("unsupported")),
+                                .unwrap_or_else(|| String::new()),
                             })
                             .collect::<Vec<_>>()
                             .join(separator.as_str())
