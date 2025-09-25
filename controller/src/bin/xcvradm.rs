@@ -793,7 +793,7 @@ enum VendorInfoFields {
     Rev,
     /// Serial number of the transceiver module.
     Serial,
-    /// Manufactured date formatted as a date-code specified in SFF-8636
+    /// Manufactured date formatted as a date-code specified in SFF-8636.
     ManufacturedDate,
 }
 
