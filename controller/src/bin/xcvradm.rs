@@ -1616,18 +1616,20 @@ fn print_power_mode(mode_result: &PowerModeResult, kind: &OutputKind<PowerFields
             OutputKind::Parseable {
                 fields, separator, ..
             } => {
-                println!(
-                    "{}",
-                    fields
-                        .iter()
-                        .map(|field| match field {
-                            PowerFields::Port => port.to_string(),
-                            PowerFields::Power => state.clone(),
-                            PowerFields::Override => over.to_string(),
-                        })
-                        .collect::<Vec<_>>()
-                        .join(separator.as_str())
-                );
+                if fields.len() > 0 {
+                    println!(
+                        "{}",
+                        fields
+                            .iter()
+                            .map(|field| match field {
+                                PowerFields::Port => port.to_string(),
+                                PowerFields::Power => state.clone(),
+                                PowerFields::Override => over.to_string(),
+                            })
+                            .collect::<Vec<_>>()
+                            .join(separator.as_str())
+                    );
+                }
             }
         }
     }
@@ -1758,17 +1760,19 @@ fn print_read_data(read_result: &ReadResult, binary: bool, kind: &OutputKind<Rea
             OutputKind::Parseable {
                 fields, separator, ..
             } => {
-                println!(
-                    "{}",
-                    fields
-                        .iter()
-                        .map(|field| match field {
-                            ReadDataFields::Port => port.to_string(),
-                            ReadDataFields::Data => formatted_data.clone(),
-                        })
-                        .collect::<Vec<_>>()
-                        .join(separator.as_str())
-                );
+                if fields.len() > 0 {
+                    println!(
+                        "{}",
+                        fields
+                            .iter()
+                            .map(|field| match field {
+                                ReadDataFields::Port => port.to_string(),
+                                ReadDataFields::Data => formatted_data.clone(),
+                            })
+                            .collect::<Vec<_>>()
+                            .join(separator.as_str())
+                    );
+                }
             }
         }
     }
@@ -1805,18 +1809,20 @@ fn print_module_identifier(ident_result: &IdentifierResult, kind: &OutputKind<Id
             OutputKind::Parseable {
                 fields, separator, ..
             } => {
-                println!(
-                    "{}",
-                    fields
-                        .iter()
-                        .map(|field| match field {
-                            IdentifyFields::Port => port.to_string(),
-                            IdentifyFields::Ident => ident.clone(),
-                            IdentifyFields::Description => id.to_string(),
-                        })
-                        .collect::<Vec<_>>()
-                        .join(separator.as_str())
-                );
+                if fields.len() > 0 {
+                    println!(
+                        "{}",
+                        fields
+                            .iter()
+                            .map(|field| match field {
+                                IdentifyFields::Port => port.to_string(),
+                                IdentifyFields::Ident => ident.clone(),
+                                IdentifyFields::Description => id.to_string(),
+                            })
+                            .collect::<Vec<_>>()
+                            .join(separator.as_str())
+                    );
+                }
             }
         }
     }
@@ -1864,22 +1870,24 @@ fn print_vendor_info(vendor_result: &VendorInfoResult, kind: &OutputKind<VendorI
             OutputKind::Parseable {
                 fields, separator, ..
             } => {
-                println!(
-                    "{}",
-                    fields
-                        .iter()
-                        .map(|field| match field {
-                            VendorInfoFields::Port => port.to_string(),
-                            VendorInfoFields::Identifier => ident.clone(),
-                            VendorInfoFields::Vendor => info.vendor.name.clone(),
-                            VendorInfoFields::Part => info.vendor.part.clone(),
-                            VendorInfoFields::Rev => info.vendor.revision.clone(),
-                            VendorInfoFields::Serial => info.vendor.serial.clone(),
-                            VendorInfoFields::ManufacturedDate => date.to_string(),
-                        })
-                        .collect::<Vec<_>>()
-                        .join(separator.as_str())
-                );
+                if fields.len() > 0 {
+                    println!(
+                        "{}",
+                        fields
+                            .iter()
+                            .map(|field| match field {
+                                VendorInfoFields::Port => port.to_string(),
+                                VendorInfoFields::Identifier => ident.clone(),
+                                VendorInfoFields::Vendor => info.vendor.name.clone(),
+                                VendorInfoFields::Part => info.vendor.part.clone(),
+                                VendorInfoFields::Rev => info.vendor.revision.clone(),
+                                VendorInfoFields::Serial => info.vendor.serial.clone(),
+                                VendorInfoFields::ManufacturedDate => date.to_string(),
+                            })
+                            .collect::<Vec<_>>()
+                            .join(separator.as_str())
+                    );
+                }
             }
         }
     }
@@ -1908,17 +1916,19 @@ fn print_module_memory_model(
             OutputKind::Parseable {
                 fields, separator, ..
             } => {
-                println!(
-                    "{}",
-                    fields
-                        .iter()
-                        .map(|field| match field {
-                            MemoryModelFields::Port => port.to_string(),
-                            MemoryModelFields::Model => model.to_string(),
-                        })
-                        .collect::<Vec<_>>()
-                        .join(separator.as_str())
-                );
+                if fields.len() > 0 {
+                    println!(
+                        "{}",
+                        fields
+                            .iter()
+                            .map(|field| match field {
+                                MemoryModelFields::Port => port.to_string(),
+                                MemoryModelFields::Model => model.to_string(),
+                            })
+                            .collect::<Vec<_>>()
+                            .join(separator.as_str())
+                    );
+                }
             }
         }
     }
@@ -1963,17 +1973,19 @@ fn print_led_state(result: &LedStateResult, kind: &OutputKind<LedFields>) {
             OutputKind::Parseable {
                 fields, separator, ..
             } => {
-                println!(
-                    "{}",
-                    fields
-                        .iter()
-                        .map(|field| match field {
-                            LedFields::Port => port.to_string(),
-                            LedFields::Led => state.to_string(),
-                        })
-                        .collect::<Vec<_>>()
-                        .join(separator.as_str())
-                );
+                if fields.len() > 0 {
+                    println!(
+                        "{}",
+                        fields
+                            .iter()
+                            .map(|field| match field {
+                                LedFields::Port => port.to_string(),
+                                LedFields::Led => state.to_string(),
+                            })
+                            .collect::<Vec<_>>()
+                            .join(separator.as_str())
+                    );
+                }
             }
         }
     }
@@ -2096,59 +2108,61 @@ fn print_monitors(monitor_result: &MonitorResult, kind: &OutputKind<MonitorField
             OutputKind::Parseable {
                 fields, separator, ..
             } => {
-                println!(
-                    "{}",
-                    fields
-                        .iter()
-                        .map(|field| match field {
-                            MonitorFields::Port => port.to_string(),
-                            MonitorFields::Temperature => monitor
-                                .temperature
-                                .map(|t| t.to_string())
+                if fields.len() > 0 {
+                    println!(
+                        "{}",
+                        fields
+                            .iter()
+                            .map(|field| match field {
+                                MonitorFields::Port => port.to_string(),
+                                MonitorFields::Temperature => monitor
+                                    .temperature
+                                    .map(|t| t.to_string())
+                                    .unwrap_or_else(|| String::from("unsupported")),
+                                MonitorFields::SupplyVoltage => monitor
+                                    .supply_voltage
+                                    .map(|v| v.to_string())
+                                    .unwrap_or_else(|| String::from("unsupported")),
+                                MonitorFields::AverageRxPower => monitor
+                                    .receiver_power
+                                    .as_ref()
+                                    .map(|rx| {
+                                        format!("[{}]", display_list(rx.iter().map(|x| x.value())))
+                                    })
+                                    .unwrap_or_else(|| String::from("unsupported")),
+                                MonitorFields::TxBias => monitor
+                                    .transmitter_bias_current
+                                    .as_ref()
+                                    .map(|tx| { format!("[{}]", display_list(tx.iter())) })
+                                    .unwrap_or_else(|| String::from("unsupported")),
+                                MonitorFields::TxPower => monitor
+                                    .transmitter_power
+                                    .as_ref()
+                                    .map(|tx| { format!("[{}]", display_list(tx.iter())) })
+                                    .unwrap_or_else(|| String::from("unsupported")),
+                                MonitorFields::Aux1 => aux1_monitor_value(
+                                    monitor.aux_monitors.and_then(|monitor| monitor.aux1)
+                                )
+                                .1
+                                .map(|value| value)
                                 .unwrap_or_else(|| String::from("unsupported")),
-                            MonitorFields::SupplyVoltage => monitor
-                                .supply_voltage
-                                .map(|v| v.to_string())
+                                MonitorFields::Aux2 => aux2_monitor_value(
+                                    monitor.aux_monitors.and_then(|monitor| monitor.aux2)
+                                )
+                                .1
+                                .map(|value| value)
                                 .unwrap_or_else(|| String::from("unsupported")),
-                            MonitorFields::AverageRxPower => monitor
-                                .receiver_power
-                                .as_ref()
-                                .map(|rx| {
-                                    format!("[{}]", display_list(rx.iter().map(|x| x.value())))
-                                })
+                                MonitorFields::Aux3 => aux3_monitor_value(
+                                    monitor.aux_monitors.and_then(|monitor| monitor.aux3)
+                                )
+                                .1
+                                .map(|value| value)
                                 .unwrap_or_else(|| String::from("unsupported")),
-                            MonitorFields::TxBias => monitor
-                                .transmitter_bias_current
-                                .as_ref()
-                                .map(|tx| { format!("[{}]", display_list(tx.iter())) })
-                                .unwrap_or_else(|| String::from("unsupported")),
-                            MonitorFields::TxPower => monitor
-                                .transmitter_power
-                                .as_ref()
-                                .map(|tx| { format!("[{}]", display_list(tx.iter())) })
-                                .unwrap_or_else(|| String::from("unsupported")),
-                            MonitorFields::Aux1 => aux1_monitor_value(
-                                monitor.aux_monitors.and_then(|monitor| monitor.aux1)
-                            )
-                            .1
-                            .map(|value| value)
-                            .unwrap_or_else(|| String::from("unsupported")),
-                            MonitorFields::Aux2 => aux2_monitor_value(
-                                monitor.aux_monitors.and_then(|monitor| monitor.aux2)
-                            )
-                            .1
-                            .map(|value| value)
-                            .unwrap_or_else(|| String::from("unsupported")),
-                            MonitorFields::Aux3 => aux3_monitor_value(
-                                monitor.aux_monitors.and_then(|monitor| monitor.aux3)
-                            )
-                            .1
-                            .map(|value| value)
-                            .unwrap_or_else(|| String::from("unsupported")),
-                        })
-                        .collect::<Vec<_>>()
-                        .join(separator.as_str())
-                );
+                            })
+                            .collect::<Vec<_>>()
+                            .join(separator.as_str())
+                    );
+                }
             }
         }
     }
@@ -2387,18 +2401,20 @@ fn print_parseable_header<T>(fields: &[T], separator: &ParseableOutputSeparator)
 where
     T: ValueEnum,
 {
-    let header = fields
-        .iter()
-        .map(|field| {
-            field
-                .to_possible_value()
-                .map(|value| value.get_name().to_string())
-                .expect("Unknown field {:field?}")
-        })
-        .collect::<Vec<_>>()
-        .join(separator.as_str());
+    if fields.len() > 0 {
+        let header = fields
+            .iter()
+            .map(|field| {
+                field
+                    .to_possible_value()
+                    .map(|value| value.get_name().to_string())
+                    .expect("Unknown field {:field?}")
+            })
+            .collect::<Vec<_>>()
+            .join(separator.as_str());
 
-    println!("{}", header);
+        println!("{}", header);
+    }
 }
 
 #[cfg(test)]
