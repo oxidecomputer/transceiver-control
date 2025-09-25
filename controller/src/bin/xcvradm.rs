@@ -1612,21 +1612,22 @@ fn print_power_mode(mode_result: &PowerModeResult, kind: &OutputKind<PowerFields
         };
         let state = format!("{:?}", mode.state);
         match kind {
-            OutputKind::Default { .. } => {
-                println!("{port:>WIDTH$}  {state:POWER_WIDTH$}  {over}",);
-            }
+            OutputKind::Default { .. } => println!("{port:>WIDTH$}  {state:POWER_WIDTH$}  {over}",),
             OutputKind::Parseable {
                 fields, separator, ..
             } => {
-                fields
-                    .iter()
-                    .map(|field| match field {
-                        PowerFields::Port => port.to_string(),
-                        PowerFields::Power => state.clone(),
-                        PowerFields::Override => over.to_string(),
-                    })
-                    .collect::<Vec<_>>()
-                    .join(separator.as_str());
+                println!(
+                    "{}",
+                    fields
+                        .iter()
+                        .map(|field| match field {
+                            PowerFields::Port => port.to_string(),
+                            PowerFields::Power => state.clone(),
+                            PowerFields::Override => over.to_string(),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(separator.as_str())
+                );
             }
         }
     }
@@ -1757,14 +1758,17 @@ fn print_read_data(read_result: &ReadResult, binary: bool, kind: &OutputKind<Rea
             OutputKind::Parseable {
                 fields, separator, ..
             } => {
-                fields
-                    .iter()
-                    .map(|field| match field {
-                        ReadDataFields::Port => port.to_string(),
-                        ReadDataFields::Data => formatted_data.clone(),
-                    })
-                    .collect::<Vec<_>>()
-                    .join(separator.as_str());
+                println!(
+                    "{}",
+                    fields
+                        .iter()
+                        .map(|field| match field {
+                            ReadDataFields::Port => port.to_string(),
+                            ReadDataFields::Data => formatted_data.clone(),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(separator.as_str())
+                );
             }
         }
     }
@@ -1801,15 +1805,18 @@ fn print_module_identifier(ident_result: &IdentifierResult, kind: &OutputKind<Id
             OutputKind::Parseable {
                 fields, separator, ..
             } => {
-                fields
-                    .iter()
-                    .map(|field| match field {
-                        IdentifyFields::Port => port.to_string(),
-                        IdentifyFields::Ident => ident.clone(),
-                        IdentifyFields::Description => id.to_string(),
-                    })
-                    .collect::<Vec<_>>()
-                    .join(separator.as_str());
+                println!(
+                    "{}",
+                    fields
+                        .iter()
+                        .map(|field| match field {
+                            IdentifyFields::Port => port.to_string(),
+                            IdentifyFields::Ident => ident.clone(),
+                            IdentifyFields::Description => id.to_string(),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(separator.as_str())
+                );
             }
         }
     }
