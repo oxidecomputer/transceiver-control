@@ -352,8 +352,21 @@ enum Cmd {
         #[arg(long)]
         all: bool,
 
-        #[command(flatten)]
-        parse_args: ParsableArgs<StatusFields>,
+        /// Print the output in a parseable format.
+        #[arg(long, short, conflicts_with_all = ["with", "without", "all"])]
+        parseable: bool,
+
+        /// Select the output fields to be displayed. Fields that are not supported by a module are emitted as empty values.
+        #[arg(long, short, requires = "parseable", conflicts_with_all = ["with", "without", "all"])]
+        output: Vec<StatusFields>,
+
+        /// Character used to separate output fields. (Default: ":")
+        #[arg(long, requires = "parseable", conflicts_with_all = ["with", "without", "all"])]
+        output_separator: Option<String>,
+
+        /// Omit displaying the output header
+        #[arg(long)]
+        omit_header: bool,
     },
 
     /// Reset the addressed modules.
@@ -944,13 +957,10 @@ async fn main() -> anyhow::Result<()> {
             with,
             without,
             all,
-            parse_args:
-                ParsableArgs {
-                    parseable,
-                    output,
-                    output_separator,
-                    omit_header,
-                },
+            parseable,
+            output,
+            output_separator,
+            omit_header,
         } => {
             let kind = match (with, without, all, parseable) {
                 (None, None, false, true) => StatusKind::Parseable {
