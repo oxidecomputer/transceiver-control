@@ -48,7 +48,6 @@ use transceiver_decode::Datapath;
 use transceiver_decode::ReceiverPower;
 use transceiver_decode::Sff8636Datapath;
 use transceiver_decode::SffComplianceCode;
-use transceiver_decode::VendorInfo;
 use transceiver_messages::filter_module_data;
 use transceiver_messages::mac::MacAddrs;
 use transceiver_messages::message::ExtendedStatus;
@@ -230,8 +229,65 @@ enum InputKind {
     BinaryString,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+enum OutputKind<T> {
+    Default {
+        header: bool,
+    },
+    Parseable {
+        header: bool,
+        fields: Vec<T>,
+        separator: ParseableOutputSeparator,
+    },
+}
+
+impl<T> OutputKind<T> {
+    fn with_header(header: bool) -> Self {
+        OutputKind::Default { header }
+    }
+
+    fn parseable(header: bool, fields: Vec<T>, separator: Option<String>) -> Self {
+        OutputKind::Parseable {
+            header,
+            fields,
+            separator: ParseableOutputSeparator::new(separator),
+        }
+    }
+
+    fn display_header(&self) -> bool {
+        match self {
+            Self::Default { header } => *header,
+            Self::Parseable { header, .. } => *header,
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum ParseableOutputSeparator {
+    Default,
+    Custom(String),
+}
+
+impl ParseableOutputSeparator {
+    fn new(custom_value: Option<String>) -> Self {
+        match custom_value {
+            Some(value) => ParseableOutputSeparator::Custom(value),
+            None => ParseableOutputSeparator::Default,
+        }
+    }
+}
+
+impl ParseableOutputSeparator {
+    fn as_str(&self) -> &str {
+        match self {
+            ParseableOutputSeparator::Default => ":",
+            ParseableOutputSeparator::Custom(s) => s.as_str(),
+        }
+    }
+}
+
 // How to print the `Status`.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 enum StatusKind {
     // Print the usual Display representation of each set of status bits.
     Normal,
@@ -242,6 +298,10 @@ enum StatusKind {
     },
     // Print all bits from all modules.
     All,
+    // Print the parseable representation of each set of status bits.
+    Parseable {
+        separator: ParseableOutputSeparator,
+    },
 }
 
 #[derive(Clone, Copy, Debug, clap::Parser)]
@@ -291,6 +351,22 @@ enum Cmd {
         /// a "1" is printed. Otherwise a "0" is printed.
         #[arg(long)]
         all: bool,
+
+        /// Print the output in a parseable format.
+        #[arg(long, short, conflicts_with_all = ["with", "without", "all"])]
+        parseable: bool,
+
+        /// Select the output fields to be displayed. Fields that are not supported by a module are emitted as empty values.
+        #[arg(long, short, requires = "parseable", conflicts_with_all = ["with", "without", "all"])]
+        output: Vec<StatusFields>,
+
+        /// Character used to separate output fields. (Default: ":")
+        #[arg(long, requires = "parseable", conflicts_with_all = ["with", "without", "all"])]
+        output_separator: Option<String>,
+
+        /// Omit displaying the output header
+        #[arg(long)]
+        omit_header: bool,
     },
 
     /// Reset the addressed modules.
@@ -310,7 +386,10 @@ enum Cmd {
     ///
     /// This takes into account whether a module has specified software override
     /// of power control, and may take up to 2s to complete.
-    Power,
+    Power {
+        #[command(flatten)]
+        parse_args: ParsableArgs<PowerFields>,
+    },
 
     /// Enable the hot swap controller for the addressed modules.
     ///
@@ -347,10 +426,16 @@ enum Cmd {
     DeassertLpMode,
 
     /// Read the SFF-8024 identifier for a set of modules.
-    Identify,
+    Identify {
+        #[command(flatten)]
+        parse_args: ParsableArgs<IdentifyFields>,
+    },
 
     /// Read the vendor information for a set of modules.
-    VendorInfo,
+    VendorInfo {
+        #[command(flatten)]
+        parse_args: ParsableArgs<VendorInfoFields>,
+    },
 
     /// Read the lower page of a set of transceiver modules.
     #[command(group(ArgGroup::new("interface").required(true).args(["sff", "cmis"])))]
@@ -378,6 +463,9 @@ enum Cmd {
         /// This may be specified in hex, starting with `0x`, or in decimal.
         #[arg(value_parser = read_u8)]
         len: u8,
+
+        #[command(flatten)]
+        parse_args: ParsableArgs<ReadDataFields>,
     },
 
     /// Write the lower page of a set of transceiver modules.
@@ -464,6 +552,9 @@ enum Cmd {
         /// This may be specified in hex, starting with `0x`, or in decimal.
         #[arg(value_parser = read_u8)]
         len: u8,
+
+        #[command(flatten)]
+        parse_args: ParsableArgs<ReadDataFields>,
     },
 
     /// Write the upper page of a set of transceiver modules.
@@ -533,7 +624,10 @@ enum Cmd {
     /// bank is also printed following each banked page. For example, `0x10/1`
     /// indicates that page `0x10` is supported, and the module implements banks
     /// 0 and 1 (16 lanes).
-    MemoryModel,
+    MemoryModel {
+        #[command(flatten)]
+        parse_args: ParsableArgs<MemoryModelFields>,
+    },
 
     /// Return the MAC addresses for the particular system allotted by its
     /// FRUID.
@@ -558,7 +652,10 @@ enum Cmd {
     ClearDisableLatch,
 
     /// Return the state of the addressed modules' attention LEDs.
-    Leds,
+    Leds {
+        #[command(flatten)]
+        parse_args: ParsableArgs<LedFields>,
+    },
 
     /// Set the state of the addressed modules' attention LEDs.
     SetLeds {
@@ -581,7 +678,10 @@ enum Cmd {
     /// support receiver power measurements, so that is always printed. Values
     /// near zero should be treated with caution, and the datasheet should be
     /// consulted for details.
-    Monitors,
+    Monitors {
+        #[command(flatten)]
+        parse_args: ParsableArgs<MonitorFields>,
+    },
 
     /// Return information about the datapath of a set of modules.
     ///
@@ -594,6 +694,25 @@ enum Cmd {
     /// - Tx and Rx loss-of-signal (LOS) and loss-of-lock (LOL) information
     /// - Datapath state (for CMIS modules only)
     Datapath,
+}
+
+#[derive(Parser)]
+pub struct ParsableArgs<T: ValueEnum + Send + Sync + 'static> {
+    /// Print the output in a parseable format.
+    #[arg(long, short)]
+    parseable: bool,
+
+    /// Select the output fields to be displayed. Fields that are not supported by a module are emitted as empty values.
+    #[arg(long, short, requires = "parseable")]
+    output: Vec<T>,
+
+    /// Character used to separate output fields. (Default: ":")
+    #[arg(long, requires = "parseable")]
+    output_separator: Option<String>,
+
+    /// Omit displaying the output header
+    #[arg(long)]
+    omit_header: bool,
 }
 
 // Maximum number of bytes to read from input source for writing to module.
@@ -630,6 +749,109 @@ fn load_known_write_data<R: Read>(rdr: &mut R, kind: InputKind) -> anyhow::Resul
             Ok(data)
         }
     }
+}
+
+#[derive(Clone, ValueEnum, PartialEq)]
+enum StatusFields {
+    /// The port number of the switch.
+    Port,
+    /// The power state of the transceiver module.
+    Status,
+}
+
+#[derive(Clone, ValueEnum, PartialEq)]
+enum PowerFields {
+    /// The port number of the switch.
+    Port,
+    /// The power state of the transceiver module.
+    Power,
+    /// Flag to indicate a software override of the modules power state.
+    Override,
+}
+
+#[derive(Clone, ValueEnum, PartialEq)]
+enum IdentifyFields {
+    /// The port number of the switch.
+    Port,
+    /// SFF-8024 identifier of the transceiver module.
+    Ident,
+    /// Description of the module interface as defined by SFF-8024.
+    Description,
+}
+
+#[derive(Clone, ValueEnum, PartialEq)]
+enum VendorInfoFields {
+    /// The port number of the switch.
+    Port,
+    /// Identifier of the transceiver module.
+    Identifier,
+    /// Manufacturer of the transceiver module.
+    Vendor,
+    /// Manufacturer part number.
+    Part,
+    /// Revision number of the transceiver module.
+    Rev,
+    /// Serial number of the transceiver module.
+    Serial,
+    /// Manufactured date formatted as a date-code specified in SFF-8636.
+    ManufacturedDate,
+}
+
+#[derive(Clone, ValueEnum, PartialEq)]
+enum ReadDataFields {
+    /// The port number of the switch.
+    Port,
+    /// The requested data from the transceiver module.
+    Data,
+}
+
+#[derive(Clone, ValueEnum, PartialEq)]
+enum ReadUpperFields {}
+
+#[derive(Clone, ValueEnum, PartialEq)]
+enum MemoryModelFields {
+    /// The port number of the switch.
+    Port,
+    /// The model number of the transceiver module.
+    Model,
+}
+
+#[derive(Clone, ValueEnum, PartialEq)]
+enum MacFields {
+    /// The port number of the switch.
+    Port,
+    /// The model number of the transceiver module.
+    Model,
+}
+
+#[derive(Clone, ValueEnum, PartialEq)]
+enum LedFields {
+    /// The port number of the switch.
+    Port,
+    /// State of th transceiver modules status LED.
+    Led,
+}
+
+#[derive(Clone, ValueEnum, PartialEq)]
+enum MonitorFields {
+    /// The port number of the switch.
+    Port,
+    /// The temperature of the transceiver module.
+    Temperature,
+    /// Voltage supplied to the transceiver module in V.
+    SupplyVoltage,
+    /// Average received power of the transceiver module in mW.
+    AverageRxPower,
+    /// Transmit bias current of the transceiver module in mA.
+    TxBias,
+    /// Transmit power of the transceiver module in mW.
+    TxPower,
+    /// Auxiliary monitor 1 as reported by the transceiver module.
+    Aux1,
+    /// Auxiliary monitor 2 as reported by the transceiver module.
+    Aux2,
+    /// Auxiliary monitor 3 as reported by the transceiver module.
+    Aux3,
 }
 
 // Try to autodetect the input kind, based on the first few
@@ -731,11 +953,22 @@ async fn main() -> anyhow::Result<()> {
     let modules = address_transceivers(&controller, transceivers).await?;
 
     match args.cmd {
-        Cmd::Status { with, without, all } => {
-            let kind = match (with, without, all) {
-                (None, None, false) => StatusKind::Normal,
-                (None, None, true) => StatusKind::All,
-                (maybe_with, maybe_without, false) => {
+        Cmd::Status {
+            with,
+            without,
+            all,
+            parseable,
+            output,
+            output_separator,
+            omit_header,
+        } => {
+            let kind = match (with, without, all, parseable) {
+                (None, None, false, true) => StatusKind::Parseable {
+                    separator: ParseableOutputSeparator::new(output_separator),
+                },
+                (None, None, false, false) => StatusKind::Normal,
+                (None, None, true, false) => StatusKind::All,
+                (maybe_with, maybe_without, false, false) => {
                     let with = maybe_with.unwrap_or_else(ExtendedStatus::empty);
                     let without = maybe_without.unwrap_or_else(ExtendedStatus::empty);
                     if with.is_empty() && without.is_empty() {
@@ -767,7 +1000,7 @@ async fn main() -> anyhow::Result<()> {
                 }
             };
 
-            print_module_status(&status_result, kind);
+            print_module_status(&status_result, omit_header, kind, &output);
             if !args.ignore_errors {
                 print_failures(&status_result.failures);
             }
@@ -793,12 +1026,26 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
-        Cmd::Power => {
+        Cmd::Power {
+            parse_args:
+                ParsableArgs {
+                    parseable,
+                    output,
+                    output_separator,
+                    omit_header,
+                },
+        } => {
+            let kind = if parseable {
+                OutputKind::parseable(!omit_header, output, output_separator)
+            } else {
+                OutputKind::with_header(!omit_header)
+            };
+
             let mode_result = controller
                 .power(modules)
                 .await
                 .context("Failed to get power mode")?;
-            print_power_mode(&mode_result);
+            print_power_mode(&mode_result, &kind);
             if !args.ignore_errors {
                 print_failures(&mode_result.failures);
             }
@@ -864,23 +1111,51 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
-        Cmd::Identify => {
+        Cmd::Identify {
+            parse_args:
+                ParsableArgs {
+                    parseable,
+                    output,
+                    output_separator,
+                    omit_header,
+                },
+        } => {
+            let kind = if parseable {
+                OutputKind::parseable(!omit_header, output, output_separator)
+            } else {
+                OutputKind::with_header(!omit_header)
+            };
+
             let ident_result = controller
                 .identifier(modules)
                 .await
                 .context("Failed to identify transceiver modules")?;
-            print_module_identifier(&ident_result);
+            print_module_identifier(&ident_result, &kind);
             if !args.ignore_errors {
                 print_failures(&ident_result.failures);
             }
         }
 
-        Cmd::VendorInfo => {
+        Cmd::VendorInfo {
+            parse_args:
+                ParsableArgs {
+                    parseable,
+                    output,
+                    output_separator,
+                    omit_header,
+                },
+        } => {
+            let kind = if parseable {
+                OutputKind::parseable(!omit_header, output, output_separator)
+            } else {
+                OutputKind::with_header(!omit_header)
+            };
+
             let info_result = controller
                 .vendor_info(modules)
                 .await
                 .context("Failed to fetch vendor information for transceiver modules")?;
-            print_vendor_info(&info_result);
+            print_vendor_info(&info_result, &kind);
             if !args.ignore_errors {
                 print_failures(&info_result.failures);
             }
@@ -892,10 +1167,24 @@ async fn main() -> anyhow::Result<()> {
             binary,
             offset,
             len,
+            parse_args:
+                ParsableArgs {
+                    parseable,
+                    output,
+                    output_separator,
+                    omit_header,
+                },
         } => {
             if len == 0 {
                 return Ok(());
             }
+
+            let kind = if parseable {
+                OutputKind::parseable(!omit_header, output, output_separator)
+            } else {
+                OutputKind::with_header(!omit_header)
+            };
+
             let reads = match (sff, cmis) {
                 (true, false) => MemoryRead::build_many(sff8636::Page::Lower, offset, len)
                     .context("Failed to setup lower page memory read")?,
@@ -913,7 +1202,7 @@ async fn main() -> anyhow::Result<()> {
                     .context("Failed to read transceiver modules")?;
                 read_result = read_result.append(&res).unwrap();
             }
-            print_read_data(&read_result, binary);
+            print_read_data(&read_result, binary, &kind);
             if !args.ignore_errors {
                 print_failures(&read_result.failures);
             }
@@ -952,10 +1241,24 @@ async fn main() -> anyhow::Result<()> {
             bank,
             offset,
             len,
+            parse_args:
+                ParsableArgs {
+                    parseable,
+                    output,
+                    output_separator,
+                    omit_header,
+                },
         } => {
             if len == 0 {
                 return Ok(());
             }
+
+            let kind = if parseable {
+                OutputKind::parseable(!omit_header, output, output_separator)
+            } else {
+                OutputKind::with_header(!omit_header)
+            };
+
             let reads = match (sff, cmis) {
                 (true, false) => {
                     let page =
@@ -985,7 +1288,7 @@ async fn main() -> anyhow::Result<()> {
                     .context("Failed to read transceiver modules")?;
                 read_result = read_result.append(&res).unwrap();
             }
-            print_read_data(&read_result, binary);
+            print_read_data(&read_result, binary, &kind);
             if !args.ignore_errors {
                 print_failures(&read_result.failures);
             }
@@ -1029,12 +1332,26 @@ async fn main() -> anyhow::Result<()> {
                 print_failures(&write_result.failures);
             }
         }
-        Cmd::MemoryModel => {
+        Cmd::MemoryModel {
+            parse_args:
+                ParsableArgs {
+                    parseable,
+                    output,
+                    output_separator,
+                    omit_header,
+                },
+        } => {
+            let kind = if parseable {
+                OutputKind::parseable(!omit_header, output, output_separator)
+            } else {
+                OutputKind::with_header(!omit_header)
+            };
+
             let layout_result = controller
                 .memory_model(modules)
                 .await
                 .context("Failed to get memory model")?;
-            print_module_memory_model(&layout_result);
+            print_module_memory_model(&layout_result, &kind);
             if !args.ignore_errors {
                 print_failures(&layout_result.failures);
             }
@@ -1064,12 +1381,26 @@ async fn main() -> anyhow::Result<()> {
                 print_failures(&ack_result.failures);
             }
         }
-        Cmd::Leds => {
+        Cmd::Leds {
+            parse_args:
+                ParsableArgs {
+                    parseable,
+                    output,
+                    output_separator,
+                    omit_header,
+                },
+        } => {
+            let kind = if parseable {
+                OutputKind::parseable(!omit_header, output, output_separator)
+            } else {
+                OutputKind::with_header(!omit_header)
+            };
+
             let state_result = controller
                 .leds(modules)
                 .await
                 .context("Failed to get LED state")?;
-            print_led_state(&state_result);
+            print_led_state(&state_result, &kind);
             if !args.ignore_errors {
                 print_failures(&state_result.failures);
             }
@@ -1083,12 +1414,26 @@ async fn main() -> anyhow::Result<()> {
                 print_failures(&ack_result.failures);
             }
         }
-        Cmd::Monitors => {
+        Cmd::Monitors {
+            parse_args:
+                ParsableArgs {
+                    parseable,
+                    output,
+                    output_separator,
+                    omit_header,
+                },
+        } => {
+            let kind = if parseable {
+                OutputKind::parseable(!omit_header, output, output_separator)
+            } else {
+                OutputKind::with_header(!omit_header)
+            };
+
             let monitor_result = controller
                 .monitors(modules)
                 .await
                 .context("Failed to get monitoring data")?;
-            print_monitors(&monitor_result);
+            print_monitors(&monitor_result, &kind);
             if !args.ignore_errors {
                 print_failures(&monitor_result.failures);
             }
@@ -1184,8 +1529,16 @@ fn print_failures(failures: &FailedModules) {
     }
 }
 
-fn print_power_mode(mode_result: &PowerModeResult) {
-    println!("Port  Power  Software-override");
+fn print_power_mode(mode_result: &PowerModeResult, kind: &OutputKind<PowerFields>) {
+    if kind.display_header() {
+        match kind {
+            OutputKind::Default { .. } => println!("Port  Power  Software-override"),
+            OutputKind::Parseable {
+                fields, separator, ..
+            } => print_parseable_header(fields, separator),
+        }
+    }
+
     for (port, mode) in mode_result
         .modules
         .to_indices()
@@ -1197,14 +1550,70 @@ fn print_power_mode(mode_result: &PowerModeResult) {
             Some(false) => "No",
         };
         let state = format!("{:?}", mode.state);
-        println!("{port:>WIDTH$}  {state:POWER_WIDTH$}  {over}",);
+        match kind {
+            OutputKind::Default { .. } => println!("{port:>WIDTH$}  {state:POWER_WIDTH$}  {over}",),
+            OutputKind::Parseable {
+                fields, separator, ..
+            } => {
+                if fields.len() > 0 {
+                    println!(
+                        "{}",
+                        fields
+                            .iter()
+                            .map(|field| match field {
+                                PowerFields::Port => port.to_string(),
+                                PowerFields::Power => state.clone(),
+                                PowerFields::Override => over.to_string(),
+                            })
+                            .collect::<Vec<_>>()
+                            .join(separator.as_str())
+                    );
+                }
+            }
+        }
     }
 }
 
-fn print_module_status(status_result: &ExtendedStatusResult, kind: StatusKind) {
+fn print_module_status(
+    status_result: &ExtendedStatusResult,
+    omit_header: bool,
+    kind: StatusKind,
+    output: &[StatusFields],
+) {
     match kind {
+        StatusKind::Parseable { separator } => {
+            if !omit_header {
+                println!(
+                    "{}",
+                    output
+                        .iter()
+                        .map(|field| match field {
+                            StatusFields::Port => "port",
+                            StatusFields::Status => "status",
+                        })
+                        .collect::<Vec<_>>()
+                        .join(separator.as_str())
+                );
+            }
+
+            for (port, status) in status_result.iter() {
+                println!(
+                    "{}",
+                    output
+                        .iter()
+                        .map(|field| match field {
+                            StatusFields::Port => port.to_string(),
+                            StatusFields::Status => status.to_string(),
+                        })
+                        .collect::<Vec<_>>()
+                        .join(separator.as_str())
+                );
+            }
+        }
         StatusKind::Normal => {
-            println!("Port Status");
+            if !omit_header {
+                println!("Port Status");
+            }
             for (port, status) in status_result.iter() {
                 println!("{port:>WIDTH$} {}", status);
             }
@@ -1264,8 +1673,16 @@ fn print_all_status(status_result: &ExtendedStatusResult) {
     }
 }
 
-fn print_read_data(read_result: &ReadResult, binary: bool) {
-    println!("Port Data");
+fn print_read_data(read_result: &ReadResult, binary: bool, kind: &OutputKind<ReadDataFields>) {
+    if kind.display_header() {
+        match kind {
+            OutputKind::Default { .. } => println!("Port Data"),
+            OutputKind::Parseable {
+                fields, separator, ..
+            } => print_parseable_header(fields, separator),
+        }
+    }
+
     let fmt_data = if binary {
         |byte| format!("0b{byte:08b}")
     } else {
@@ -1277,7 +1694,26 @@ fn print_read_data(read_result: &ReadResult, binary: bool) {
         .zip(read_result.data().iter())
     {
         let formatted_data = each.iter().map(fmt_data).collect::<Vec<_>>().join(",");
-        println!("{port:>WIDTH$} [{formatted_data}]",);
+        match kind {
+            OutputKind::Default { .. } => println!("{port:>WIDTH$} [{formatted_data}]"),
+            OutputKind::Parseable {
+                fields, separator, ..
+            } => {
+                if fields.len() > 0 {
+                    println!(
+                        "{}",
+                        fields
+                            .iter()
+                            .map(|field| match field {
+                                ReadDataFields::Port => port.to_string(),
+                                ReadDataFields::Data => formatted_data.clone(),
+                            })
+                            .collect::<Vec<_>>()
+                            .join(separator.as_str())
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -1289,55 +1725,151 @@ const REV_WIDTH: usize = 4;
 const SERIAL_WIDTH: usize = 16;
 const DATE_WIDTH: usize = 20;
 
-fn print_module_identifier(ident_result: &IdentifierResult) {
-    println!("Port Ident Description");
+fn print_module_identifier(ident_result: &IdentifierResult, kind: &OutputKind<IdentifyFields>) {
+    if kind.display_header() {
+        match kind {
+            OutputKind::Default { .. } => println!("Port Ident Description"),
+            OutputKind::Parseable {
+                fields, separator, ..
+            } => print_parseable_header(fields, separator),
+        }
+    }
+
     for (port, id) in ident_result
         .modules
         .to_indices()
         .zip(ident_result.identifiers().iter())
     {
         let ident = format!("0x{:02x}", u8::from(*id));
-        println!("{port:>WIDTH$} {ident:ID_BYTE_WIDTH$} {id}");
+        match kind {
+            OutputKind::Default { .. } => {
+                println!("{port:>WIDTH$} {ident:ID_BYTE_WIDTH$} {id}");
+            }
+            OutputKind::Parseable {
+                fields, separator, ..
+            } => {
+                if fields.len() > 0 {
+                    println!(
+                        "{}",
+                        fields
+                            .iter()
+                            .map(|field| match field {
+                                IdentifyFields::Port => port.to_string(),
+                                IdentifyFields::Ident => ident.clone(),
+                                IdentifyFields::Description => id.to_string(),
+                            })
+                            .collect::<Vec<_>>()
+                            .join(separator.as_str())
+                    );
+                }
+            }
+        }
     }
 }
 
-fn print_vendor_info(vendor_result: &VendorInfoResult) {
-    println!(
-        "Port {:ID_DEBUG_WIDTH$} {:VENDOR_WIDTH$} {:PART_WIDTH$} \
-        {:REV_WIDTH$} {:SERIAL_WIDTH$} {:DATE_WIDTH$}",
-        "Identifier", "Vendor", "Part", "Rev", "Serial", "Mfg date"
-    );
-    for (port, inf) in vendor_result
+fn print_vendor_info(vendor_result: &VendorInfoResult, kind: &OutputKind<VendorInfoFields>) {
+    if kind.display_header() {
+        match kind {
+            OutputKind::Default { .. } => println!(
+                "Port {:ID_DEBUG_WIDTH$} {:VENDOR_WIDTH$} {:PART_WIDTH$} \
+                {:REV_WIDTH$} {:SERIAL_WIDTH$} {:DATE_WIDTH$}",
+                "Identifier", "Vendor", "Part", "Rev", "Serial", "Mfg date"
+            ),
+            OutputKind::Parseable {
+                fields, separator, ..
+            } => print_parseable_header(fields, separator),
+        }
+    }
+
+    for (port, info) in vendor_result
         .modules
         .to_indices()
         .zip(vendor_result.vendor_info().iter())
     {
-        print_single_module_vendor_info(port, inf);
+        let ident = format!(
+            "{:?} (0x{:02x})",
+            info.identifier,
+            u8::from(info.identifier)
+        );
+        let date = info.vendor.date.as_deref().unwrap_or("Unknown");
+
+        match kind {
+            OutputKind::Default { .. } => {
+                println!(
+                    "{port:>WIDTH$} {:ID_DEBUG_WIDTH$} {:VENDOR_WIDTH$} \
+                    {:PART_WIDTH$} {:REV_WIDTH$} {:SERIAL_WIDTH$} {:DATE_WIDTH$}",
+                    ident,
+                    info.vendor.name,
+                    info.vendor.part,
+                    info.vendor.revision,
+                    info.vendor.serial,
+                    date,
+                );
+            }
+            OutputKind::Parseable {
+                fields, separator, ..
+            } => {
+                if fields.len() > 0 {
+                    println!(
+                        "{}",
+                        fields
+                            .iter()
+                            .map(|field| match field {
+                                VendorInfoFields::Port => port.to_string(),
+                                VendorInfoFields::Identifier => ident.clone(),
+                                VendorInfoFields::Vendor => info.vendor.name.clone(),
+                                VendorInfoFields::Part => info.vendor.part.clone(),
+                                VendorInfoFields::Rev => info.vendor.revision.clone(),
+                                VendorInfoFields::Serial => info.vendor.serial.clone(),
+                                VendorInfoFields::ManufacturedDate => date.to_string(),
+                            })
+                            .collect::<Vec<_>>()
+                            .join(separator.as_str())
+                    );
+                }
+            }
+        }
     }
 }
 
-fn print_single_module_vendor_info(port: u8, info: &VendorInfo) {
-    let ident = format!(
-        "{:?} (0x{:02x})",
-        info.identifier,
-        u8::from(info.identifier)
-    );
-    let date = info.vendor.date.as_deref().unwrap_or("Unknown");
-    println!(
-        "{port:>WIDTH$} {:ID_DEBUG_WIDTH$} {:VENDOR_WIDTH$} \
-        {:PART_WIDTH$} {:REV_WIDTH$} {:SERIAL_WIDTH$} {:DATE_WIDTH$}",
-        ident, info.vendor.name, info.vendor.part, info.vendor.revision, info.vendor.serial, date,
-    );
-}
+fn print_module_memory_model(
+    model_result: &MemoryModelResult,
+    kind: &OutputKind<MemoryModelFields>,
+) {
+    if kind.display_header() {
+        match kind {
+            OutputKind::Default { .. } => println!("Port Model"),
+            OutputKind::Parseable {
+                fields, separator, ..
+            } => print_parseable_header(fields, separator),
+        }
+    }
 
-fn print_module_memory_model(model_result: &MemoryModelResult) {
-    println!("Port Model");
     for (port, model) in model_result
         .modules
         .to_indices()
         .zip(model_result.memory_models().iter())
     {
-        println!("{port:>WIDTH$} {model}");
+        match kind {
+            OutputKind::Default { .. } => println!("{port:>WIDTH$} {model}"),
+            OutputKind::Parseable {
+                fields, separator, ..
+            } => {
+                if fields.len() > 0 {
+                    println!(
+                        "{}",
+                        fields
+                            .iter()
+                            .map(|field| match field {
+                                MemoryModelFields::Port => port.to_string(),
+                                MemoryModelFields::Model => model.to_string(),
+                            })
+                            .collect::<Vec<_>>()
+                            .join(separator.as_str())
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -1364,10 +1896,37 @@ fn print_mac_address_range(macs: MacAddrs, summary: bool) {
     }
 }
 
-fn print_led_state(result: &LedStateResult) {
-    println!("Port LED");
+fn print_led_state(result: &LedStateResult, kind: &OutputKind<LedFields>) {
+    if kind.display_header() {
+        match kind {
+            OutputKind::Default { .. } => println!("Port LED"),
+            OutputKind::Parseable {
+                fields, separator, ..
+            } => print_parseable_header(fields, separator),
+        }
+    }
+
     for (port, state) in result.iter() {
-        println!("{port:>WIDTH$} {state:?}");
+        match kind {
+            OutputKind::Default { .. } => println!("{port:>WIDTH$} {state:?}"),
+            OutputKind::Parseable {
+                fields, separator, ..
+            } => {
+                if fields.len() > 0 {
+                    println!(
+                        "{}",
+                        fields
+                            .iter()
+                            .map(|field| match field {
+                                LedFields::Port => port.to_string(),
+                                LedFields::Led => state.to_string(),
+                            })
+                            .collect::<Vec<_>>()
+                            .join(separator.as_str())
+                    );
+                }
+            }
+        }
     }
 }
 
@@ -1379,109 +1938,210 @@ fn display_list<T: std::fmt::Display>(items: impl Iterator<Item = T>) -> String 
         .join(",")
 }
 
-fn print_monitors(monitor_result: &MonitorResult) {
+fn print_monitors(monitor_result: &MonitorResult, kind: &OutputKind<MonitorFields>) {
+    if kind.display_header() {
+        if let OutputKind::Parseable {
+            fields, separator, ..
+        } = kind
+        {
+            print_parseable_header(fields, separator)
+        }
+    }
+
     const NAME_WIDTH: usize = 22;
     let unsupported = String::from("--");
     let mut need_newline = false;
     for (port, monitor) in monitor_result.iter() {
-        if need_newline {
-            println!();
-        }
-
-        // Start by printing the module address.
-        println!("Port {port}");
-
-        // Print module temperature, if supported.
-        print!("  {:>NAME_WIDTH$}: ", "Temperature (C)");
-        if let Some(temp) = monitor.temperature {
-            println!("{temp}");
-        } else {
-            println!("{unsupported}");
-        }
-
-        // Print supply voltage, if supported.
-        print!("  {:>NAME_WIDTH$}: ", "Supply voltage (V)");
-        if let Some(volt) = monitor.supply_voltage {
-            println!("{volt}");
-        } else {
-            println!("{unsupported}");
-        }
-
-        // Print the receiver power per-lane.
-        //
-        // Rx power is measured in one of two ways, either an average or
-        // peak-to-peak measurement. Print that in the field name, followed by
-        // the per-lane values themselves.
-        if let Some(rx_pow) = &monitor.receiver_power {
-            let name = if matches!(rx_pow[0], ReceiverPower::Average(_)) {
-                "Avg Rx power (mW)"
-            } else {
-                "P-P Rx power (mW)"
-            };
-            let values = rx_pow.iter().map(|x| x.value());
-            println!("  {:>NAME_WIDTH$}: [{}]", name, display_list(values),);
-        } else {
-            print!("  {:>NAME_WIDTH$}: ", "Rx power (mW)");
-            println!("{unsupported}");
-        }
-
-        // Print the Tx bias current.
-        print!("  {:>NAME_WIDTH$}: ", "Tx bias (mA)");
-        if let Some(tx_bias) = &monitor.transmitter_bias_current {
-            println!("[{}]", display_list(tx_bias.iter()));
-        } else {
-            println!("{unsupported}");
-        }
-
-        // Print the Tx output power.
-        print!("  {:>NAME_WIDTH$}: ", "Tx power (mW)");
-        if let Some(tx_pow) = &monitor.transmitter_power {
-            println!("[{}]", display_list(tx_pow.iter()));
-        } else {
-            println!("{unsupported}");
-        }
-
-        // Print each auxiliary monitor.
-        //
-        // The requires that we print the "observable", the thing being measured
-        // as well. Each line is formatted like:
-        //
-        // Aux N, <observable> (<units>): <value>
-        if let Some(Some(aux1)) = monitor.aux_monitors.map(|aux| aux.aux1) {
-            let (name, value) = match aux1 {
-                Aux1Monitor::TecCurrent(c) => ("Aux 1, TEC current (mA)", format!("{c}")),
-                Aux1Monitor::Custom(c) => {
-                    ("Aux 1, Custom", format!("[0x{:02x},0x{:02x}]", c[0], c[1]))
+        match kind {
+            OutputKind::Default { .. } => {
+                if need_newline {
+                    println!();
                 }
-            };
-            println!("  {name:>NAME_WIDTH$}: {value}");
-        } else {
-            println!("  {:>NAME_WIDTH$}: {unsupported}", "Aux 1");
-        }
 
-        if let Some(Some(aux2)) = monitor.aux_monitors.map(|aux| aux.aux2) {
-            let (name, value) = match aux2 {
-                Aux2Monitor::TecCurrent(c) => ("Aux 2, TEC current (mA)", format!("{c}")),
-                Aux2Monitor::LaserTemperature(t) => ("Aux 2, Laser temp (C)", format!("{t}")),
-            };
-            println!("  {name:>NAME_WIDTH$}: {value}");
-        } else {
-            println!("  {:>NAME_WIDTH$}: {unsupported}", "Aux 2");
-        }
+                // Start by printing the module address.
+                println!("Port {port}");
 
-        if let Some(Some(aux3)) = monitor.aux_monitors.map(|aux| aux.aux3) {
-            let (name, value) = match aux3 {
-                Aux3Monitor::LaserTemperature(t) => ("Aux 3, Laser temp (C)", format!("{t}")),
-                Aux3Monitor::AdditionalSupplyVoltage(v) => {
-                    ("Aux 3, Supply voltage 2 (V)", format!("{v}"))
+                // Print module temperature, if supported.
+                print!("  {:>NAME_WIDTH$}: ", "Temperature (C)");
+                if let Some(temp) = monitor.temperature {
+                    println!("{temp}");
+                } else {
+                    println!("{unsupported}");
                 }
-            };
-            println!("  {name:>NAME_WIDTH$}: {value}");
-        } else {
-            println!("  {:>NAME_WIDTH$}: {unsupported}", "Aux 3");
+
+                // Print supply voltage, if supported.
+                print!("  {:>NAME_WIDTH$}: ", "Supply voltage (V)");
+                if let Some(volt) = monitor.supply_voltage {
+                    println!("{volt}");
+                } else {
+                    println!("{unsupported}");
+                }
+
+                // Print the receiver power per-lane.
+                //
+                // Rx power is measured in one of two ways, either an average or
+                // peak-to-peak measurement. Print that in the field name, followed by
+                // the per-lane values themselves.
+                if let Some(rx_pow) = &monitor.receiver_power {
+                    let name = if matches!(rx_pow[0], ReceiverPower::Average(_)) {
+                        "Avg Rx power (mW)"
+                    } else {
+                        "P-P Rx power (mW)"
+                    };
+                    let values = rx_pow.iter().map(|x| x.value());
+                    println!("  {:>NAME_WIDTH$}: [{}]", name, display_list(values),);
+                } else {
+                    print!("  {:>NAME_WIDTH$}: ", "Rx power (mW)");
+                    println!("{unsupported}");
+                }
+
+                // Print the Tx bias current.
+                print!("  {:>NAME_WIDTH$}: ", "Tx bias (mA)");
+                if let Some(tx_bias) = &monitor.transmitter_bias_current {
+                    println!("[{}]", display_list(tx_bias.iter()));
+                } else {
+                    println!("{unsupported}");
+                }
+
+                // Print the Tx output power.
+                print!("  {:>NAME_WIDTH$}: ", "Tx power (mW)");
+                if let Some(tx_pow) = &monitor.transmitter_power {
+                    println!("[{}]", display_list(tx_pow.iter()));
+                } else {
+                    println!("{unsupported}");
+                }
+
+                // Print each auxiliary monitor.
+                //
+                // The requires that we print the "observable", the thing being measured
+                // as well. Each line is formatted like:
+                //
+                // Aux N, <observable> (<units>): <value>
+                let (aux1_name, aux1_value) =
+                    aux1_monitor_value(monitor.aux_monitors.and_then(|aux| aux.aux1));
+                if let Some(aux1_value) = aux1_value {
+                    println!("  {aux1_name:>NAME_WIDTH$}: {aux1_value}");
+                } else {
+                    println!("  {:>NAME_WIDTH$}: {unsupported}", aux1_name);
+                }
+
+                let (aux2_name, aux2_value) =
+                    aux2_monitor_value(monitor.aux_monitors.and_then(|aux| aux.aux2));
+                if let Some(aux2_value) = aux2_value {
+                    println!("  {aux2_name:>NAME_WIDTH$}: {aux2_value}");
+                } else {
+                    println!("  {:>NAME_WIDTH$}: {unsupported}", aux2_name);
+                }
+
+                let (aux3_name, aux3_value) =
+                    aux3_monitor_value(monitor.aux_monitors.and_then(|aux| aux.aux3));
+                if let Some(aux3_value) = aux3_value {
+                    println!("  {aux3_name:>NAME_WIDTH$}: {aux3_value}");
+                } else {
+                    println!("  {:>NAME_WIDTH$}: {unsupported}", aux3_name);
+                }
+
+                // Print additional newline between each port for clarity.
+                need_newline = true;
+            }
+            OutputKind::Parseable {
+                fields, separator, ..
+            } => {
+                if fields.len() > 0 {
+                    println!(
+                        "{}",
+                        fields
+                            .iter()
+                            .map(|field| match field {
+                                MonitorFields::Port => port.to_string(),
+                                MonitorFields::Temperature => monitor
+                                    .temperature
+                                    .map(|t| t.to_string())
+                                    .unwrap_or_else(|| String::new()),
+                                MonitorFields::SupplyVoltage => monitor
+                                    .supply_voltage
+                                    .map(|v| v.to_string())
+                                    .unwrap_or_else(|| String::new()),
+                                MonitorFields::AverageRxPower => monitor
+                                    .receiver_power
+                                    .as_ref()
+                                    .map(|rx| {
+                                        format!("{}", display_list(rx.iter().map(|x| x.value())))
+                                    })
+                                    .unwrap_or_else(|| String::new()),
+                                MonitorFields::TxBias => monitor
+                                    .transmitter_bias_current
+                                    .as_ref()
+                                    .map(|tx| { format!("{}", display_list(tx.iter())) })
+                                    .unwrap_or_else(|| String::new()),
+                                MonitorFields::TxPower => monitor
+                                    .transmitter_power
+                                    .as_ref()
+                                    .map(|tx| { format!("{}", display_list(tx.iter())) })
+                                    .unwrap_or_else(|| String::new()),
+                                MonitorFields::Aux1 => aux1_monitor_value(
+                                    monitor.aux_monitors.and_then(|monitor| monitor.aux1)
+                                )
+                                .1
+                                .map(|value| value)
+                                .unwrap_or_else(|| String::new()),
+                                MonitorFields::Aux2 => aux2_monitor_value(
+                                    monitor.aux_monitors.and_then(|monitor| monitor.aux2)
+                                )
+                                .1
+                                .map(|value| value)
+                                .unwrap_or_else(|| String::new()),
+                                MonitorFields::Aux3 => aux3_monitor_value(
+                                    monitor.aux_monitors.and_then(|monitor| monitor.aux3)
+                                )
+                                .1
+                                .map(|value| value)
+                                .unwrap_or_else(|| String::new()),
+                            })
+                            .collect::<Vec<_>>()
+                            .join(separator.as_str())
+                    );
+                }
+            }
         }
-        // Print additional newline between each port for clarity.
-        need_newline = true;
+    }
+}
+
+fn aux1_monitor_value(monitor: Option<Aux1Monitor>) -> (&'static str, Option<String>) {
+    if let Some(aux1) = monitor {
+        match aux1 {
+            Aux1Monitor::TecCurrent(c) => ("Aux 1, TEC current (mA)", Some(format!("{c}"))),
+            Aux1Monitor::Custom(c) => (
+                "Aux 1, Custom",
+                Some(format!("[0x{:02x},0x{:02x}]", c[0], c[1])),
+            ),
+        }
+    } else {
+        ("Aux 1", None)
+    }
+}
+
+fn aux2_monitor_value(monitor: Option<Aux2Monitor>) -> (&'static str, Option<String>) {
+    if let Some(aux2) = monitor {
+        match aux2 {
+            Aux2Monitor::TecCurrent(c) => ("Aux 2, TEC current (mA)", Some(format!("{c}"))),
+            Aux2Monitor::LaserTemperature(t) => ("Aux 2, Laser temp (C)", Some(format!("{t}"))),
+        }
+    } else {
+        ("Aux 2", None)
+    }
+}
+
+fn aux3_monitor_value(monitor: Option<Aux3Monitor>) -> (&'static str, Option<String>) {
+    if let Some(aux3) = monitor {
+        match aux3 {
+            Aux3Monitor::LaserTemperature(t) => ("Aux 3, Laser temp (C)", Some(format!("{t}"))),
+            Aux3Monitor::AdditionalSupplyVoltage(v) => {
+                ("Aux 3, Supply voltage 2 (V)", Some(format!("{v}")))
+            }
+        }
+    } else {
+        ("Aux 3", None)
     }
 }
 
@@ -1674,6 +2334,26 @@ fn print_sff8636_datapath(
         builder.push_record(row);
     }
     println!("{}", builder.build().with(Style::empty()));
+}
+
+fn print_parseable_header<T>(fields: &[T], separator: &ParseableOutputSeparator)
+where
+    T: ValueEnum,
+{
+    if fields.len() > 0 {
+        let header = fields
+            .iter()
+            .map(|field| {
+                field
+                    .to_possible_value()
+                    .map(|value| value.get_name().to_string())
+                    .expect("Unknown field {:field?}")
+            })
+            .collect::<Vec<_>>()
+            .join(separator.as_str());
+
+        println!("{}", header);
+    }
 }
 
 #[cfg(test)]
