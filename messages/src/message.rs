@@ -63,7 +63,10 @@ pub mod version {
         /// Addition to HwError: I2cSclStretchTimeout
         pub const V5: u8 = 5;
 
-        pub const CURRENT: u8 = V5;
+        /// Addition to HwError: I2cTransactionTimeout
+        pub const V6: u8 = 6;
+
+        pub const CURRENT: u8 = V6;
         pub const MIN: u8 = V1;
     }
     pub mod outer {
@@ -200,6 +203,16 @@ pub enum HwError {
     /// CMIS 5.0 section B.2.7.3 but referred to as tRD.
     #[cfg_attr(any(test, feature = "std"), error("The module stretched SCL too long"))]
     I2cSclStretchTimeout,
+
+    /// An I2C transaction has gone on for too long.
+    ///
+    /// While neither SFF-8636 or CMIS give guidance for transaction timeouts,
+    /// we are opting to use the SMBus t_timeout,min of 25ms to timeout.
+    #[cfg_attr(
+        any(test, feature = "std"),
+        error("The I2C transaction to the module timed out")
+    )]
+    I2cTransactionTimeout,
 }
 
 /// Deserialize the [`HwError`]s from a packet buffer that are expected, given
@@ -1069,7 +1082,7 @@ mod test {
     #[test]
     fn test_hardware_error_encoding_unchanged() {
         let mut buf = [0u8; HwError::MAX_SIZE];
-        const TEST_DATA: [HwError; 13] = [
+        const TEST_DATA: [HwError; 14] = [
             HwError::I2cError,
             HwError::InvalidModuleIndex,
             HwError::FpgaError,
@@ -1083,6 +1096,7 @@ mod test {
             HwError::I2cAddressNack,
             HwError::I2cByteNack,
             HwError::I2cSclStretchTimeout,
+            HwError::I2cTransactionTimeout,
         ];
 
         for (variant_id, variant) in TEST_DATA.iter().enumerate() {
