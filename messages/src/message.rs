@@ -208,7 +208,7 @@ pub enum HwError {
     ///
     /// While neither SFF-8636 or CMIS give guidance for transaction timeouts,
     /// we are opting to use the SMBus t_timeout,min of 25ms to timeout.
-    #[cfg_attr(any(test, feature = "std"), error("The transaction timed out"))]
+    #[cfg_attr(any(test, feature = "std"), error("The I2C transaction to the module timed out"))]
     I2cTransactionTimeout,
 }
 
