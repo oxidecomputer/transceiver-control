@@ -68,7 +68,9 @@ pub use crate::controller::Controller;
 pub use crate::messages::*;
 pub use crate::results::*;
 pub use large_access::LargeMemoryAccess;
+use transceiver_messages::message::Unknowns;
 
+use std::fmt;
 use std::net::IpAddr;
 pub use transceiver_decode::Error as DecodeError;
 pub use transceiver_decode::*;
@@ -132,15 +134,33 @@ mod probes {
     fn message__dropped(header: &Header, message: &Message, reason: &str) {}
 }
 
+/// An optional unknown hardware error code, printed only when present.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct MaybeUnknown(pub Option<Unknowns>);
+
+impl fmt::Display for MaybeUnknown {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if let Some(v) = self.0 {
+            match v {
+                Unknowns::UnknownUnknown(byte) => write!(f, " (unknown: {byte:#04x})"),
+                Unknowns::KnownUnknown => Ok(()),
+            }
+        } else {
+            Ok(())
+        }
+    }
+}
+
 /// An error operating on a transceiver, such as a bad index, hardware failure,
 /// or error decoding its memory map.
 #[derive(Clone, Copy, Debug, PartialEq, thiserror::Error)]
 pub enum TransceiverError {
-    #[error("Hardware error accessing module {module_index}: {source}")]
+    #[error("Hardware error accessing module {module_index}: {source}{unknown}")]
     Hardware {
         module_index: u8,
         #[source]
         source: HwError,
+        unknown: MaybeUnknown,
     },
 
     #[error("Error decoding module data: {0}")]
