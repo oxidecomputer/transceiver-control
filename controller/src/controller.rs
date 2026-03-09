@@ -47,7 +47,6 @@ use transceiver_messages::merge_module_data;
 use transceiver_messages::message;
 use transceiver_messages::message::Header;
 use transceiver_messages::message::HostRequest;
-use transceiver_messages::message::HwError;
 pub use transceiver_messages::message::LedState;
 use transceiver_messages::message::MacAddrResponse;
 use transceiver_messages::message::Message;
@@ -326,21 +325,15 @@ impl Controller {
         message::deserialize_hw_errors(failed_modules, data)
             .map_err(Error::from)
             .map(|hw_errors| {
-                let mut unknowns = hw_errors.unknowns.clone();
                 let errors = hw_errors
-                    .errors
                     .into_iter()
                     .zip(failed_modules.to_indices())
-                    .map(|(source, module_index)| {
-                        let unknown = if source == HwError::Unknown {
-                            MaybeUnknown(unknowns.pop())
-                        } else {
-                            MaybeUnknown(None)
-                        };
+                    .map(|(error, module_index)| {
+                        let (hw_err, unknown) = error;
                         TransceiverError::Hardware {
                             module_index,
-                            source,
-                            unknown,
+                            source: *hw_err,
+                            unknown: MaybeUnknown(*unknown),
                         }
                     })
                     .collect();

@@ -241,32 +241,69 @@ pub enum Unknowns {
     UnknownUnknown(u8), // We got a byte we don't know how to decode
 }
 
-/// When a HwError::Unknown is pushed into `errors`, an approprate Unknowns
-/// should be pushed into `unknowns`.
+/// When a HwError::Unknown is present we can supply additional information
+/// we may have about it.
 #[cfg(feature = "std")]
 #[derive(Clone, Debug, PartialEq)]
 pub struct DeserializedErrors {
-    pub errors: Vec<HwError>,
-    pub unknowns: Vec<Unknowns>,
+    errors: Vec<(HwError, Option<Unknowns>)>,
 }
 
 #[cfg(feature = "std")]
 impl DeserializedErrors {
-    pub fn new(error_count: usize) -> Self {
-        Self {
-            errors: Vec::with_capacity(error_count),
-            unknowns: Vec::new(),
+    pub fn new(error_count: usize, buf: &[u8]) -> Result<Self, ProtocolError> {
+        const ITEM_SIZE: usize = HwError::MAX_SIZE;
+        let n_bytes = error_count * ITEM_SIZE;
+        if buf.len() < n_bytes {
+            return Err(ProtocolError::WrongDataSize {
+                expected: u32::try_from(n_bytes).unwrap(),
+                actual: u32::try_from(buf.len()).unwrap(),
+            });
         }
+        let mut d = Self {
+            errors: Vec::with_capacity(error_count),
+        };
+        for chunk in buf.chunks_exact(ITEM_SIZE) {
+            d.push(chunk)
+        }
+        Ok(d)
+    }
+
+    fn push(&mut self, chunk: &[u8]) {
+        let err = match hubpack::deserialize(chunk).map_err(|_| ProtocolError::Serialization) {
+            Ok(hwerr) => {
+                let e = hwerr.0;
+                // We need to check if the peer sent us a HwError::Unknown
+                // intentionally. In practice this shouldn't happen, but
+                // if it did and we didn't account for it then we could lose
+                // information about actual serialization failures.
+                let u = if hwerr.0 == HwError::Unknown {
+                    Some(Unknowns::KnownUnknown)
+                } else {
+                    None
+                };
+                (e, u)
+            }
+            Err(_) => (HwError::Unknown, Some(Unknowns::UnknownUnknown(chunk[0]))),
+        };
+        self.errors.push(err);
     }
 }
 
 #[cfg(feature = "std")]
 impl Default for DeserializedErrors {
     fn default() -> Self {
-        Self {
-            errors: Vec::new(),
-            unknowns: Vec::new(),
-        }
+        Self { errors: Vec::new() }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<'a> IntoIterator for &'a DeserializedErrors {
+    type Item = &'a (HwError, Option<Unknowns>);
+    type IntoIter = core::slice::Iter<'a, (HwError, Option<Unknowns>)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.errors.iter()
     }
 }
 
@@ -291,40 +328,7 @@ pub fn deserialize_hw_errors(
 ) -> Result<DeserializedErrors, ProtocolError> {
     match failed_modules.selected_transceiver_count() {
         0 => Ok(DeserializedErrors::default()),
-        n => {
-            const ITEM_SIZE: usize = HwError::MAX_SIZE;
-            let n_bytes = n * ITEM_SIZE;
-            if buf.len() < n_bytes {
-                return Err(ProtocolError::WrongDataSize {
-                    expected: u32::try_from(n_bytes).unwrap(),
-                    actual: u32::try_from(buf.len()).unwrap(),
-                });
-            }
-            let mut out = DeserializedErrors::new(n);
-            let chunks = buf.chunks_exact(ITEM_SIZE);
-            for chunk in chunks {
-                match hubpack::deserialize(chunk).map_err(|_| ProtocolError::Serialization) {
-                    Ok(hwerr) => {
-                        out.errors.push(hwerr.0);
-                        // We need to check if the peer sent us a HwError::Unknown
-                        // intentionally. In practice this shouldn't happen, but
-                        // if it did and we didn't account for it then we could lose
-                        // information about actual serialization failures.
-                        if hwerr.0 == HwError::Unknown {
-                            out.unknowns.push(Unknowns::KnownUnknown);
-                        }
-                    }
-                    Err(_) => {
-                        out.errors.push(HwError::Unknown);
-                        out.unknowns.push(Unknowns::UnknownUnknown(chunk[0]));
-                    }
-                }
-            }
-            // We want to use the unknowns vec like a queue, so we reverse it
-            // to support popping entries in the order they were added.
-            out.unknowns.reverse();
-            Ok(out)
-        }
+        n => DeserializedErrors::new(n, buf),
     }
 }
 
@@ -1076,7 +1080,6 @@ mod test {
     use crate::message::ProtocolError;
     use crate::message::SpResponse;
     use crate::message::Status;
-    use crate::message::Unknowns;
     use crate::mgmt::sff8636;
     use crate::mgmt::ManagementInterface;
     use crate::mgmt::MemoryRead;
@@ -1518,30 +1521,22 @@ mod test {
         let modules = ModuleId(1);
         assert_eq!(
             deserialize_hw_errors(modules, &[0]).unwrap(),
-            DeserializedErrors {
-                errors: vec![HwError::I2cError],
-                unknowns: vec![],
-            },
+            DeserializedErrors::new(1, &[0]).unwrap()
         );
 
         // peer sent a HwError we don't know about
         let modules = ModuleId(2);
         assert_eq!(
             deserialize_hw_errors(modules, &[255]).unwrap(),
-            DeserializedErrors {
-                errors: vec![HwError::Unknown],
-                unknowns: vec![Unknowns::UnknownUnknown(255)],
-            },
+            DeserializedErrors::new(1, &[255]).unwrap()
         );
 
         // peer intentionally sends an HwError::Unknown
         let modules = ModuleId(4);
+        let unknown_byte = HwError::Unknown as u8;
         assert_eq!(
-            deserialize_hw_errors(modules, &[HwError::Unknown as u8]).unwrap(),
-            DeserializedErrors {
-                errors: vec![HwError::Unknown],
-                unknowns: vec![Unknowns::KnownUnknown],
-            },
+            deserialize_hw_errors(modules, &[unknown_byte]).unwrap(),
+            DeserializedErrors::new(1, &[unknown_byte]).unwrap()
         );
     }
 
