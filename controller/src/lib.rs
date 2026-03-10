@@ -142,8 +142,8 @@ impl fmt::Display for MaybeUnknown {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         if let Some(v) = self.0 {
             match v {
-                Unknowns::UnknownUnknown(byte) => write!(f, " (unknown: {byte:#04x})"),
-                Unknowns::KnownUnknown => Ok(()),
+                Unknowns::UnknownUnknown(byte) => write!(f, " (could not deserialize {byte:#04x})"),
+                Unknowns::KnownUnknown => write!(f, " (peer sent HwError::Unknown)"),
             }
         } else {
             Ok(())

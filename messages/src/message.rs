@@ -270,7 +270,7 @@ impl DeserializedErrors {
     }
 
     fn push(&mut self, chunk: &[u8]) {
-        let err = match hubpack::deserialize(chunk).map_err(|_| ProtocolError::Serialization) {
+        let err = match hubpack::deserialize(chunk) {
             Ok(hwerr) => {
                 let e = hwerr.0;
                 // We need to check if the peer sent us a HwError::Unknown

@@ -328,14 +328,13 @@ impl Controller {
                 let errors = hw_errors
                     .into_iter()
                     .zip(failed_modules.to_indices())
-                    .map(|(error, module_index)| {
-                        let (hw_err, unknown) = error;
-                        TransceiverError::Hardware {
+                    .map(
+                        |(&(hw_error, unknown), module_index)| TransceiverError::Hardware {
                             module_index,
-                            source: *hw_err,
-                            unknown: MaybeUnknown(*unknown),
-                        }
-                    })
+                            source: hw_error,
+                            unknown: MaybeUnknown(unknown),
+                        },
+                    )
                     .collect();
                 FailedModules {
                     modules: failed_modules,
