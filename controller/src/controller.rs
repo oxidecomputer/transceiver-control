@@ -11,6 +11,7 @@ use crate::ioloop::IoLoop;
 use crate::messages::*;
 use crate::results::*;
 use crate::Error;
+use crate::MaybeUnknown;
 use crate::PowerMode;
 use crate::PowerState;
 use crate::TransceiverError;
@@ -327,10 +328,13 @@ impl Controller {
                 let errors = hw_errors
                     .into_iter()
                     .zip(failed_modules.to_indices())
-                    .map(|(source, module_index)| TransceiverError::Hardware {
-                        module_index,
-                        source,
-                    })
+                    .map(
+                        |(&(hw_error, unknown), module_index)| TransceiverError::Hardware {
+                            module_index,
+                            source: hw_error,
+                            unknown: MaybeUnknown(unknown),
+                        },
+                    )
                     .collect();
                 FailedModules {
                     modules: failed_modules,
@@ -1393,6 +1397,7 @@ mod tests {
     use crate::test_utils;
     use crate::Controller;
     use crate::Error;
+    use crate::MaybeUnknown;
     use crate::PowerMode;
     use crate::TransceiverError;
     use crate::NUM_OUTSTANDING_REQUESTS;
@@ -1418,6 +1423,7 @@ mod tests {
     use transceiver_messages::message::MessageBody;
     use transceiver_messages::message::SpResponse;
     use transceiver_messages::message::Status;
+    use transceiver_messages::message::Unknowns;
     use transceiver_messages::mgmt::cmis;
     use transceiver_messages::mgmt::sff8636;
     use transceiver_messages::mgmt::MemoryRead;
@@ -1679,6 +1685,7 @@ mod tests {
         let received_errors = vec![TransceiverError::Hardware {
             module_index: 0,
             source: errors[0].clone(),
+            unknown: MaybeUnknown(None),
         }];
         let expected_requests = vec![
             Message::new(MessageBody::HostRequest(HostRequest::Read {
@@ -1781,6 +1788,113 @@ mod tests {
         simple_ack_op(HostRequest::ClearPowerFault).await;
     }
 
+    // Test that an unrecognized error byte from the SP is reported as
+    // HwError::Unknown with the raw byte captured in MaybeUnknown.
+    #[tokio::test]
+    async fn test_unknown_unknown_hw_error() {
+        let (controller, socket) = peer_setup().await;
+
+        let modules = ModuleId(0b01);
+        let failed_modules = ModuleId(0b01);
+
+        // 0xFF is not a valid HwError variant, so it will be decoded as
+        // HwError::Unknown with the raw byte preserved in MaybeUnknown.
+        let unknown_byte: u8 = 0xFF;
+        let expected_errors = vec![TransceiverError::Hardware {
+            module_index: 0,
+            source: HwError::Unknown,
+            unknown: MaybeUnknown(Some(Unknowns::UnknownUnknown(unknown_byte))),
+        }];
+
+        let expected_requests = vec![Message::new(MessageBody::HostRequest(
+            HostRequest::AssertReset(modules),
+        ))];
+        let responses = vec![(
+            Message::new(MessageBody::SpResponse(SpResponse::Ack {
+                modules: ModuleId::empty(),
+                failed_modules,
+            })),
+            Some(vec![unknown_byte]),
+        )];
+
+        let (ded, ded_rx) = oneshot::channel();
+        let sp = MockSp {
+            socket,
+            expected_requests,
+            responses,
+            ded: Some(ded),
+        };
+        let _sp_task = tokio::spawn(sp.run());
+
+        let task = tokio::spawn(async move { controller.assert_reset(modules).await });
+        ded_rx.await.unwrap().expect("MockSp panicked");
+        let result = task.await.unwrap().unwrap();
+        assert_eq!(
+            result,
+            AckResult {
+                modules: ModuleId::empty(),
+                data: vec![],
+                failures: FailedModules {
+                    modules: failed_modules,
+                    errors: expected_errors,
+                },
+            }
+        );
+    }
+
+    // Test that an HwError::Uknown from the SP is reported as
+    // HwError::Unknown without a raw byte also captured.
+    #[tokio::test]
+    async fn test_known_unknown_hw_error() {
+        let (controller, socket) = peer_setup().await;
+
+        let modules = ModuleId(0b01);
+        let failed_modules = ModuleId(0b01);
+
+        // HwError::Unknown is a known variant and thus we shouldn't capture the byte
+        let hw_unknown: u8 = HwError::Unknown as u8;
+        let expected_errors = vec![TransceiverError::Hardware {
+            module_index: 0,
+            source: HwError::Unknown,
+            unknown: MaybeUnknown(Some(Unknowns::KnownUnknown)),
+        }];
+
+        let expected_requests = vec![Message::new(MessageBody::HostRequest(
+            HostRequest::AssertReset(modules),
+        ))];
+        let responses = vec![(
+            Message::new(MessageBody::SpResponse(SpResponse::Ack {
+                modules: ModuleId::empty(),
+                failed_modules,
+            })),
+            Some(vec![hw_unknown]),
+        )];
+
+        let (ded, ded_rx) = oneshot::channel();
+        let sp = MockSp {
+            socket,
+            expected_requests,
+            responses,
+            ded: Some(ded),
+        };
+        let _sp_task = tokio::spawn(sp.run());
+
+        let task = tokio::spawn(async move { controller.assert_reset(modules).await });
+        ded_rx.await.unwrap().expect("MockSp panicked");
+        let result = task.await.unwrap().unwrap();
+        assert_eq!(
+            result,
+            AckResult {
+                modules: ModuleId::empty(),
+                data: vec![],
+                failures: FailedModules {
+                    modules: failed_modules,
+                    errors: expected_errors,
+                },
+            }
+        );
+    }
+
     // Helper function to run a bunch of tests, which generally just send some
     // simple host request and await an ACK. E.g., assert reset and disable
     // power are fundamentally the same, with a slightly different method and
@@ -1798,6 +1912,7 @@ mod tests {
         let received_errors = vec![TransceiverError::Hardware {
             module_index: 0,
             source: errors[0].clone(),
+            unknown: MaybeUnknown(None),
         }];
         let request = req(modules);
         let expected_requests = vec![Message::new(MessageBody::HostRequest(request)); 2];
@@ -2196,6 +2311,7 @@ mod tests {
         let expected_status_err = vec![TransceiverError::Hardware {
             module_index: 0,
             source: HwError::FpgaError,
+            unknown: MaybeUnknown(None),
         }];
         let expected_status_err_data = serialize_vec(&[HwError::FpgaError]);
 
@@ -2211,6 +2327,7 @@ mod tests {
         let expected_ident_err = vec![TransceiverError::Hardware {
             module_index: 1,
             source: HwError::FpgaError,
+            unknown: MaybeUnknown(None),
         }];
         let expected_ident_err_data = serialize_vec(&[HwError::FpgaError]);
 
@@ -2229,6 +2346,7 @@ mod tests {
         let expected_power_err = vec![TransceiverError::Hardware {
             module_index: 2,
             source: HwError::FpgaError,
+            unknown: MaybeUnknown(None),
         }];
         let expected_power_err_data = serialize_vec(&[HwError::FpgaError]);
 
@@ -2397,14 +2515,17 @@ mod tests {
                         TransceiverError::Hardware {
                             module_index: 0,
                             source: failed_lp_mode_err[0],
+                            unknown: MaybeUnknown(None),
                         },
                         TransceiverError::Hardware {
                             module_index: 1,
                             source: failed_reset_err[0],
+                            unknown: MaybeUnknown(None),
                         },
                         TransceiverError::Hardware {
                             module_index: 2,
                             source: failed_disable_power_err[0],
+                            unknown: MaybeUnknown(None),
                         },
                     ],
                 }
@@ -2511,6 +2632,7 @@ mod tests {
         let received_errors = vec![TransceiverError::Hardware {
             module_index: cmis_module.to_indices().next().unwrap(),
             source: errors[0].clone(),
+            unknown: MaybeUnknown(None),
         }];
 
         // We expect a few different requests:

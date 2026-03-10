@@ -66,7 +66,10 @@ pub mod version {
         /// Addition to HwError: I2cTransactionTimeout
         pub const V6: u8 = 6;
 
-        pub const CURRENT: u8 = V6;
+        /// Addition to HwError: Unknown
+        pub const V7: u8 = 7;
+
+        pub const CURRENT: u8 = V7;
         pub const MIN: u8 = V1;
     }
     pub mod outer {
@@ -213,6 +216,95 @@ pub enum HwError {
         error("The I2C transaction to the module timed out")
     )]
     I2cTransactionTimeout,
+
+    /// We received an error we don't know how to deserialize.
+    ///
+    /// We have received an error which we are unsure how to deserialize, so
+    /// we map it to this variant so we can continue to decode the message.
+    /// This can happen when the controller and the SP are running different
+    /// versions of the protocol, such as during an update.
+    #[cfg_attr(any(test, feature = "std"), error("Received an unknown error type"))]
+    Unknown,
+}
+
+/// A Rumsfeldian enum to assist in the cases where we can end up with
+/// HwError::Unknown when deserializing messages from a peer. It is important
+/// to be able to differentiate between the case where the peer explicitly sent
+/// it to us (unexpected in practice) and when we fail to deserialize an error
+/// from the peer. In the later we want to preserve the data we failed to
+/// deserialize so it can be utilized by the controller when printing an error
+/// message.
+#[cfg(feature = "std")]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Unknowns {
+    KnownUnknown,       // The peer sent us an actual HwError::Unknown
+    UnknownUnknown(u8), // We got a byte we don't know how to decode
+}
+
+/// When a HwError::Unknown is present we can supply additional information
+/// we may have about it.
+#[cfg(feature = "std")]
+#[derive(Clone, Debug, PartialEq)]
+pub struct DeserializedErrors {
+    errors: Vec<(HwError, Option<Unknowns>)>,
+}
+
+#[cfg(feature = "std")]
+impl DeserializedErrors {
+    pub fn new(error_count: usize, buf: &[u8]) -> Result<Self, ProtocolError> {
+        const ITEM_SIZE: usize = HwError::MAX_SIZE;
+        let n_bytes = error_count * ITEM_SIZE;
+        if buf.len() < n_bytes {
+            return Err(ProtocolError::WrongDataSize {
+                expected: u32::try_from(n_bytes).unwrap(),
+                actual: u32::try_from(buf.len()).unwrap(),
+            });
+        }
+        let mut d = Self {
+            errors: Vec::with_capacity(error_count),
+        };
+        for chunk in buf.chunks_exact(ITEM_SIZE) {
+            d.push(chunk)
+        }
+        Ok(d)
+    }
+
+    fn push(&mut self, chunk: &[u8]) {
+        let err = match hubpack::deserialize(chunk) {
+            Ok(hwerr) => {
+                let e = hwerr.0;
+                // We need to check if the peer sent us a HwError::Unknown
+                // intentionally. In practice this shouldn't happen, but
+                // if it did and we didn't account for it then we could lose
+                // information about actual serialization failures.
+                let u = if hwerr.0 == HwError::Unknown {
+                    Some(Unknowns::KnownUnknown)
+                } else {
+                    None
+                };
+                (e, u)
+            }
+            Err(_) => (HwError::Unknown, Some(Unknowns::UnknownUnknown(chunk[0]))),
+        };
+        self.errors.push(err);
+    }
+}
+
+#[cfg(feature = "std")]
+impl Default for DeserializedErrors {
+    fn default() -> Self {
+        Self { errors: Vec::new() }
+    }
+}
+
+#[cfg(feature = "std")]
+impl<'a> IntoIterator for &'a DeserializedErrors {
+    type Item = &'a (HwError, Option<Unknowns>);
+    type IntoIter = core::slice::Iter<'a, (HwError, Option<Unknowns>)>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.errors.iter()
+    }
 }
 
 /// Deserialize the [`HwError`]s from a packet buffer that are expected, given
@@ -233,29 +325,10 @@ pub enum HwError {
 pub fn deserialize_hw_errors(
     failed_modules: ModuleId,
     buf: &[u8],
-) -> Result<Vec<HwError>, ProtocolError> {
+) -> Result<DeserializedErrors, ProtocolError> {
     match failed_modules.selected_transceiver_count() {
-        0 => Ok(vec![]),
-        n => {
-            const ITEM_SIZE: usize = HwError::MAX_SIZE;
-            let n_bytes = n * ITEM_SIZE;
-            if buf.len() < n_bytes {
-                return Err(ProtocolError::WrongDataSize {
-                    expected: u32::try_from(n_bytes).unwrap(),
-                    actual: u32::try_from(buf.len()).unwrap(),
-                });
-            }
-            let mut out = Vec::with_capacity(n);
-            let chunks = buf.chunks_exact(ITEM_SIZE);
-            for chunk in chunks {
-                out.push(
-                    hubpack::deserialize(chunk)
-                        .map_err(|_| ProtocolError::Serialization)?
-                        .0,
-                );
-            }
-            Ok(out)
-        }
+        0 => Ok(DeserializedErrors::default()),
+        n => DeserializedErrors::new(n, buf),
     }
 }
 
@@ -994,6 +1067,7 @@ mod test {
     use crate::mac::BadMacAddrReason;
     use crate::mac::MacAddrs;
     use crate::message::deserialize_hw_errors;
+    use crate::message::DeserializedErrors;
     use crate::message::ExtendedStatus;
     use crate::message::Header;
     use crate::message::HostRequest;
@@ -1082,7 +1156,7 @@ mod test {
     #[test]
     fn test_hardware_error_encoding_unchanged() {
         let mut buf = [0u8; HwError::MAX_SIZE];
-        const TEST_DATA: [HwError; 14] = [
+        const TEST_DATA: [HwError; 15] = [
             HwError::I2cError,
             HwError::InvalidModuleIndex,
             HwError::FpgaError,
@@ -1097,6 +1171,7 @@ mod test {
             HwError::I2cByteNack,
             HwError::I2cSclStretchTimeout,
             HwError::I2cTransactionTimeout,
+            HwError::Unknown,
         ];
 
         for (variant_id, variant) in TEST_DATA.iter().enumerate() {
@@ -1429,7 +1504,10 @@ mod test {
     #[test]
     fn test_deserialize_hw_errors() {
         let modules = ModuleId(0);
-        assert_eq!(deserialize_hw_errors(modules, &[0; 8]).unwrap(), vec![]);
+        assert_eq!(
+            deserialize_hw_errors(modules, &[0; 8]).unwrap(),
+            DeserializedErrors::default()
+        );
 
         let modules = ModuleId(1);
         assert_eq!(
@@ -1443,7 +1521,22 @@ mod test {
         let modules = ModuleId(1);
         assert_eq!(
             deserialize_hw_errors(modules, &[0]).unwrap(),
-            vec![HwError::I2cError],
+            DeserializedErrors::new(1, &[0]).unwrap()
+        );
+
+        // peer sent a HwError we don't know about
+        let modules = ModuleId(2);
+        assert_eq!(
+            deserialize_hw_errors(modules, &[255]).unwrap(),
+            DeserializedErrors::new(1, &[255]).unwrap()
+        );
+
+        // peer intentionally sends an HwError::Unknown
+        let modules = ModuleId(4);
+        let unknown_byte = HwError::Unknown as u8;
+        assert_eq!(
+            deserialize_hw_errors(modules, &[unknown_byte]).unwrap(),
+            DeserializedErrors::new(1, &[unknown_byte]).unwrap()
         );
     }
 
