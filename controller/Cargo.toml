@@ -14,7 +14,6 @@ itertools = "0.15.0"
 serde = "1"
 slog-async = "2"
 slog-term = "2"
-tabled = "0.21"
 thiserror = "2"
 transceiver-decode = { path = "../decode", default-features = false }
 transceiver-messages = { path = "../messages" }
@@ -35,6 +34,11 @@ optional = true
 [dependencies.slog]
 version = "2"
 features = [ "max_level_trace", "release_max_level_trace" ]
+
+[dependencies.tabled]
+version = "0.21"
+default-features = false
+features = [ "std" ]
 
 [dependencies.tokio]
 version = "1"
