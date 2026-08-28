@@ -1154,9 +1154,10 @@ mod tests {
 
     #[test]
     fn can_read_write_unknown_compliance_codes() {
-        let code = EthernetComplianceCode::new_unchecked(0x81);
-        let as_str = code.to_string();
-        assert_eq!(as_str, "Unknown (0x81)");
-        assert_eq!(code, as_str.parse().unwrap())
+        for x in 0..=u8::MAX {
+            let code = EthernetComplianceCode::new_unchecked(x);
+            let as_str = code.to_string();
+            assert_eq!(code, as_str.parse().unwrap());
+        }
     }
 }
