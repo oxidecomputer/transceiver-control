@@ -171,10 +171,12 @@ impl From<EthernetComplianceCode> for String {
 
 #[cfg(any(feature = "api-traits", test))]
 impl std::str::FromStr for EthernetComplianceCode {
-    type Err = &'static str;
+    type Err = String;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
-        const ERR: &str = "Unknown or malformed Ethernet compliance code";
+        let err = |code: &str| -> String {
+            format!("Unknown or malformed Ethernet compliance code: '{code}'")
+        };
         match value {
             "40G Active Cable" => Ok(Self(0b0000_0001)),
             "40GBASE-LR4" => Ok(Self(0b0000_0010)),
@@ -183,7 +185,17 @@ impl std::str::FromStr for EthernetComplianceCode {
             "10GBASE-SR" => Ok(Self(0b0001_0000)),
             "10GBASE-LR" => Ok(Self(0b0010_0000)),
             "10GBASE-LRM" => Ok(Self(0b0100_0000)),
-            _ => Err(ERR),
+            _ => {
+                let Some(suffix) = value.strip_prefix("Unknown (0x") else {
+                    return Err(err(value));
+                };
+                let Some(code) = suffix.strip_suffix(")") else {
+                    return Err(err(value));
+                };
+                u8::from_str_radix(code, 16)
+                    .map(EthernetComplianceCode)
+                    .map_err(|_| err(value))
+            }
         }
     }
 }
@@ -1138,5 +1150,13 @@ mod tests {
     fn do_not_panic_on_bad_spec() {
         let code = EthernetComplianceCode::new_unchecked(0);
         assert_eq!(code.to_string(), "Unknown (0x00)");
+    }
+
+    #[test]
+    fn can_read_write_unknown_compliance_codes() {
+        let code = EthernetComplianceCode::new_unchecked(0x81);
+        let as_str = code.to_string();
+        assert_eq!(as_str, "Unknown (0x81)");
+        assert_eq!(code, as_str.parse().unwrap())
     }
 }
