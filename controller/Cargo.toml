@@ -36,7 +36,7 @@ version = "2"
 features = [ "max_level_trace", "release_max_level_trace" ]
 
 [dependencies.tabled]
-version = "0.21"
+version = "0.22"
 default-features = false
 features = [ "std" ]
 
